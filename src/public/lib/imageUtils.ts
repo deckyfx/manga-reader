@@ -174,3 +174,26 @@ export function displayedToNaturalRect(
   const scale = getImageScaleFactors(imageElement);
   return scaleRectangle(rect, scale);
 }
+
+/**
+ * Convert data URL to File object
+ *
+ * @param dataUrl - Data URL (e.g., from canvas.toDataURL())
+ * @param filename - Name for the file
+ * @returns Promise resolving to File object
+ *
+ * @example
+ * const canvas = document.createElement('canvas');
+ * // ... draw to canvas ...
+ * const dataUrl = canvas.toDataURL('image/png');
+ * const file = await dataUrlToFile(dataUrl, 'capture.png');
+ * // Use file in FormData or API calls
+ */
+export async function dataUrlToFile(
+  dataUrl: string,
+  filename: string = "image.png"
+): Promise<File> {
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  return new File([blob], filename, { type: blob.type || "image/png" });
+}

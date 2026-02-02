@@ -33,12 +33,6 @@ export function OCRSelector({ imageUrl }: { imageUrl: string }) {
   const imageRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // OCR Configuration
-  const [ocrLanguage, setOcrLanguage] = useState<string>("jpn");
-  const [ocrOrientation, setOcrOrientation] = useState<string>("vertical");
-  const [ocrEngine, setOcrEngine] = useState<string>("tesseract-cli");
-  const [ocrPreset, setOcrPreset] = useState<string>("japaneseVertical");
-
   /**
    * Capture the selected region and display preview
    */
@@ -143,35 +137,23 @@ export function OCRSelector({ imageUrl }: { imageUrl: string }) {
       // Simulate progress during upload
       setProgress(30);
 
-      // Send to server-side OCR endpoint with configuration
+      // Send to server-side OCR endpoint (queued for manga-ocr processing)
       const result = await api.api.ocr.post({
         image: file,
-        language: ocrLanguage,
-        orientation: ocrOrientation,
-        engine: ocrEngine,
-        preset: ocrPreset,
       });
 
       setProgress(100);
 
       if (result.data?.success) {
-        setOcrResult(result.data.text);
+        setOcrResult("Image queued for OCR processing. Check server console for results.");
         setOcrMetadata({
-          confidence: result.data.confidence,
-          words: result.data.words,
-          savedAs: result.data.savedAs,
+          savedAs: result.data.filename,
           path: result.data.path,
-          engine: result.data.engine,
-          processingTime: result.data.processingTime,
         });
-        console.log("OCR Success:", {
-          confidence: result.data.confidence,
-          words: result.data.words,
-          savedAs: result.data.savedAs,
-        });
+        console.log("Image queued:", result.data.filename);
       } else {
         setOcrResult(
-          `Error: ${result.data?.error || "OCR processing failed"}`
+          `Error: ${result.data?.error || "Failed to queue image"}`
         );
         setOcrMetadata(null);
       }
@@ -200,112 +182,6 @@ export function OCRSelector({ imageUrl }: { imageUrl: string }) {
 
   return (
     <div className="space-y-4">
-      {/* Instructions */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <p className="text-sm text-blue-800 mb-2">
-          📝 <strong>How to use:</strong>
-        </p>
-        <ol className="text-sm text-blue-800 space-y-1 ml-4">
-          <li>1. Configure OCR settings below</li>
-          <li>2. Click "Enable Selection" to show the selection box</li>
-          <li>3. Drag the box to move it, resize from corners/edges</li>
-          <li>4. Click "Capture Region" to preview</li>
-          <li>5. Click "Run OCR" to extract text</li>
-        </ol>
-      </div>
-
-      {/* OCR Configuration */}
-      <div className="bg-white rounded-lg shadow-lg p-4">
-        <h3 className="text-md font-semibold text-gray-800 mb-3">
-          ⚙️ OCR Configuration
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Preset Selection */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Preset
-            </label>
-            <select
-              value={ocrPreset}
-              onChange={(e) => {
-                const preset = e.target.value;
-                setOcrPreset(preset);
-                // Auto-set language and orientation based on preset
-                if (preset === "japaneseVertical") {
-                  setOcrLanguage("jpn_vert");
-                  setOcrOrientation("vertical");
-                } else if (preset === "japaneseHorizontal") {
-                  setOcrLanguage("jpn");
-                  setOcrOrientation("horizontal");
-                } else if (preset === "englishHorizontal") {
-                  setOcrLanguage("eng");
-                  setOcrOrientation("horizontal");
-                }
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="japaneseVertical">📖 Japanese Vertical (Manga)</option>
-              <option value="japaneseHorizontal">🇯🇵 Japanese Horizontal</option>
-              <option value="englishHorizontal">🇬🇧 English Horizontal</option>
-              <option value="custom">⚙️ Custom</option>
-            </select>
-          </div>
-
-          {/* Language */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Language
-            </label>
-            <select
-              value={ocrLanguage}
-              onChange={(e) => setOcrLanguage(e.target.value)}
-              disabled={ocrPreset !== "custom"}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
-            >
-              <option value="jpn_vert">Japanese Vertical</option>
-              <option value="jpn">Japanese Horizontal</option>
-              <option value="eng">English</option>
-              <option value="chi_sim">Chinese Simplified</option>
-              <option value="chi_tra">Chinese Traditional</option>
-              <option value="kor">Korean</option>
-            </select>
-          </div>
-
-          {/* Orientation */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Text Orientation
-            </label>
-            <select
-              value={ocrOrientation}
-              onChange={(e) => setOcrOrientation(e.target.value)}
-              disabled={ocrPreset !== "custom"}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
-            >
-              <option value="vertical">⬇️ Vertical (Top to Bottom)</option>
-              <option value="horizontal">➡️ Horizontal (Left to Right)</option>
-              <option value="auto">🔄 Auto Detect</option>
-            </select>
-          </div>
-
-          {/* Engine */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              OCR Engine
-            </label>
-            <select
-              value={ocrEngine}
-              onChange={(e) => setOcrEngine(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="tesseract-cli">🚀 Tesseract CLI (Fast)</option>
-              <option value="tesseract-js">📦 Tesseract.js (Slow)</option>
-              <option value="python">🐍 Python (Custom)</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
       {/* Control buttons */}
       <div className="flex gap-3">
         <button
@@ -430,37 +306,26 @@ export function OCRSelector({ imageUrl }: { imageUrl: string }) {
               <h3 className="text-lg font-semibold text-gray-800">
                 📄 Extracted Text
               </h3>
-              {ocrMetadata && (
-                <div className="text-sm text-gray-600 mt-1 space-y-1">
-                  <p>
-                    {ocrMetadata.confidence ? `Confidence: ${ocrMetadata.confidence?.toFixed(1)}%` : ""}
-                    {ocrMetadata.confidence && ocrMetadata.words ? " • " : ""}
-                    Words: {ocrMetadata.words}
-                    {ocrMetadata.engine && ` • Engine: ${ocrMetadata.engine}`}
-                    {ocrMetadata.processingTime && ` • ${ocrMetadata.processingTime}ms`}
-                  </p>
-                  {ocrMetadata.savedAs && (
-                    <p className="text-xs">
-                      💾 Saved as:{" "}
-                      <code className="bg-gray-100 px-1 rounded">
-                        {ocrMetadata.savedAs}
-                      </code>
-                      {ocrMetadata.path && (
-                        <>
-                          {" "}•{" "}
-                          <a
-                            href={ocrMetadata.path}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:underline"
-                          >
-                            View
-                          </a>
-                        </>
-                      )}
-                    </p>
+              {ocrMetadata?.savedAs && (
+                <p className="text-sm text-gray-600 mt-1">
+                  💾 Saved as:{" "}
+                  <code className="bg-gray-100 px-1 rounded text-xs">
+                    {ocrMetadata.savedAs}
+                  </code>
+                  {ocrMetadata.path && (
+                    <>
+                      {" "}•{" "}
+                      <a
+                        href={ocrMetadata.path}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline"
+                      >
+                        View
+                      </a>
+                    </>
                   )}
-                </div>
+                </p>
               )}
             </div>
             <div className="flex gap-2">

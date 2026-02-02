@@ -2,6 +2,28 @@ import { Elysia } from "elysia";
 import { envConfig } from "./env-config";
 import { apiPlugin } from "./plugins/routeApi";
 import { appPlugin } from "./plugins/routeApp";
+import { FileWatcher } from "./services/FileWatcher";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
+
+async function initializeFileWatcher() {
+  // Ensure directories exist
+  await mkdir(envConfig.OCR_INPUT_DIR, { recursive: true });
+  await mkdir(dirname(envConfig.OCR_OUTPUT_FILE), { recursive: true });
+
+  // Get FileWatcher singleton
+  const watcher = FileWatcher.getInstance();
+
+  // Start watching (subscriptions are managed per-request by OcrResultManager)
+  await watcher.startWatching(envConfig.OCR_OUTPUT_FILE, envConfig.OCR_INPUT_DIR);
+
+  console.log("✅ FileWatcher initialized");
+  console.log("   Watching:", envConfig.OCR_OUTPUT_FILE);
+  console.log("   Cleaning:", envConfig.OCR_INPUT_DIR);
+}
+
+// Initialize FileWatcher before starting server
+await initializeFileWatcher();
 
 /**
  * Main Elysia server with API and React app plugins

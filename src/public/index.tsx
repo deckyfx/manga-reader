@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { api } from "../lib/api";
-import { OCRSelector } from "./components/OCRSelector";
+import { MangaPage } from "./components/MangaPage";
 import "./global.css";
 
 /**
@@ -46,11 +46,11 @@ function App() {
         ) : (
           <>
             {/* Comic Page Display with OCR */}
-            <div className="mb-12 bg-white rounded-lg shadow-xl p-8">
+            <div className="mb-12">
               <h2 className="text-3xl font-bold text-gray-800 mb-6 text-center">
-                📖 Sample Comic Page with OCR
+                📖 Manga Page with Inline OCR
               </h2>
-              <OCRSelector imageUrl="/uploads/57_005.png" />
+              <MangaPage src="/uploads/57_005.png" alt="Sample manga page" />
             </div>
 
             {/* Comic List */}

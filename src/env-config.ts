@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 /**
  * Singleton class for typed environment configuration
  */
@@ -52,6 +54,37 @@ class EnvConfig {
    */
   get isProduction(): boolean {
     return this.NODE_ENV === "production";
+  }
+
+  /**
+   * OCR output file path
+   */
+  get OCR_OUTPUT_FILE(): string {
+    const customPath = Bun.env.OCR_OUTPUT_FILE;
+    return customPath
+      ? join(process.cwd(), customPath)
+      : join(process.cwd(), "data/ocroutput/results.txt");
+  }
+
+  /**
+   * OCR input directory path
+   */
+  get OCR_INPUT_DIR(): string {
+    const customPath = Bun.env.OCR_INPUT_DIR;
+    return customPath
+      ? join(process.cwd(), customPath)
+      : join(process.cwd(), "data/ocrinput");
+  }
+
+  /**
+   * DeepL API key for translation
+   */
+  get DEEPL_API_KEY(): string {
+    const apiKey = Bun.env.DEEPL_API_KEY;
+    if (!apiKey) {
+      throw new Error("DEEPL_API_KEY is not defined in environment variables");
+    }
+    return apiKey;
   }
 }
 
