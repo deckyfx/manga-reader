@@ -1,98 +1,40 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import ReactDOM from "react-dom/client";
-import { api } from "../lib/api";
-import { MangaPage } from "./components/MangaPage";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { HomePage } from "./pages/HomePage";
+import { SeriesListPage } from "./pages/reader/SeriesListPage";
+import { SeriesDetailPage } from "./pages/reader/SeriesDetailPage";
+import { ChapterGalleryPage } from "./pages/reader/ChapterGalleryPage";
+import { ReaderPage } from "./pages/reader/ReaderPage";
+import { CreateSeriesPage } from "./pages/admin/CreateSeriesPage";
+import { EditSeriesPage } from "./pages/admin/EditSeriesPage";
+import { UploadChapterPage } from "./pages/admin/UploadChapterPage";
+import { EditChapterPage } from "./pages/admin/EditChapterPage";
 import "./global.css";
 
 /**
- * Main Comic Reader App component
+ * Main Comic Reader App with routing
  */
 function App() {
-  const [message, setMessage] = useState("");
-  const [comics, setComics] = useState<
-    Array<{ id: number; title: string; pages: number }>
-  >([]);
-  const [pageData, setPageData] = useState<{
-    id: number;
-    originalImage: string;
-    createdAt: Date;
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // Fetch hello message, comics, and page 1 data using type-safe Eden Treaty
-    Promise.all([
-      api.api.hello.get(),
-      api.api.comics.get(),
-      api.api.pages({ id: "1" }).get(),
-    ]).then(([helloRes, comicsRes, pageRes]) => {
-      if (helloRes.data) {
-        setMessage(helloRes.data.message);
-      }
-      if (comicsRes.data) {
-        setComics(comicsRes.data.comics);
-      }
-      if (pageRes.data?.success && pageRes.data.page) {
-        setPageData(pageRes.data.page);
-      }
-      setLoading(false);
-    });
-  }, []);
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
-      <div className="container mx-auto px-4 py-8">
-        <header className="text-center mb-12">
-          <h1 className="text-5xl font-bold text-gray-800 mb-4">
-            📚 Comic Reader
-          </h1>
-          <p className="text-xl text-gray-600">{message || "Loading..."}</p>
-        </header>
+    <BrowserRouter>
+      <Routes>
+        {/* Home */}
+        <Route path="/" element={<HomePage />} />
 
-        {loading ? (
-          <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
-          </div>
-        ) : (
-          <>
-            {/* Comic Page Display with OCR */}
-            {pageData && (
-              <div className="mb-12">
-                <h2 className="text-3xl font-bold text-gray-800 mb-6 text-center">
-                  📖 Manga Page with Inline OCR
-                </h2>
-                <MangaPage page={pageData} />
-              </div>
-            )}
+        {/* Reader Routes */}
+        <Route path="/r" element={<SeriesListPage />} />
+        <Route path="/r/:seriesId" element={<SeriesDetailPage />} />
+        <Route path="/r/:seriesId/:chapterId" element={<ChapterGalleryPage />} />
+        <Route path="/r/:seriesId/:chapterId/:pageNum" element={<ReaderPage />} />
 
-            {/* Comic List */}
-            <h2 className="text-3xl font-bold text-gray-800 mb-6">
-              Available Comics
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {comics.map((comic) => (
-                <div
-                  key={comic.id}
-                  className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow"
-                >
-                  <h3 className="text-2xl font-semibold text-gray-800 mb-2">
-                    {comic.title}
-                  </h3>
-                  <p className="text-gray-600">Pages: {comic.pages}</p>
-                  <button className="mt-4 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded transition-colors">
-                    Read Now
-                  </button>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        <footer className="mt-12 text-center text-gray-500">
-          <p>Built with Bun + Elysia + React + Tailwind CSS</p>
-        </footer>
-      </div>
-    </div>
+        {/* Admin Routes */}
+        <Route path="/a/create" element={<CreateSeriesPage />} />
+        <Route path="/a/series/:seriesId/edit" element={<EditSeriesPage />} />
+        <Route path="/a/series/:seriesId/chapter" element={<UploadChapterPage />} />
+        <Route path="/a/chapters/:chapterId/edit" element={<EditChapterPage />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 

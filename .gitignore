@@ -33,3 +33,4 @@ Thumbs.db
 *.log
 logs/
 .claude/
+src/public/uploads/

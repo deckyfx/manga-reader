@@ -6,6 +6,7 @@ import { FileWatcher } from "./services/FileWatcher";
 import { MigrationManager } from "./db/migration-manager";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import staticPlugin from "@elysiajs/static";
 
 async function initializeDatabase() {
   // Initialize migrations (auto-migrate in development, strict in production)
@@ -24,7 +25,10 @@ async function initializeFileWatcher() {
   const watcher = FileWatcher.getInstance();
 
   // Start watching (subscriptions are managed per-request by OcrResultManager)
-  await watcher.startWatching(envConfig.OCR_OUTPUT_FILE, envConfig.OCR_INPUT_DIR);
+  await watcher.startWatching(
+    envConfig.OCR_OUTPUT_FILE,
+    envConfig.OCR_INPUT_DIR,
+  );
 
   console.log("✅ FileWatcher initialized");
   console.log("   Watching:", envConfig.OCR_OUTPUT_FILE);
@@ -39,6 +43,7 @@ await initializeFileWatcher();
  * Main Elysia server with API and React app plugins
  */
 const app = new Elysia()
+
   .use(apiPlugin) // API routes first
   .use(appPlugin) // React app last (wildcard route)
   .listen(envConfig.SERVER_PORT);

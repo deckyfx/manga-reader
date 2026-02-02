@@ -23,6 +23,8 @@ interface PageData {
 
 interface MangaPageProps {
   page: PageData;
+  onPrevious?: () => void;
+  onNext?: () => void;
 }
 
 /**
@@ -36,7 +38,7 @@ interface MangaPageProps {
  * - Captions are automatically persisted to database
  * - Update/Discard workflow
  */
-export function MangaPage({ page }: MangaPageProps) {
+export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
   const [editMode, setEditMode] = useState(false);
   const [rectangles, setRectangles] = useState<Rectangle[]>([]);
   const [currentDraw, setCurrentDraw] = useState<{
@@ -87,6 +89,25 @@ export function MangaPage({ page }: MangaPageProps) {
   useEffect(() => {
     loadCaptions();
   }, [page.id]);
+
+  /**
+   * Handle image click for navigation (when not in edit mode)
+   */
+  const handleImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Only handle navigation when NOT in edit mode
+    if (editMode || !containerRef.current) return;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const width = rect.width;
+
+    // Left half = previous, right half = next
+    if (clickX < width / 2) {
+      onPrevious?.();
+    } else {
+      onNext?.();
+    }
+  };
 
   /**
    * Handle mouse down - start drawing rectangle
@@ -259,7 +280,8 @@ export function MangaPage({ page }: MangaPageProps) {
           onClick={() => {
             setEditMode(!editMode);
             if (editMode) {
-              // Exiting edit mode - clear active popover
+              // Exiting edit mode - reload captions and clear active popover
+              loadCaptions();
               setActiveRectId(null);
             }
           }}
@@ -277,10 +299,11 @@ export function MangaPage({ page }: MangaPageProps) {
       <div
         ref={containerRef}
         className="relative inline-block select-none"
+        onClick={handleImageClick}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        style={{ cursor: editMode ? "crosshair" : "default" }}
+        style={{ cursor: editMode ? "crosshair" : "pointer" }}
       >
         <img
           ref={imageRef}

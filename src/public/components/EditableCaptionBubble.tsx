@@ -48,11 +48,15 @@ export function EditableCaptionBubble({
   onClose,
 }: EditableCaptionBubbleProps) {
   const [state, setState] = useState<ProcessState>(
-    existingCaptionId ? "success" : "uploading"
+    existingCaptionId ? "success" : "uploading",
   );
-  const [captionId, setCaptionId] = useState<number | null>(existingCaptionId || null);
+  const [captionId, setCaptionId] = useState<number | null>(
+    existingCaptionId || null,
+  );
   const [rawText, setRawText] = useState<string>(existingRawText || "");
-  const [translatedText, setTranslatedText] = useState<string>(existingTranslatedText || "");
+  const [translatedText, setTranslatedText] = useState<string>(
+    existingTranslatedText || "",
+  );
   const [error, setError] = useState<string>("");
   const [isUpdating, setIsUpdating] = useState(false);
 
@@ -159,6 +163,11 @@ export function EditableCaptionBubble({
     }
   };
 
+  // Determine layout direction based on rectangle aspect ratio
+  // If width > height, image is horizontal/wide -> display vertically (image on top)
+  // If height > width, image is vertical/tall -> display horizontally (image on left)
+  const isWideImage = rectWidth > rectHeight;
+
   return (
     <div
       className="absolute bg-white rounded-lg shadow-2xl border-2 border-gray-300 p-3 z-10"
@@ -177,22 +186,22 @@ export function EditableCaptionBubble({
         ✕
       </button>
 
-      <div className="flex gap-3">
-        {/* Captured Image Preview - Left Side */}
+      <div className={`flex gap-3 ${isWideImage ? "flex-col" : "flex-row"}`}>
+        {/* Captured Image Preview - Left Side or Top */}
         <div className="flex-shrink-0">
           <img
             src={capturedImage}
             alt="Captured region"
             className="rounded border border-gray-200"
-            style={{
-              maxHeight: 150,
-              width: "auto",
-              height: "auto",
-            }}
+            style={
+              isWideImage
+                ? { maxHeight: 100, width: 200, height: "auto" }
+                : { maxHeight: 150, width: "auto", height: "auto" }
+            }
           />
         </div>
 
-        {/* Info Panel - Right Side */}
+        {/* Info Panel - Right Side or Bottom */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Uploading State */}
           {state === "uploading" && (

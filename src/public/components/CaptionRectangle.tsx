@@ -96,6 +96,8 @@ export function CaptionRectangle({
           translatedText={translatedText}
           x={x + width + 10}
           y={y}
+          width={width}
+          height={height}
         />
       )}
     </div>

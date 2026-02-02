@@ -8,7 +8,6 @@ import index from "../public/index.html";
  * IMPORTANT: Static plugin must be registered BEFORE wildcard routes
  */
 export const appPlugin = new Elysia()
-  // Static files FIRST - handles /uploads/*
   .use(
     staticPlugin({
       assets: "src/public/uploads",
@@ -17,4 +16,8 @@ export const appPlugin = new Elysia()
     }),
   )
   // React app routes AFTER - handles everything else
-  .get("/", index);
+  .get("/", index)
+  .get("/a/", index)
+  .get("/a/*", index)
+  .get("/r/", index)
+  .get("/r/*", index);

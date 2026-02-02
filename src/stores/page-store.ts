@@ -41,7 +41,19 @@ export class PageStore {
   }
 
   /**
-   * Create new page or return existing one
+   * Create a new page
+   */
+  static async create(data: NewPage): Promise<Page> {
+    const result = await db.insert(pages).values(data).returning();
+    const page = result[0];
+    if (!page) {
+      throw new Error("Failed to create page");
+    }
+    return page;
+  }
+
+  /**
+   * Create new page or return existing one (legacy support)
    */
   static async findOrCreate(imagePath: string): Promise<Page> {
     // Check if page already exists
@@ -50,10 +62,14 @@ export class PageStore {
       return existing;
     }
 
-    // Create new page
+    // Create new page with default chapter (for backward compatibility)
     const result = await db
       .insert(pages)
-      .values({ originalImage: imagePath })
+      .values({
+        chapterId: 1,
+        originalImage: imagePath,
+        orderNum: 1,
+      })
       .returning();
 
     const page = result[0];
@@ -62,6 +78,17 @@ export class PageStore {
     }
 
     return page;
+  }
+
+  /**
+   * Find all pages for a chapter, ordered by page number
+   */
+  static async findByChapterId(chapterId: number): Promise<Page[]> {
+    return await db
+      .select()
+      .from(pages)
+      .where(eq(pages.chapterId, chapterId))
+      .orderBy(pages.orderNum);
   }
 
   /**

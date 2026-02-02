@@ -29,10 +29,10 @@ export function RectangleOverlay({
 }: RectangleOverlayProps) {
   return (
     <div
-      className={`absolute border-2 transition-all ${
+      className={`absolute border-2 transition-all cursor-pointer ${
         editMode
-          ? "border-green-500 bg-green-300 bg-opacity-20 cursor-pointer hover:bg-opacity-40"
-          : "border-blue-500 bg-blue-300 bg-opacity-10 cursor-pointer hover:bg-opacity-30"
+          ? "border-green-500 bg-green-500/10 hover:bg-green-500/20"
+          : "border-blue-500 bg-blue-500/10 hover:bg-blue-500/20"
       }`}
       style={{
         left: x,

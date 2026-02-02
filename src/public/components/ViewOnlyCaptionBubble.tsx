@@ -4,6 +4,8 @@ interface ViewOnlyCaptionBubbleProps {
   translatedText?: string;
   x: number;
   y: number;
+  width: number;
+  height: number;
 }
 
 /**
@@ -21,7 +23,14 @@ export function ViewOnlyCaptionBubble({
   translatedText,
   x,
   y,
+  width,
+  height,
 }: ViewOnlyCaptionBubbleProps) {
+  // Determine layout direction based on rectangle aspect ratio
+  // If width > height, image is horizontal/wide -> display vertically (image on top)
+  // If height > width, image is vertical/tall -> display horizontally (image on left)
+  const isWideImage = width > height;
+
   return (
     <div
       className="absolute bg-white rounded-lg shadow-2xl border-2 border-blue-500 p-3 z-10 pointer-events-none"
@@ -31,13 +40,15 @@ export function ViewOnlyCaptionBubble({
         maxWidth: 400,
       }}
     >
-      <div className="flex gap-3">
+      <div className={`flex gap-3 ${isWideImage ? "flex-col" : "flex-row"}`}>
         {/* Captured Image Preview */}
         <div className="flex-shrink-0">
           <img
             src={capturedImage}
             alt="Captured region"
-            className="rounded border border-gray-200 max-h-32 w-auto"
+            className={`rounded border border-gray-200 ${
+              isWideImage ? "max-w-full h-auto" : "max-h-32 w-auto"
+            }`}
           />
         </div>
 
@@ -47,7 +58,10 @@ export function ViewOnlyCaptionBubble({
           {rawText && (
             <div>
               <div className="text-xs text-gray-500 mb-1">Original:</div>
-              <div className="text-sm text-gray-800 line-clamp-3">
+              <div
+                className="text-sm text-gray-800 line-clamp-3"
+                style={{ minWidth: 300 }}
+              >
                 {rawText}
               </div>
             </div>
@@ -57,7 +71,10 @@ export function ViewOnlyCaptionBubble({
           {translatedText && (
             <div>
               <div className="text-xs text-gray-500 mb-1">Translation:</div>
-              <div className="text-sm text-blue-700 font-medium line-clamp-3">
+              <div
+                className="text-sm text-blue-700 font-medium line-clamp-3"
+                style={{ minWidth: 300 }}
+              >
                 {translatedText}
               </div>
             </div>
