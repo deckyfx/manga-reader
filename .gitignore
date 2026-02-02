@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Environment
+.env
+.env.local
+
+# Temporary files
+temp/
+tmp/
+
+# Data directory (models, OCR input/output, uploads)
+data/
+src/public/uploads/cropped/*.png
+
+# Docker backups (large tar files)
+docker-backups/
+*.tar
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+.claude/

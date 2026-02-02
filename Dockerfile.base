@@ -1,0 +1,25 @@
+# Base image with manga-ocr and all heavy dependencies pre-installed
+# Build once, reuse everywhere
+FROM python:3.11-slim
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set pip cache directory
+ENV PIP_CACHE_DIR=/pip-cache
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install manga-ocr (includes torch ~900MB)
+# This layer will be cached and reused
+RUN pip install --no-cache-dir manga-ocr==0.1.14
+
+# Verify installation
+RUN python -c "from manga_ocr import MangaOcr; print('manga-ocr installed successfully!')"
+
+# Set working directory
+WORKDIR /app
