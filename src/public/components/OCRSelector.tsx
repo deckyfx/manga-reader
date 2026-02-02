@@ -1,7 +1,6 @@
 import React, { useState, useRef } from "react";
 import html2canvas from "html2canvas";
 import { DraggableResizable } from "./DraggableResizable";
-import { displayedToNaturalRect } from "../lib/imageUtils";
 import { api } from "../../lib/api";
 
 /**
@@ -14,9 +13,18 @@ import { api } from "../../lib/api";
  * - Client-side OCR processing
  * - Display extracted text with copy functionality
  */
-export function OCRSelector({ imageUrl }: { imageUrl: string }) {
+export function OCRSelector({
+  pageId,
+  imageUrl,
+}: {
+  pageId: number;
+  imageUrl: string;
+}) {
   const [showSelector, setShowSelector] = useState(false);
-  const [selectionSize, setSelectionSize] = useState({ width: 200, height: 100 });
+  const [selectionSize, setSelectionSize] = useState({
+    width: 200,
+    height: 100,
+  });
   const [selectionPosition, setSelectionPosition] = useState({ x: 50, y: 50 });
   const [ocrResult, setOcrResult] = useState<string>("");
   const [ocrMetadata, setOcrMetadata] = useState<{
@@ -104,7 +112,7 @@ export function OCRSelector({ imageUrl }: { imageUrl: string }) {
         0,
         0,
         naturalRect.width,
-        naturalRect.height
+        naturalRect.height,
       );
 
       // Convert to data URL for preview
@@ -127,34 +135,39 @@ export function OCRSelector({ imageUrl }: { imageUrl: string }) {
     setProgress(0);
 
     try {
-      // Convert data URL to blob
-      const response = await fetch(capturedImage);
-      const blob = await response.blob();
-
-      // Create a File object from the blob for the API
-      const file = new File([blob], "capture.png", { type: "image/png" });
-
       // Simulate progress during upload
       setProgress(30);
 
-      // Send to server-side OCR endpoint (queued for manga-ocr processing)
+      // Send to server-side OCR endpoint with immediate database persistence
       const result = await api.api.ocr.post({
-        image: file,
+        pageId,
+        imagePath: imageUrl,
+        x: selectionPosition.x,
+        y: selectionPosition.y,
+        width: selectionSize.width,
+        height: selectionSize.height,
+        capturedImage,
       });
 
       setProgress(100);
 
       if (result.data?.success) {
-        setOcrResult("Image queued for OCR processing. Check server console for results.");
-        setOcrMetadata({
-          savedAs: result.data.filename,
-          path: result.data.path,
-        });
-        console.log("Image queued:", result.data.filename);
+        if (result.data.rawText) {
+          // Got OCR result and saved to database
+          setOcrResult(result.data.rawText);
+          setOcrMetadata({
+            savedAs: result.data.filename,
+          });
+          console.log("[OCRSelector] Caption saved:", result.data.captionId);
+        } else {
+          // Timeout - queued for processing
+          setOcrResult("Image queued for OCR processing. Results pending.");
+          setOcrMetadata({
+            savedAs: result.data.filename,
+          });
+        }
       } else {
-        setOcrResult(
-          `Error: ${result.data?.error || "Failed to queue image"}`
-        );
+        setOcrResult(`Error: ${result.data?.error || "Failed to queue image"}`);
         setOcrMetadata(null);
       }
     } catch (error) {
@@ -314,7 +327,8 @@ export function OCRSelector({ imageUrl }: { imageUrl: string }) {
                   </code>
                   {ocrMetadata.path && (
                     <>
-                      {" "}•{" "}
+                      {" "}
+                      •{" "}
                       <a
                         href={ocrMetadata.path}
                         target="_blank"

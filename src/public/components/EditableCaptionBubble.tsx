@@ -1,0 +1,284 @@
+import { useState, useEffect } from "react";
+import { api } from "../../lib/api";
+
+interface EditableCaptionBubbleProps {
+  existingCaptionId?: number;
+  existingRawText?: string;
+  existingTranslatedText?: string;
+  pageId: number;
+  capturedImage: string;
+  imagePath: string;
+  x: number;
+  y: number;
+  rectX: number;
+  rectY: number;
+  rectWidth: number;
+  rectHeight: number;
+  onDiscard: () => void;
+  onUpdate: () => void;
+  onClose: () => void;
+}
+
+type ProcessState = "uploading" | "processing" | "success" | "error";
+
+/**
+ * EditableCaptionBubble Component
+ *
+ * Full-featured editing interface for caption regions
+ * - Shows captured image preview
+ * - Handles API upload and immediate persistence
+ * - Displays editable textareas for original and translated text
+ * - Shows Update/Discard buttons
+ */
+export function EditableCaptionBubble({
+  existingCaptionId,
+  existingRawText,
+  existingTranslatedText,
+  pageId,
+  capturedImage,
+  imagePath,
+  x,
+  y,
+  rectX,
+  rectY,
+  rectWidth,
+  rectHeight,
+  onDiscard,
+  onUpdate,
+  onClose,
+}: EditableCaptionBubbleProps) {
+  const [state, setState] = useState<ProcessState>(
+    existingCaptionId ? "success" : "uploading"
+  );
+  const [captionId, setCaptionId] = useState<number | null>(existingCaptionId || null);
+  const [rawText, setRawText] = useState<string>(existingRawText || "");
+  const [translatedText, setTranslatedText] = useState<string>(existingTranslatedText || "");
+  const [error, setError] = useState<string>("");
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  useEffect(() => {
+    // Only run OCR for new captions (no existing ID)
+    if (!existingCaptionId) {
+      uploadImage();
+    }
+  }, [existingCaptionId]);
+
+  /**
+   * Upload image to OCR API and save to database immediately
+   */
+  const uploadImage = async () => {
+    try {
+      setState("uploading");
+      setState("processing");
+
+      // Use Eden Treaty for type-safe API call
+      const result = await api.api.ocr.post({
+        pageId,
+        imagePath,
+        x: rectX,
+        y: rectY,
+        width: rectWidth,
+        height: rectHeight,
+        capturedImage,
+      });
+
+      console.log("[CaptionBubble] API Response:", result.data);
+
+      if (result.data?.success) {
+        if (result.data.rawText) {
+          // Got result and saved to database!
+          setState("success");
+          setCaptionId(result.data.captionId);
+          setRawText(result.data.rawText);
+          setTranslatedText(result.data.translatedText || "");
+        } else {
+          // Timeout
+          setState("error");
+          setError("OCR processing timed out");
+        }
+      } else {
+        setState("error");
+        setError(result.data?.error || "Upload failed");
+      }
+    } catch (err) {
+      console.error("Upload error:", err);
+      setState("error");
+      setError(err instanceof Error ? err.message : "Failed to upload");
+    }
+  };
+
+  /**
+   * Update caption in database
+   */
+  const handleUpdate = async () => {
+    if (!captionId) return;
+
+    setIsUpdating(true);
+    try {
+      const result = await api.api.captions({ id: captionId }).put({
+        rawText,
+        translatedText: translatedText || undefined,
+      });
+
+      if (result.data?.success) {
+        console.log("[EditableCaptionBubble] Caption updated successfully");
+        // Reload all captions from database to refresh UI
+        onUpdate();
+      } else {
+        setError("Failed to update caption");
+      }
+    } catch (err) {
+      console.error("Update error:", err);
+      setError(err instanceof Error ? err.message : "Failed to update");
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  /**
+   * Delete caption from database and remove from UI
+   */
+  const handleDelete = async () => {
+    if (!captionId) {
+      onDiscard();
+      return;
+    }
+
+    try {
+      const result = await api.api.captions({ id: captionId }).delete();
+
+      if (result.data?.success) {
+        console.log("[CaptionBubble] Caption deleted successfully");
+        onDiscard();
+      } else {
+        setError("Failed to delete caption");
+      }
+    } catch (err) {
+      console.error("Delete error:", err);
+      setError(err instanceof Error ? err.message : "Failed to delete");
+    }
+  };
+
+  return (
+    <div
+      className="absolute bg-white rounded-lg shadow-2xl border-2 border-gray-300 p-3 z-10"
+      style={{
+        left: x,
+        top: y,
+        maxWidth: 500,
+      }}
+    >
+      {/* Close button */}
+      <button
+        onClick={onClose}
+        className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-full bg-gray-200 hover:bg-gray-300 text-gray-600 hover:text-gray-800 transition-colors"
+        title="Close without saving"
+      >
+        ✕
+      </button>
+
+      <div className="flex gap-3">
+        {/* Captured Image Preview - Left Side */}
+        <div className="flex-shrink-0">
+          <img
+            src={capturedImage}
+            alt="Captured region"
+            className="rounded border border-gray-200"
+            style={{
+              maxHeight: 150,
+              width: "auto",
+              height: "auto",
+            }}
+          />
+        </div>
+
+        {/* Info Panel - Right Side */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Uploading State */}
+          {state === "uploading" && (
+            <div className="flex items-center gap-2 text-sm text-gray-600 py-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+              <span>Uploading...</span>
+            </div>
+          )}
+
+          {/* Processing State */}
+          {state === "processing" && (
+            <div className="flex items-center gap-2 text-sm text-gray-600 py-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-500"></div>
+              <span>Processing OCR...</span>
+            </div>
+          )}
+
+          {/* Success State - Editable Textareas */}
+          {state === "success" && (
+            <>
+              <div className="text-sm text-gray-700 mb-3 flex-1 space-y-2">
+                {/* Original Japanese Text - Editable */}
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">
+                    Original:
+                  </label>
+                  <textarea
+                    value={rawText}
+                    onChange={(e) => setRawText(e.target.value)}
+                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    style={{ minWidth: "300px" }}
+                    rows={3}
+                  />
+                </div>
+
+                {/* Translated English Text - Editable */}
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">
+                    Translation:
+                  </label>
+                  <textarea
+                    value={translatedText}
+                    onChange={(e) => setTranslatedText(e.target.value)}
+                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-blue-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    style={{ minWidth: "300px" }}
+                    rows={3}
+                    placeholder="Enter translation..."
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleUpdate}
+                  disabled={isUpdating}
+                  className="flex-1 px-3 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white text-sm font-semibold rounded transition-colors"
+                >
+                  {isUpdating ? "..." : "✓ Update"}
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="flex-1 px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded transition-colors"
+                >
+                  ✕ Discard
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Error State */}
+          {state === "error" && (
+            <>
+              <div className="text-sm text-red-600 mb-2 p-2 bg-red-50 rounded flex-1">
+                ❌ {error}
+              </div>
+              <button
+                onClick={onDiscard}
+                className="w-full px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded transition-colors"
+              >
+                ✕ Close
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

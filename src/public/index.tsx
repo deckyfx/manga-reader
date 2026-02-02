@@ -12,21 +12,31 @@ function App() {
   const [comics, setComics] = useState<
     Array<{ id: number; title: string; pages: number }>
   >([]);
+  const [pageData, setPageData] = useState<{
+    id: number;
+    originalImage: string;
+    createdAt: Date;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Fetch hello message and comics using type-safe Eden Treaty
-    Promise.all([api.api.hello.get(), api.api.comics.get()]).then(
-      ([helloRes, comicsRes]) => {
-        if (helloRes.data) {
-          setMessage(helloRes.data.message);
-        }
-        if (comicsRes.data) {
-          setComics(comicsRes.data.comics);
-        }
-        setLoading(false);
-      },
-    );
+    // Fetch hello message, comics, and page 1 data using type-safe Eden Treaty
+    Promise.all([
+      api.api.hello.get(),
+      api.api.comics.get(),
+      api.api.pages({ id: "1" }).get(),
+    ]).then(([helloRes, comicsRes, pageRes]) => {
+      if (helloRes.data) {
+        setMessage(helloRes.data.message);
+      }
+      if (comicsRes.data) {
+        setComics(comicsRes.data.comics);
+      }
+      if (pageRes.data?.success && pageRes.data.page) {
+        setPageData(pageRes.data.page);
+      }
+      setLoading(false);
+    });
   }, []);
 
   return (
@@ -46,12 +56,14 @@ function App() {
         ) : (
           <>
             {/* Comic Page Display with OCR */}
-            <div className="mb-12">
-              <h2 className="text-3xl font-bold text-gray-800 mb-6 text-center">
-                📖 Manga Page with Inline OCR
-              </h2>
-              <MangaPage src="/uploads/57_005.png" alt="Sample manga page" />
-            </div>
+            {pageData && (
+              <div className="mb-12">
+                <h2 className="text-3xl font-bold text-gray-800 mb-6 text-center">
+                  📖 Manga Page with Inline OCR
+                </h2>
+                <MangaPage page={pageData} />
+              </div>
+            )}
 
             {/* Comic List */}
             <h2 className="text-3xl font-bold text-gray-800 mb-6">

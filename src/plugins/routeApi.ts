@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { envConfig } from "../env-config";
 import { OcrResultManager } from "../services/OcrResultManager";
 import { TranslationService } from "../services/TranslationService";
+import { PageStore } from "../stores/page-store";
+import { CaptionStore } from "../stores/caption-store";
 
 /**
  * API routes plugin with /api prefix
@@ -20,6 +22,61 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
       ],
     };
   })
+  .get(
+    "/pages/:id",
+    async ({ params }) => {
+      try {
+        const pageId = parseInt(params.id);
+        const page = await PageStore.findById(pageId);
+
+        if (!page) {
+          return {
+            success: false,
+            error: "Page not found",
+          };
+        }
+
+        return {
+          success: true,
+          page,
+        };
+      } catch (error) {
+        console.error("Get page error:", error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to get page",
+        };
+      }
+    }
+  )
+  .get(
+    "/captions",
+    async ({ query }) => {
+      try {
+        const { pageId } = query;
+
+        // Get all captions for this page
+        const captions = await CaptionStore.findByPageId(pageId);
+
+        return {
+          success: true,
+          captions,
+        };
+      } catch (error) {
+        console.error("Get captions error:", error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to get captions",
+          captions: [],
+        };
+      }
+    },
+    {
+      query: t.Object({
+        pageId: t.Number(),
+      }),
+    }
+  )
   .post("/echo", ({ body }) => {
     return { echo: body };
   }, {
@@ -31,11 +88,11 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
     "/ocr",
     async ({ body }) => {
       try {
-        const { image } = body;
+        const { pageId, imagePath, x, y, width, height, capturedImage } = body;
 
-        // Convert File to Buffer
-        const arrayBuffer = await image.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
+        // Decode base64 image
+        const base64Data = capturedImage.replace(/^data:image\/\w+;base64,/, "");
+        const buffer = Buffer.from(base64Data, "base64");
 
         // Generate filename
         const timestamp = Date.now();
@@ -54,15 +111,28 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         const translationService = TranslationService.getInstance();
 
         try {
-          const text = await resultManager.waitForResult(filename, 5000);
+          const rawText = await resultManager.waitForResult(filename, 5000);
 
           // Translate the extracted text
-          const translatedText = await translationService.translate(text);
+          const translatedText = await translationService.translate(rawText);
+
+          // Save caption immediately to database
+          const caption = await CaptionStore.create({
+            pageId,
+            x,
+            y,
+            width,
+            height,
+            capturedImage,
+            rawText,
+            translatedText: translatedText || null,
+          });
 
           return {
             success: true,
-            text,
-            translatedText,
+            captionId: caption.id,
+            rawText: caption.rawText,
+            translatedText: caption.translatedText,
             filename,
           };
         } catch (timeoutError) {
@@ -85,10 +155,70 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
     },
     {
       body: t.Object({
-        image: t.File({
-          type: ["image/png", "image/jpeg", "image/jpg", "image/webp"],
-          maxSize: 10 * 1024 * 1024, // 10MB max
-        }),
+        pageId: t.Number(),
+        imagePath: t.String(),
+        x: t.Number(),
+        y: t.Number(),
+        width: t.Number(),
+        height: t.Number(),
+        capturedImage: t.String(), // base64 data URL
       }),
     }
-  );
+  )
+  .put(
+    "/captions/:id",
+    async ({ params: { id }, body }) => {
+      try {
+        const caption = await CaptionStore.update(parseInt(id), {
+          rawText: body.rawText,
+          translatedText: body.translatedText,
+        });
+
+        if (!caption) {
+          return {
+            success: false,
+            error: "Caption not found",
+          };
+        }
+
+        return {
+          success: true,
+          caption,
+        };
+      } catch (error) {
+        console.error("Update caption error:", error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to update caption",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        rawText: t.String(),
+        translatedText: t.Optional(t.String()),
+      }),
+    }
+  )
+  .delete("/captions/:id", async ({ params: { id } }) => {
+    try {
+      const deleted = await CaptionStore.delete(parseInt(id));
+
+      if (!deleted) {
+        return {
+          success: false,
+          error: "Caption not found",
+        };
+      }
+
+      return {
+        success: true,
+      };
+    } catch (error) {
+      console.error("Delete caption error:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to delete caption",
+      };
+    }
+  });

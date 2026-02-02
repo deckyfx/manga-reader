@@ -1,33 +1,42 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import html2canvas from "html2canvas";
-import { CaptionBubble } from "./CaptionBubble";
+import { CaptionRectangle } from "./CaptionRectangle";
+import { api } from "../../lib/api";
 
 interface Rectangle {
   id: string;
+  captionId?: number; // Database ID for existing captions
   x: number;
   y: number;
   width: number;
   height: number;
-  text?: string;
-  saved: boolean;
   capturedImage?: string;
+  rawText?: string;
+  translatedText?: string;
+}
+
+interface PageData {
+  id: number;
+  originalImage: string;
+  createdAt: Date;
 }
 
 interface MangaPageProps {
-  src: string;
-  alt?: string;
+  page: PageData;
 }
 
 /**
  * MangaPage Component
  *
  * Reusable manga page viewer with inline OCR editing
+ * - Receives complete page data from parent
  * - Toggle edit mode
  * - Click and drag to create OCR regions
- * - Inline popover shows captured image, progress, and results
- * - Save/Discard workflow
+ * - Inline popover shows captured image, progress, and editable results
+ * - Captions are automatically persisted to database
+ * - Update/Discard workflow
  */
-export function MangaPage({ src, alt = "Manga page" }: MangaPageProps) {
+export function MangaPage({ page }: MangaPageProps) {
   const [editMode, setEditMode] = useState(false);
   const [rectangles, setRectangles] = useState<Rectangle[]>([]);
   const [currentDraw, setCurrentDraw] = useState<{
@@ -40,6 +49,44 @@ export function MangaPage({ src, alt = "Manga page" }: MangaPageProps) {
 
   const imageRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Load saved captions from database
+   */
+  const loadCaptions = async () => {
+    try {
+      const result = await api.api.captions.get({
+        query: { pageId: page.id },
+      });
+
+      if (result.data?.success && result.data.captions) {
+        // Convert database captions to Rectangle format
+        const loadedRectangles: Rectangle[] = result.data.captions.map((caption) => ({
+          id: `caption-${caption.id}`,
+          captionId: caption.id, // Store database ID
+          x: caption.x,
+          y: caption.y,
+          width: caption.width,
+          height: caption.height,
+          capturedImage: caption.capturedImage,
+          rawText: caption.rawText,
+          translatedText: caption.translatedText || undefined,
+        }));
+
+        setRectangles(loadedRectangles);
+        console.log(`[MangaPage] Loaded ${loadedRectangles.length} captions for page ${page.id}`);
+      }
+    } catch (error) {
+      console.error("[MangaPage] Failed to load captions:", error);
+    }
+  };
+
+  /**
+   * Load captions on mount
+   */
+  useEffect(() => {
+    loadCaptions();
+  }, [page.id]);
 
   /**
    * Handle mouse down - start drawing rectangle
@@ -110,7 +157,6 @@ export function MangaPage({ src, alt = "Manga page" }: MangaPageProps) {
         y,
         width,
         height,
-        saved: false,
         capturedImage,
       };
 
@@ -181,17 +227,7 @@ export function MangaPage({ src, alt = "Manga page" }: MangaPageProps) {
   };
 
   /**
-   * Save a rectangle with text (keep it on the page)
-   */
-  const handleSave = (rectId: string, text: string) => {
-    setRectangles((prev) =>
-      prev.map((r) => (r.id === rectId ? { ...r, text, saved: true } : r))
-    );
-    setActiveRectId(null);
-  };
-
-  /**
-   * Discard a rectangle (remove it)
+   * Discard a rectangle (remove it from UI after database deletion)
    */
   const handleDiscard = (rectId: string) => {
     setRectangles((prev) => prev.filter((r) => r.id !== rectId));
@@ -248,8 +284,8 @@ export function MangaPage({ src, alt = "Manga page" }: MangaPageProps) {
       >
         <img
           ref={imageRef}
-          src={src}
-          alt={alt}
+          src={page.originalImage}
+          alt={`Manga page ${page.id}`}
           className="max-w-full h-auto rounded-lg shadow-lg"
           crossOrigin="anonymous"
           draggable={false}
@@ -270,91 +306,38 @@ export function MangaPage({ src, alt = "Manga page" }: MangaPageProps) {
 
         {/* Caption rectangles */}
         {rectangles.map((rect) => (
-          <div key={rect.id}>
-            {/* Rectangle overlay */}
-            <div
-              className={`absolute border-2 pointer-events-none ${
-                rect.saved
-                  ? "border-green-500 bg-green-300"
-                  : "border-blue-500 bg-blue-300"
-              } bg-opacity-20`}
-              style={{
-                left: rect.x,
-                top: rect.y,
-                width: rect.width,
-                height: rect.height,
-              }}
-            />
-
-            {/* Caption bubble (only show for active unsaved rectangles) */}
-            {activeRectId === rect.id && !rect.saved && rect.capturedImage && (
-              <CaptionBubble
-                capturedImage={rect.capturedImage}
-                x={rect.x + rect.width + 10}
-                y={rect.y}
-                onSave={(text) => handleSave(rect.id, text)}
-                onDiscard={() => handleDiscard(rect.id)}
-              />
-            )}
-
-            {/* Saved caption indicator */}
-            {rect.saved && (
-              <div
-                className="absolute bg-green-500 text-white text-xs px-2 py-1 rounded-full pointer-events-auto cursor-pointer hover:bg-green-600"
-                style={{
-                  left: rect.x,
-                  top: rect.y - 8,
-                }}
-                onClick={() => setActiveRectId(rect.id === activeRectId ? null : rect.id)}
-              >
-                ✓
-              </div>
-            )}
-
-            {/* Show saved text on hover/click */}
-            {activeRectId === rect.id && rect.saved && rect.text && (
-              <div
-                className="absolute bg-white rounded-lg shadow-xl border-2 border-green-500 p-3 z-10 pointer-events-auto"
-                style={{
-                  left: rect.x + rect.width + 10,
-                  top: rect.y,
-                  minWidth: 200,
-                  maxWidth: 300,
-                }}
-              >
-                <div className="text-sm text-gray-700 mb-2 max-h-32 overflow-y-auto">
-                  <pre className="whitespace-pre-wrap font-sans">{rect.text}</pre>
-                </div>
-                <button
-                  onClick={() => setActiveRectId(null)}
-                  className="w-full px-3 py-1 bg-gray-500 hover:bg-gray-600 text-white text-sm rounded transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            )}
-          </div>
+          <CaptionRectangle
+            key={rect.id}
+            id={rect.id}
+            captionId={rect.captionId}
+            pageId={page.id}
+            x={rect.x}
+            y={rect.y}
+            width={rect.width}
+            height={rect.height}
+            capturedImage={rect.capturedImage || ""}
+            rawText={rect.rawText}
+            translatedText={rect.translatedText}
+            imagePath={page.originalImage}
+            editMode={editMode}
+            isActive={activeRectId === rect.id}
+            onActivate={() => setActiveRectId(rect.id)}
+            onDiscard={() => handleDiscard(rect.id)}
+            onUpdate={loadCaptions}
+            onClose={() => setActiveRectId(null)}
+          />
         ))}
       </div>
 
-      {/* Saved rectangles list (when not in edit mode) */}
+      {/* Caption regions info */}
       {!editMode && rectangles.length > 0 && (
         <div className="bg-white rounded-lg shadow-lg p-4">
-          <h3 className="text-sm font-semibold text-gray-800 mb-2">
-            📝 Extracted Text ({rectangles.length})
-          </h3>
-          <div className="space-y-2">
-            {rectangles.map((rect, index) => (
-              <div
-                key={rect.id}
-                className="text-sm p-2 bg-gray-50 rounded cursor-pointer hover:bg-gray-100"
-                onClick={() => setActiveRectId(rect.id)}
-              >
-                <span className="font-medium text-gray-600">Region {index + 1}:</span>{" "}
-                {rect.text || "No text"}
-              </div>
-            ))}
-          </div>
+          <p className="text-sm text-gray-600">
+            📝 {rectangles.length} caption region{rectangles.length > 1 ? "s" : ""} saved
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            Click on a region to view/edit the caption
+          </p>
         </div>
       )}
     </div>

@@ -3,8 +3,17 @@ import { envConfig } from "./env-config";
 import { apiPlugin } from "./plugins/routeApi";
 import { appPlugin } from "./plugins/routeApp";
 import { FileWatcher } from "./services/FileWatcher";
+import { MigrationManager } from "./db/migration-manager";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+
+async function initializeDatabase() {
+  // Initialize migrations (auto-migrate in development, strict in production)
+  await MigrationManager.init({
+    autoMigrate: envConfig.isDevelopment,
+    strict: envConfig.isProduction,
+  });
+}
 
 async function initializeFileWatcher() {
   // Ensure directories exist
@@ -22,7 +31,8 @@ async function initializeFileWatcher() {
   console.log("   Cleaning:", envConfig.OCR_INPUT_DIR);
 }
 
-// Initialize FileWatcher before starting server
+// Initialize database and FileWatcher before starting server
+await initializeDatabase();
 await initializeFileWatcher();
 
 /**
