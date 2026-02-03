@@ -1,16 +1,45 @@
-# Dockerfile for manga-ocr
-# Uses pre-built base image with manga-ocr and torch
-FROM comic-reader-base:latest
+# ============================================
+# Stage 1: Builder
+# ============================================
+FROM oven/bun:1 AS builder
 
-# Copy requirements file first (for additional dependencies if needed)
-COPY requirements.txt .
+WORKDIR /app
 
-# Install any additional dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies
+COPY package.json bun.lock* ./
+RUN bun install --frozen-lockfile
+
+# Copy source code
+COPY . .
+
+# Build single executable binary
+RUN bun run build
+
+# ============================================
+# Stage 2: Runtime (Minimal Bun image)
+# ============================================
+FROM oven/bun:1-slim
+
+WORKDIR /app
+
+# Copy compiled binary from builder
+COPY --from=builder /app/app /app/app
+
+# Copy migration files (needed for database initialization)
+COPY --from=builder /app/drizzle /app/drizzle
+
+# Copy migration script for database initialization
+COPY --from=builder /app/src/db/migrate.ts /app/migrate.ts
 
 # Copy entrypoint script
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Set entrypoint
-ENTRYPOINT ["/entrypoint.sh"]
+# Set environment to production
+ENV NODE_ENV=production
+
+# Expose port
+EXPOSE 3000
+
+# Use entrypoint script for directory setup and migrations
+ENTRYPOINT ["docker-entrypoint.sh"]

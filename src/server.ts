@@ -2,41 +2,29 @@ import { Elysia } from "elysia";
 import { envConfig } from "./env-config";
 import { apiPlugin } from "./plugins/routeApi";
 import { appPlugin } from "./plugins/routeApp";
-import { FileWatcher } from "./services/FileWatcher";
-import { MigrationManager } from "./db/migration-manager";
-import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { MangaOCRService } from "./services/MangaOCRService";
 
-async function initializeDatabase() {
-  // Initialize migrations (auto-migrate in development, strict in production)
-  await MigrationManager.init({
-    autoMigrate: envConfig.isDevelopment,
-    strict: envConfig.isProduction,
-  });
+async function initializeMangaOCR() {
+  // Get MangaOCRService singleton
+  const ocrService = MangaOCRService.getInstance();
+
+  // Check if OCR service is available
+  try {
+    const health = await ocrService.healthCheck();
+    console.log("✅ Manga OCR service initialized");
+    console.log("   Status:", health.status);
+    console.log("   Model loaded:", health.model_loaded);
+    console.log("   Socket:", envConfig.MANGA_OCR_SOCKET);
+  } catch (error) {
+    console.warn("⚠️  Manga OCR service not available");
+    console.warn("   Socket:", envConfig.MANGA_OCR_SOCKET);
+    console.warn("   Error:", error instanceof Error ? error.message : "Unknown error");
+    console.warn("   OCR features will not work until the service is started");
+  }
 }
 
-async function initializeFileWatcher() {
-  // Ensure directories exist
-  await mkdir(envConfig.OCR_INPUT_DIR, { recursive: true });
-  await mkdir(dirname(envConfig.OCR_OUTPUT_FILE), { recursive: true });
-
-  // Get FileWatcher singleton
-  const watcher = FileWatcher.getInstance();
-
-  // Start watching (subscriptions are managed per-request by OcrResultManager)
-  await watcher.startWatching(
-    envConfig.OCR_OUTPUT_FILE,
-    envConfig.OCR_INPUT_DIR,
-  );
-
-  console.log("✅ FileWatcher initialized");
-  console.log("   Watching:", envConfig.OCR_OUTPUT_FILE);
-  console.log("   Cleaning:", envConfig.OCR_INPUT_DIR);
-}
-
-// Initialize database and FileWatcher before starting server
-await initializeDatabase();
-await initializeFileWatcher();
+// Initialize Manga OCR service before starting server
+await initializeMangaOCR();
 
 /**
  * Main Elysia server with API and React app plugins

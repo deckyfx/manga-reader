@@ -1,11 +1,24 @@
 {
   "name": "comic-reader",
+  "version": "1.0.0",
+  "description": "A modern manga/comic reader with real-time OCR text extraction and translation capabilities",
   "module": "src/server.ts",
   "type": "module",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deckyfx/manga-reader.git"
+  },
+  "author": "deckyfx",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/deckyfx/manga-reader/issues"
+  },
+  "homepage": "https://github.com/deckyfx/manga-reader#readme",
   "scripts": {
     "dev": "bun run src/server.ts",
     "typecheck": "tsc --noEmit",
+    "build": "bun run build.ts",
     "migrate": "bun run src/db/migrate.ts",
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio"

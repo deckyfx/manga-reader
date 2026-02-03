@@ -1,0 +1,49 @@
+[project]
+name = "manga-ocr"
+version = "1.0.0"
+description = "Modernized manga OCR with latest dependencies"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
+dependencies = [
+    "fastapi>=0.115.0",  # Modern async web framework
+    "fugashi>=1.3.0",  # Japanese tokenizer (REQUIRED)
+    "jaconv>=0.4.0",  # Japanese text conversion
+    "loguru>=0.7.0",  # Modern logging
+    "numpy>=1.26.0,<2.0",  # Pin to 1.x for PyTorch compatibility
+    "Pillow>=10.0.0",  # Image processing
+    "protobuf>=3.20.0",  # Required by transformers (REQUIRED)
+    "python-multipart>=0.0.6",  # For file uploads in FastAPI
+    "sentencepiece>=0.1.99",  # Tokenizer library (REQUIRED)
+    "torch>=2.5.0",  # Modern PyTorch (CPU or CUDA)
+    "transformers>=4.40.0",  # Latest transformers with security fixes
+    "unidic-lite>=1.0.8",  # Japanese dictionary for fugashi (REQUIRED)
+    "uvicorn>=0.32.0",  # ASGI server for FastAPI
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "black>=24.0.0",
+    "ruff>=0.8.0",
+]
+
+[project.scripts]
+manga-ocr-server = "src.server:start_server"
+
+[build-system]
+requires = ["setuptools>=70.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["src"]
+package-dir = {"" = "."}
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

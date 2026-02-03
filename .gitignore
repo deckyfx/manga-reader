@@ -34,3 +34,5 @@ Thumbs.db
 logs/
 .claude/
 src/public/uploads/
+example/
+app

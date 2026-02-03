@@ -4,16 +4,18 @@ import { DraggableResizable } from "./DraggableResizable";
 import { api } from "../lib/api";
 
 /**
- * OCRSelector Component
+ * RegionProcessor Component
  *
- * Allows users to select a region on an image and extract text using Tesseract OCR.
+ * Allows users to select a region on an image, extract text via OCR, and translate it.
  * Features:
- * - Draggable and resizable selection box (custom implementation)
+ * - Draggable and resizable selection box
  * - Visual selection overlay
- * - Client-side OCR processing
- * - Display extracted text with copy functionality
+ * - Server-side OCR processing via manga-ocr FastAPI service
+ * - Automatic translation via DeepL
+ * - Display extracted and translated text with copy functionality
+ * - Save captions to database
  */
-export function OCRSelector({
+export function RegionProcessor({
   pageId,
   imageUrl,
 }: {
@@ -28,12 +30,7 @@ export function OCRSelector({
   const [selectionPosition, setSelectionPosition] = useState({ x: 50, y: 50 });
   const [ocrResult, setOcrResult] = useState<string>("");
   const [ocrMetadata, setOcrMetadata] = useState<{
-    confidence?: number;
-    words?: number;
-    savedAs?: string;
-    path?: string;
-    engine?: string;
-    processingTime?: number;
+    captionId?: number;
   } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -152,22 +149,14 @@ export function OCRSelector({
       setProgress(100);
 
       if (result.data?.success) {
-        if (result.data.rawText) {
-          // Got OCR result and saved to database
-          setOcrResult(result.data.rawText);
-          setOcrMetadata({
-            savedAs: result.data.filename,
-          });
-          console.log("[OCRSelector] Caption saved:", result.data.captionId);
-        } else {
-          // Timeout - queued for processing
-          setOcrResult("Image queued for OCR processing. Results pending.");
-          setOcrMetadata({
-            savedAs: result.data.filename,
-          });
-        }
+        // Got OCR result and saved to database
+        setOcrResult(result.data.rawText || "");
+        setOcrMetadata({
+          captionId: result.data.captionId,
+        });
+        console.log("[RegionProcessor] Caption saved:", result.data.captionId);
       } else {
-        setOcrResult(`Error: ${result.data?.error || "Failed to queue image"}`);
+        setOcrResult(`Error: ${result.data?.error || "Failed to process OCR"}`);
         setOcrMetadata(null);
       }
     } catch (error) {
@@ -319,26 +308,9 @@ export function OCRSelector({
               <h3 className="text-lg font-semibold text-gray-800">
                 📄 Extracted Text
               </h3>
-              {ocrMetadata?.savedAs && (
+              {ocrMetadata?.captionId && (
                 <p className="text-sm text-gray-600 mt-1">
-                  💾 Saved as:{" "}
-                  <code className="bg-gray-100 px-1 rounded text-xs">
-                    {ocrMetadata.savedAs}
-                  </code>
-                  {ocrMetadata.path && (
-                    <>
-                      {" "}
-                      •{" "}
-                      <a
-                        href={ocrMetadata.path}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline"
-                      >
-                        View
-                      </a>
-                    </>
-                  )}
+                  ✅ Caption saved (ID: {ocrMetadata.captionId})
                 </p>
               )}
             </div>

@@ -1,17 +1,32 @@
 import { Elysia, t } from "elysia";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, unlink, rm } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { unzipSync } from "fflate";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { pages } from "../db/schema";
 import { envConfig } from "../env-config";
-import { OcrResultManager } from "../services/OcrResultManager";
+import { MangaOCRService } from "../services/MangaOCRService";
 import { TranslationService } from "../services/TranslationService";
 import { PageStore } from "../stores/page-store";
 import { CaptionStore } from "../stores/caption-store";
 import { SeriesStore } from "../stores/series-store";
 import { ChapterStore } from "../stores/chapter-store";
+
+/**
+ * Generate unique filename for uploaded page images
+ * Format: page_{timestamp}_{random}_{orderNum}.{ext}
+ *
+ * @param extension - File extension (e.g., "jpg", "png")
+ * @param orderNum - Optional page order number for readability
+ * @returns Unique filename
+ */
+function generateUniqueFilename(extension: string, orderNum?: number): string {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 8); // 6 random chars
+  const orderStr = orderNum !== undefined ? `_${orderNum}` : "";
+  return `page_${timestamp}_${random}${orderStr}.${extension}`;
+}
 
 /**
  * Helper function to reindex all pages in a chapter sequentially
@@ -120,62 +135,45 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         const base64Data = capturedImage.replace(/^data:image\/\w+;base64,/, "");
         const buffer = Buffer.from(base64Data, "base64");
 
-        // Generate filename
-        const timestamp = Date.now();
-        const filename = `cropped_${timestamp}.png`;
+        console.log(`[OCR] Processing image for page ${pageId}...`);
 
-        // Save directly to OCR input directory
-        await mkdir(envConfig.OCR_INPUT_DIR, { recursive: true });
-
-        const ocrInputPath = join(envConfig.OCR_INPUT_DIR, filename);
-        await writeFile(ocrInputPath, buffer);
-
-        console.log(`[OCR] Image queued for processing: ${filename}`);
-
-        // Wait for OCR result (up to 5 seconds)
-        const resultManager = OcrResultManager.getInstance();
+        // Get MangaOCRService instance
+        const ocrService = MangaOCRService.getInstance();
         const translationService = TranslationService.getInstance();
 
-        try {
-          const rawText = await resultManager.waitForResult(filename, 5000);
+        // Extract text using the new OCR service (direct socket communication)
+        const rawText = await ocrService.extractText(buffer);
 
-          // Translate the extracted text
-          const translatedText = await translationService.translate(rawText);
+        console.log(`[OCR] Extracted text: ${rawText}`);
 
-          // Save caption immediately to database
-          const caption = await CaptionStore.create({
-            pageId,
-            x,
-            y,
-            width,
-            height,
-            capturedImage,
-            rawText,
-            translatedText: translatedText || null,
-          });
+        // Translate the extracted text
+        const translatedText = await translationService.translate(rawText);
 
-          return {
-            success: true,
-            captionId: caption.id,
-            rawText: caption.rawText,
-            translatedText: caption.translatedText,
-            filename,
-          };
-        } catch (timeoutError) {
-          // Timeout - return queued status
-          console.log(`[OCR] Timeout waiting for result: ${filename}`);
+        console.log(`[OCR] Translated text: ${translatedText}`);
 
-          return {
-            success: true,
-            message: "Image queued for OCR processing (result pending)",
-            filename,
-          };
-        }
+        // Save caption to database
+        const caption = await CaptionStore.create({
+          pageId,
+          x,
+          y,
+          width,
+          height,
+          capturedImage,
+          rawText,
+          translatedText: translatedText || null,
+        });
+
+        return {
+          success: true,
+          captionId: caption.id,
+          rawText: caption.rawText,
+          translatedText: caption.translatedText,
+        };
       } catch (error) {
         console.error("OCR Error:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to queue image for OCR",
+          error: error instanceof Error ? error.message : "Failed to process OCR",
         };
       }
     },
@@ -588,8 +586,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
           const imageFile = imageFiles[i];
           if (!imageFile) continue;
 
-          const ext = extname(imageFile.name);
-          const pageFilename = `page${i + 1}${ext}`;
+          const ext = extname(imageFile.name).replace(".", ""); // Remove leading dot
+          const pageFilename = generateUniqueFilename(ext, i + 1);
           const pagePath = join(chapterDir, pageFilename);
 
           // Write image file
@@ -722,6 +720,17 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         };
       }
 
+      // Delete entire series folder (includes all chapters, pages, and cover art)
+      try {
+        const seriesDir = join(envConfig.MANGA_DIR, series.id.toString());
+        await rm(seriesDir, { recursive: true, force: true });
+        console.log(`🗑️  Deleted series folder: ${seriesDir}`);
+      } catch (dirError) {
+        // Folder might not exist, log but don't fail the deletion
+        console.warn(`⚠️  Could not delete series folder for series ${series.id}`, dirError);
+      }
+
+      // Delete database record (cascades to chapters, pages, and captions)
       const deleted = await SeriesStore.delete(series.id);
 
       if (!deleted) {
@@ -753,6 +762,22 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         };
       }
 
+      // Delete chapter folder and all its contents
+      try {
+        const chapterDir = join(
+          envConfig.MANGA_DIR,
+          chapter.seriesId.toString(),
+          "chapters",
+          chapter.id.toString()
+        );
+        await rm(chapterDir, { recursive: true, force: true });
+        console.log(`🗑️  Deleted chapter folder: ${chapterDir}`);
+      } catch (dirError) {
+        // Folder might not exist, log but don't fail the deletion
+        console.warn(`⚠️  Could not delete chapter folder for chapter ${chapter.id}`, dirError);
+      }
+
+      // Delete database record (cascades to pages and captions)
       const deleted = await ChapterStore.delete(chapter.id);
 
       if (!deleted) {
@@ -785,6 +810,20 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
       }
 
       const chapterId = page.chapterId;
+
+      // Delete physical file from disk
+      try {
+        // Convert /uploads/seriesId/chapters/chapterId/filename to full path
+        const relativePath = page.originalImage.replace("/uploads/", "");
+        const filePath = join(envConfig.MANGA_DIR, relativePath);
+        await unlink(filePath);
+        console.log(`🗑️  Deleted file: ${filePath}`);
+      } catch (fileError) {
+        // File might not exist, log but don't fail the deletion
+        console.warn(`⚠️  Could not delete file: ${page.originalImage}`, fileError);
+      }
+
+      // Delete database record
       const deleted = await PageStore.delete(page.id);
 
       if (!deleted) {
@@ -836,10 +875,9 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         const existingPages = await PageStore.findByChapterId(chapterId);
         const nextOrderNum = existingPages.length + 1;
 
-        // Get file extension
+        // Generate unique filename
         const ext = image.name.split(".").pop() || "jpg";
-        const timestamp = Date.now();
-        const filename = `page_${timestamp}.${ext}`;
+        const filename = generateUniqueFilename(ext, nextOrderNum);
         const filePath = join(chapterDir, filename);
 
         // Write file

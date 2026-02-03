@@ -118,7 +118,7 @@ export function ChapterNavigation({
       const result = await api.api.series({ slug: seriesSlug }).chapters.get();
       if (result.data?.success && result.data.chapters && result.data.chapters.length > 0) {
         const firstChapter = result.data.chapters[0];
-        navigate(`/r/${seriesSlug}/${firstChapter.slug}/1`);
+        navigate(`/r/${seriesSlug}/${firstChapter?.slug}/1`);
         setIsSeriesOpen(false);
         setSeriesFilter("");
       }

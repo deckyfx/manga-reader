@@ -1,31 +1,49 @@
-version: '3.8'
+version: "3.8"
 
 name: comic-reader
 
 services:
-  app:
+  # Main Bun application
+  # app:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: comic-reader-app
+  #   environment:
+  #     # Container mode paths
+  #     - DB_DIR=/app/db
+  #     - MANGA_DIR=/app/manga
+  #     - MANGA_OCR_SOCKET=/app/sock/manga-ocr.sock
+  #     # API Keys
+  #     - DEEPL_API_KEY=${DEEPL_API_KEY}
+  #   volumes:
+  #     # Manga uploads directory
+  #     - ${DATA_DIR:-./data}/manga:/app/manga
+  #     # Database directory
+  #     - ${DATA_DIR:-./data}/db:/app/db
+  #     # Shared sockets directory (for IPC with manga-ocr)
+  #     - ${DATA_DIR:-./data}/sock:/app/sock
+  #   ports:
+  #     - "${SERVER_PORT:-3000}:3000"
+  #   networks:
+  #     - comic-reader-network
+  #   depends_on:
+  #     - manga-ocr
+
+  # Manga OCR service (Python FastAPI server)
+  manga-ocr:
     build:
-      context: .
+      context: ./manga-ocr
       dockerfile: Dockerfile
-    container_name: comic-reader-app
-    environment:
-      # Container mode paths
-      - OCR_INPUT_DIR=/app/ocrinput
-      - OCR_OUTPUT_FILE=/app/ocroutput/results.txt
-      - DB_DIR=/app/db
-      - MANGA_DIR=/app/manga
+    container_name: manga-ocr
     volumes:
-      # Persist Hugging Face hub cache (manga-ocr model ~400MB)
+      # Persist Hugging Face model cache (~400MB)
       - ${DATA_DIR:-./data}/models/huggingface/hub:/root/.cache/huggingface/hub
-      # Manga uploads directory
-      - ${DATA_DIR:-./data}/manga:/app/manga
-      # OCR input/output directories
-      - ${DATA_DIR:-./data}/ocrinput:/app/ocrinput
-      - ${DATA_DIR:-./data}/ocroutput:/app/ocroutput
-      # Database directory
-      - ${DATA_DIR:-./data}/db:/app/db
+      # Shared sockets directory (for IPC with main app)
+      - ${DATA_DIR:-./data}/sock:/app/sock
     networks:
       - comic-reader-network
+    restart: unless-stopped
 
 networks:
   comic-reader-network:

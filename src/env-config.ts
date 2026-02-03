@@ -85,21 +85,12 @@ class EnvConfig {
   }
 
   /**
-   * OCR output file path
-   * Container: /app/ocroutput/results.txt (via env)
-   * Standalone: ./data/ocroutput/results.txt
+   * Manga OCR Unix socket path
+   * Container: /app/sock/manga-ocr.sock (via env)
+   * Standalone: ./data/sock/manga-ocr.sock
    */
-  get OCR_OUTPUT_FILE(): string {
-    return Bun.env.OCR_OUTPUT_FILE || join(this.DATA_DIR, "ocroutput/results.txt");
-  }
-
-  /**
-   * OCR input directory path
-   * Container: /app/ocrinput (via env)
-   * Standalone: ./data/ocrinput
-   */
-  get OCR_INPUT_DIR(): string {
-    return Bun.env.OCR_INPUT_DIR || join(this.DATA_DIR, "ocrinput");
+  get MANGA_OCR_SOCKET(): string {
+    return Bun.env.MANGA_OCR_SOCKET || join(this.DATA_DIR, "sock/manga-ocr.sock");
   }
 
   /**
