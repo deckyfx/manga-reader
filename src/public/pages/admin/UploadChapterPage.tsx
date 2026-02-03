@@ -1,30 +1,30 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSnackbar } from "../../hooks/useSnackbar";
-import { api } from "../../../lib/api";
+import { api } from "../../lib/api";
 
 /**
  * Admin page - upload compressed chapter containing pages
  */
 export function UploadChapterPage() {
-  const { seriesId } = useParams();
+  const { seriesSlug } = useParams();
   const navigate = useNavigate();
   const { showSnackbar, SnackbarComponent } = useSnackbar();
   const [series, setSeries] = useState<any>(null);
   const [chapterTitle, setChapterTitle] = useState("");
-  const [chapterSlug, setChapterSlug] = useState("");
+  const [chapterNumber, setChapterNumber] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingSeries, setLoadingSeries] = useState(true);
 
   useEffect(() => {
-    if (seriesId) {
+    if (seriesSlug) {
       loadSeries();
     }
-  }, [seriesId]);
+  }, [seriesSlug]);
 
   const loadSeries = async () => {
     try {
-      const result = await api.api.series({ id: seriesId! }).get();
+      const result = await api.api.series({ slug: seriesSlug! }).get();
 
       if (result.data?.success && result.data.series) {
         setSeries(result.data.series);
@@ -47,7 +47,7 @@ export function UploadChapterPage() {
     const fileInput = document.getElementById("file") as HTMLInputElement;
     const selectedFile = fileInput.files?.[0];
 
-    if (!chapterTitle.trim() || !chapterSlug.trim() || !selectedFile) {
+    if (!chapterTitle.trim() || !chapterNumber.trim() || !selectedFile) {
       showSnackbar("Please fill all required fields", "warning");
       return;
     }
@@ -67,8 +67,8 @@ export function UploadChapterPage() {
       return;
     }
 
-    // Validate slug format (numbers and dots only)
-    if (!/^[\d.]+$/.test(chapterSlug)) {
+    // Validate chapter number format (numbers and dots only)
+    if (!/^[\d.]+$/.test(chapterNumber)) {
       showSnackbar(
         "Chapter number must contain only numbers and dots (e.g., 1, 2, 1.5)",
         "warning",
@@ -80,9 +80,9 @@ export function UploadChapterPage() {
 
     try {
       const result = await api.api.chapters.post({
-        seriesId: seriesId!, // Send as string (FormData)
+        seriesId: series!.id.toString(), // Send actual series ID (not slug)
         title: chapterTitle.trim(),
-        slug: chapterSlug.trim(),
+        chapterNumber: chapterNumber.trim(),
         zipFile: selectedFile,
       });
 
@@ -94,7 +94,7 @@ export function UploadChapterPage() {
 
         // Navigate after a short delay
         setTimeout(() => {
-          navigate(`/r/${seriesId}`);
+          navigate(`/r/${series!.slug}`);
         }, 1500);
       } else {
         showSnackbar(result.data?.error || "Failed to upload chapter", "error");
@@ -120,7 +120,7 @@ export function UploadChapterPage() {
       <div className="container mx-auto px-4 py-8">
         <header className="mb-8">
           <Link
-            to={`/r/${seriesId}`}
+            to={`/r/${series?.slug}`}
             className="text-blue-600 hover:underline mb-4 inline-block"
           >
             ← Back to Series
@@ -135,19 +135,19 @@ export function UploadChapterPage() {
 
         <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Chapter Number (Slug) */}
+            {/* Chapter Number */}
             <div>
               <label
-                htmlFor="chapterSlug"
+                htmlFor="chapterNumber"
                 className="block text-sm font-semibold text-gray-700 mb-2"
               >
                 Chapter Number *
               </label>
               <input
                 type="text"
-                id="chapterSlug"
-                value={chapterSlug}
-                onChange={(e) => setChapterSlug(e.target.value)}
+                id="chapterNumber"
+                value={chapterNumber}
+                onChange={(e) => setChapterNumber(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="e.g., 1, 2, 1.5, 1.1"
                 required
@@ -211,7 +211,7 @@ export function UploadChapterPage() {
               </button>
 
               <Link
-                to={`/r/${seriesId}`}
+                to={`/r/${series?.slug}`}
                 className="flex-1 py-3 rounded-lg font-semibold text-center border-2 border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 Cancel

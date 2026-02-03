@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSnackbar } from "../../hooks/useSnackbar";
-import { api } from "../../../lib/api";
+import { api } from "../../lib/api";
 
 /**
  * Admin page - edit chapter details (title and slug)
@@ -55,7 +55,7 @@ export function EditChapterPage() {
     if (!/^[\d.]+$/.test(chapterSlug)) {
       showSnackbar(
         "Chapter number must contain only numbers and dots (e.g., 1, 2, 1.5)",
-        "warning"
+        "warning",
       );
       return;
     }

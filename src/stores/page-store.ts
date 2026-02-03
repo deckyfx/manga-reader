@@ -2,6 +2,7 @@ import { db } from "../db";
 import { pages } from "../db/schema";
 import { eq } from "drizzle-orm";
 import type { Page, NewPage } from "../db/schema";
+import { generateSlug } from "../lib/slug-encoder";
 
 /**
  * PageStore - Repository for manga page database operations
@@ -15,6 +16,19 @@ export class PageStore {
       .select()
       .from(pages)
       .where(eq(pages.id, id))
+      .limit(1);
+
+    return result[0] ?? null;
+  }
+
+  /**
+   * Find page by slug
+   */
+  static async findBySlug(slug: string): Promise<Page | null> {
+    const result = await db
+      .select()
+      .from(pages)
+      .where(eq(pages.slug, slug))
       .limit(1);
 
     return result[0] ?? null;
@@ -44,12 +58,22 @@ export class PageStore {
    * Create a new page
    */
   static async create(data: NewPage): Promise<Page> {
+    // Insert without slug first to get auto-increment ID
     const result = await db.insert(pages).values(data).returning();
-    const page = result[0];
-    if (!page) {
+    const newPage = result[0];
+    if (!newPage) {
       throw new Error("Failed to create page");
     }
-    return page;
+
+    // Generate slug based on ID and update
+    const slug = generateSlug("p", newPage.id);
+    const updated = await db
+      .update(pages)
+      .set({ slug })
+      .where(eq(pages.id, newPage.id))
+      .returning();
+
+    return updated[0] || newPage;
   }
 
   /**

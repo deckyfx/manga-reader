@@ -8,16 +8,22 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: comic-reader-app
+    environment:
+      # Container mode paths
+      - OCR_INPUT_DIR=/app/ocrinput
+      - OCR_OUTPUT_FILE=/app/ocroutput/results.txt
+      - DB_DIR=/app/db
+      - MANGA_DIR=/app/manga
     volumes:
-      # Mount uploads directory to test OCR on actual images
-      - ./src/public/uploads:/app/images:ro
       # Persist Hugging Face hub cache (manga-ocr model ~400MB)
-      - ./data/models/huggingface/hub:/root/.cache/huggingface/hub
-      # Persist pip cache (torch ~900MB + other packages)
-      - ./data/pip-cache:/pip-cache
+      - ${DATA_DIR:-./data}/models/huggingface/hub:/root/.cache/huggingface/hub
+      # Manga uploads directory
+      - ${DATA_DIR:-./data}/manga:/app/manga
       # OCR input/output directories
-      - ./data/ocrinput:/app/ocrinput
-      - ./data/ocroutput:/app/ocroutput
+      - ${DATA_DIR:-./data}/ocrinput:/app/ocrinput
+      - ${DATA_DIR:-./data}/ocroutput:/app/ocroutput
+      # Database directory
+      - ${DATA_DIR:-./data}/db:/app/db
     networks:
       - comic-reader-network
 

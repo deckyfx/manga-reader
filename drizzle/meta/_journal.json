@@ -1,19 +1,12 @@
 {
-  "version": "7",
+  "version": "1",
   "dialect": "sqlite",
   "entries": [
     {
       "idx": 0,
       "version": "6",
-      "when": 1770024313692,
-      "tag": "0000_smart_the_phantom",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1770027345565,
-      "tag": "0001_round_sugar_man",
+      "when": 1770069958673,
+      "tag": "0000_greedy_terror",
       "breakpoints": true
     }
   ]

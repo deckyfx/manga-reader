@@ -1,0 +1,88 @@
+import { Link, useNavigate } from "react-router-dom";
+
+/**
+ * Series data interface
+ */
+interface SeriesData {
+  id: number;
+  slug: string;
+  title: string;
+  coverArt?: string;
+  tags?: string;
+}
+
+/**
+ * SeriesListItem props
+ */
+interface SeriesListItemProps {
+  series: SeriesData;
+}
+
+/**
+ * SeriesListItem - displays a single series card with cover art and details
+ */
+export function SeriesListItem({ series }: SeriesListItemProps) {
+  const navigate = useNavigate();
+
+  const handleTagClick = (e: React.MouseEvent, tag: string) => {
+    e.preventDefault(); // Prevent navigating to series detail
+    e.stopPropagation();
+    navigate(`/r?mustHaveTags=${encodeURIComponent(tag.trim())}`);
+  };
+
+  return (
+    <Link
+      to={`/r/${series.slug}`}
+      className="bg-white rounded-lg shadow-lg hover:shadow-xl transition-shadow overflow-hidden"
+    >
+      <div className="flex">
+        {/* Cover Art Thumbnail */}
+        <div className="flex-shrink-0 w-32 h-48 bg-gray-200">
+          {series.coverArt ? (
+            <img
+              src={series.coverArt}
+              alt={`${series.title} cover`}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-gray-400">
+              <svg
+                className="w-12 h-12"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                />
+              </svg>
+            </div>
+          )}
+        </div>
+
+        {/* Series Info */}
+        <div className="flex-1 p-6">
+          <h3 className="text-xl font-bold text-gray-800 mb-2">
+            {series.title}
+          </h3>
+          {series.tags && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {series.tags.split(',').map((tag: string, i: number) => (
+                <button
+                  key={i}
+                  onClick={(e) => handleTagClick(e, tag)}
+                  className="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded transition-colors cursor-pointer"
+                >
+                  {tag.trim()}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+}

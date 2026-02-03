@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { api } from "../../../lib/api";
+import { api } from "../../lib/api";
 import { useSnackbar } from "../../hooks/useSnackbar";
+import { ChapterListItem } from "../../components/ChapterListItem";
 
 /**
  * Series Detail page - displays series info and chapter list
  */
 export function SeriesDetailPage() {
-  const { seriesId } = useParams();
+  const { seriesSlug } = useParams();
   const navigate = useNavigate();
   const { showSnackbar, SnackbarComponent } = useSnackbar();
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
@@ -20,16 +21,16 @@ export function SeriesDetailPage() {
   const [chapterToDelete, setChapterToDelete] = useState<any>(null);
 
   useEffect(() => {
-    if (seriesId) {
+    if (seriesSlug) {
       loadSeriesData();
     }
-  }, [seriesId]);
+  }, [seriesSlug]);
 
   const loadSeriesData = async () => {
     try {
       const [seriesResult, chaptersResult] = await Promise.all([
-        api.api.series({ id: seriesId! }).get(),
-        api.api.series({ id: seriesId! }).chapters.get(),
+        api.api.series({ slug: seriesSlug! }).get(),
+        api.api.series({ slug: seriesSlug! }).chapters.get(),
       ]);
 
       if (seriesResult.data?.success && seriesResult.data.series) {
@@ -53,7 +54,7 @@ export function SeriesDetailPage() {
   const handleDeleteConfirm = async () => {
     setDeleting(true);
     try {
-      const result = await api.api.series({ id: seriesId! }).delete();
+      const result = await api.api.series({ slug: seriesSlug! }).delete();
 
       if (result.data?.success) {
         showSnackbar("Series deleted successfully!", "success");
@@ -88,7 +89,9 @@ export function SeriesDetailPage() {
 
     setDeletingChapter(true);
     try {
-      const result = await api.api.chapters({ id: chapterToDelete.id.toString() }).delete();
+      const result = await api.api
+        .chapters({ slug: chapterToDelete.slug })
+        .delete();
 
       if (result.data?.success) {
         showSnackbar("Chapter deleted successfully!", "success");
@@ -125,7 +128,10 @@ export function SeriesDetailPage() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
         <div className="container mx-auto px-4 py-8">
-          <Link to="/r" className="text-blue-600 hover:underline mb-4 inline-block">
+          <Link
+            to="/r"
+            className="text-blue-600 hover:underline mb-4 inline-block"
+          >
             ← Back to Series List
           </Link>
           <div className="bg-white rounded-lg shadow-lg p-8 text-center">
@@ -139,7 +145,10 @@ export function SeriesDetailPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
       <div className="container mx-auto px-4 py-8">
-        <Link to="/r" className="text-blue-600 hover:underline mb-4 inline-block">
+        <Link
+          to="/r"
+          className="text-blue-600 hover:underline mb-4 inline-block"
+        >
           ← Back to Series List
         </Link>
 
@@ -150,7 +159,7 @@ export function SeriesDetailPage() {
 
             <div className="flex gap-2">
               <Link
-                to={`/a/series/${seriesId}/edit`}
+                to={`/a/series/${series.slug}/edit`}
                 className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold transition-colors"
               >
                 ✏️ Edit
@@ -168,7 +177,7 @@ export function SeriesDetailPage() {
             {series.coverArt && (
               <div className="flex-shrink-0">
                 <img
-                  src={series.coverArt}
+                  src={`${series.coverArt}?t=${new Date().getTime()}`}
                   alt={`${series.title} cover`}
                   className="w-48 rounded-lg shadow-lg"
                 />
@@ -177,18 +186,21 @@ export function SeriesDetailPage() {
 
             <div className="flex-1">
               {series.synopsis && (
-                <p className="text-gray-700 mb-4 leading-relaxed">{series.synopsis}</p>
+                <p className="text-gray-700 mb-4 leading-relaxed">
+                  {series.synopsis}
+                </p>
               )}
 
               {series.tags && (
                 <div className="flex flex-wrap gap-2">
-                  {JSON.parse(series.tags).map((tag: string, i: number) => (
-                    <span
+                  {series.tags.split(',').map((tag: string, i: number) => (
+                    <button
                       key={i}
-                      className="text-sm bg-blue-100 text-blue-800 px-3 py-1 rounded-full"
+                      onClick={() => navigate(`/r?mustHaveTags=${encodeURIComponent(tag.trim())}`)}
+                      className="text-sm bg-blue-100 text-blue-800 px-3 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer"
                     >
-                      {tag}
-                    </span>
+                      {tag.trim()}
+                    </button>
                   ))}
                 </div>
               )}
@@ -201,7 +213,7 @@ export function SeriesDetailPage() {
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-bold text-gray-800">Chapters</h2>
             <Link
-              to={`/a/series/${seriesId}/chapter`}
+              to={`/a/series/${series.slug}/chapter`}
               className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold transition-colors"
             >
               📤 Upload Chapter
@@ -209,47 +221,19 @@ export function SeriesDetailPage() {
           </div>
           {chapters.length === 0 ? (
             <div className="bg-white rounded-lg shadow-lg p-8 text-center">
-              <p className="text-gray-600 text-lg">No chapters available yet.</p>
+              <p className="text-gray-600 text-lg">
+                No chapters available yet.
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4">
               {chapters.map((chapter) => (
-                <div
-                  key={chapter.id}
-                  className="bg-white rounded-lg shadow-lg p-6 flex items-center justify-between gap-4"
-                >
-                  <Link
-                    to={`/r/${seriesId}/${chapter.id}/1`}
-                    className="flex items-baseline gap-3 flex-1 hover:opacity-70 transition-opacity"
-                  >
-                    <span className="text-sm font-semibold text-blue-600 bg-blue-100 px-3 py-1 rounded">
-                      Ch. {chapter.slug}
-                    </span>
-                    <h3 className="text-xl font-bold text-gray-800">
-                      {chapter.title}
-                    </h3>
-                  </Link>
-                  <div className="flex gap-2">
-                    <Link
-                      to={`/r/${seriesId}/${chapter.id}`}
-                      className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold transition-colors"
-                    >
-                      Gallery
-                    </Link>
-                    <Link
-                      to={`/a/chapters/${chapter.id}/edit`}
-                      className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold transition-colors"
-                    >
-                      Edit
-                    </Link>
-                    <button
-                      onClick={() => handleDeleteChapterClick(chapter)}
-                      className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition-colors"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
+                <ChapterListItem
+                  key={chapter.slug}
+                  chapter={chapter}
+                  seriesSlug={series.slug}
+                  onDeleteClick={handleDeleteChapterClick}
+                />
               ))}
             </div>
           )}
@@ -266,7 +250,9 @@ export function SeriesDetailPage() {
             Delete Series?
           </h2>
           <p className="text-gray-600 mb-6">
-            Are you sure you want to delete "{series?.title}"? This will also delete all chapters and pages associated with this series. This action cannot be undone.
+            Are you sure you want to delete "{series?.title}"? This will also
+            delete all chapters and pages associated with this series. This
+            action cannot be undone.
           </p>
           <div className="flex gap-3 justify-end">
             <button
@@ -301,7 +287,9 @@ export function SeriesDetailPage() {
             Delete Chapter?
           </h2>
           <p className="text-gray-600 mb-6">
-            Are you sure you want to delete "Chapter {chapterToDelete?.slug}: {chapterToDelete?.title}"? This will also delete all pages in this chapter. This action cannot be undone.
+            Are you sure you want to delete "Chapter {chapterToDelete?.slug}:{" "}
+            {chapterToDelete?.title}"? This will also delete all pages in this
+            chapter. This action cannot be undone.
           </p>
           <div className="flex gap-3 justify-end">
             <button

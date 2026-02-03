@@ -6,7 +6,6 @@ import { FileWatcher } from "./services/FileWatcher";
 import { MigrationManager } from "./db/migration-manager";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import staticPlugin from "@elysiajs/static";
 
 async function initializeDatabase() {
   // Initialize migrations (auto-migrate in development, strict in production)

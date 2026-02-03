@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSnackbar } from "../../hooks/useSnackbar";
-import { api } from "../../../lib/api";
+import { api } from "../../lib/api";
 
 /**
  * Admin page - edit existing manga series
  */
 export function EditSeriesPage() {
-  const { seriesId } = useParams();
+  const { seriesSlug } = useParams();
   const navigate = useNavigate();
   const { showSnackbar, SnackbarComponent } = useSnackbar();
   const [title, setTitle] = useState("");
@@ -20,14 +20,14 @@ export function EditSeriesPage() {
   const [loadingSeries, setLoadingSeries] = useState(true);
 
   useEffect(() => {
-    if (seriesId) {
+    if (seriesSlug) {
       loadSeries();
     }
-  }, [seriesId]);
+  }, [seriesSlug]);
 
   const loadSeries = async () => {
     try {
-      const result = await api.api.series({ id: seriesId! }).get();
+      const result = await api.api.series({ slug: seriesSlug! }).get();
 
       if (result.data?.success && result.data.series) {
         const series = result.data.series;
@@ -35,10 +35,9 @@ export function EditSeriesPage() {
         setSynopsis(series.synopsis || "");
         setExistingCover(series.coverArt || null);
 
-        // Parse tags from JSON
+        // Tags are already comma-separated
         if (series.tags) {
-          const tagsArray = JSON.parse(series.tags);
-          setTags(tagsArray.join(", "));
+          setTags(series.tags);
         }
       } else {
         showSnackbar("Series not found", "error");
@@ -88,14 +87,14 @@ export function EditSeriesPage() {
         coverArt: coverArt || undefined,
       };
 
-      const result = await api.api.series({ id: seriesId! }).put(formData);
+      const result = await api.api.series({ slug: seriesSlug! }).put(formData);
 
       if (result.data?.success) {
         showSnackbar("Series updated successfully!", "success");
 
         // Navigate after a short delay to show the success message
         setTimeout(() => {
-          navigate(`/r/${seriesId}`);
+          navigate(`/r/${seriesSlug}`);
         }, 1000);
       } else {
         showSnackbar(result.data?.error || "Failed to update series", "error");
@@ -120,7 +119,10 @@ export function EditSeriesPage() {
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
       <div className="container mx-auto px-4 py-8">
         <header className="mb-8">
-          <Link to={`/r/${seriesId}`} className="text-blue-600 hover:underline mb-4 inline-block">
+          <Link
+            to={`/r/${seriesSlug}`}
+            className="text-blue-600 hover:underline mb-4 inline-block"
+          >
             ← Back to Series
           </Link>
           <h1 className="text-4xl font-bold text-gray-800">Edit Series</h1>
@@ -153,17 +155,23 @@ export function EditSeriesPage() {
                         alt="Cover preview"
                         className="w-full rounded-lg shadow-md"
                       />
-                      <p className="text-xs text-center text-gray-500 mt-2">Click to change</p>
+                      <p className="text-xs text-center text-gray-500 mt-2">
+                        Click to change
+                      </p>
                     </div>
                   ) : existingCover ? (
                     <div className="border-2 border-gray-300 rounded-lg p-4 hover:border-blue-400 transition-colors">
-                      <p className="text-xs text-gray-600 mb-2">Current cover:</p>
+                      <p className="text-xs text-gray-600 mb-2">
+                        Current cover:
+                      </p>
                       <img
                         src={existingCover}
                         alt="Current cover"
                         className="w-full rounded-lg shadow-md"
                       />
-                      <p className="text-xs text-center text-gray-500 mt-2">Click to change</p>
+                      <p className="text-xs text-center text-gray-500 mt-2">
+                        Click to change
+                      </p>
                     </div>
                   ) : (
                     <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors">
@@ -250,7 +258,7 @@ export function EditSeriesPage() {
                   </button>
 
                   <Link
-                    to={`/r/${seriesId}`}
+                    to={`/r/${seriesSlug}`}
                     className="flex-1 py-3 rounded-lg font-semibold text-center border-2 border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
                   >
                     Cancel

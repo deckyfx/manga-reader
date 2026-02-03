@@ -2,6 +2,7 @@ import { db } from "../db";
 import { userCaptions } from "../db/schema";
 import { eq } from "drizzle-orm";
 import type { UserCaption, NewUserCaption } from "../db/schema";
+import { generateSlug } from "../lib/slug-encoder";
 
 /**
  * CaptionStore - Repository for user caption database operations
@@ -34,14 +35,23 @@ export class CaptionStore {
    * Create new caption
    */
   static async create(data: NewUserCaption): Promise<UserCaption> {
+    // Insert without slug first to get auto-increment ID
     const result = await db.insert(userCaptions).values(data).returning();
 
-    const caption = result[0];
-    if (!caption) {
+    const newCaption = result[0];
+    if (!newCaption) {
       throw new Error("Failed to create caption");
     }
 
-    return caption;
+    // Generate slug based on ID and update
+    const slug = generateSlug("u", newCaption.id);
+    const updated = await db
+      .update(userCaptions)
+      .set({ slug })
+      .where(eq(userCaptions.id, newCaption.id))
+      .returning();
+
+    return updated[0] || newCaption;
   }
 
   /**

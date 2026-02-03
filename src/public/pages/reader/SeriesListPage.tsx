@@ -1,21 +1,71 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { api } from "../../../lib/api";
+import { Link, useSearchParams } from "react-router-dom";
+import { api } from "../../lib/api";
+import { SeriesListItem } from "../../components/SeriesListItem";
+import { SeriesFilterPanel, type SeriesFilters } from "../../components/SeriesFilterPanel";
+
+interface Series {
+  id: number;
+  title: string;
+  slug: string | null;
+  tags: string | null;
+  coverArt: string | null;
+}
 
 /**
- * Series List page - displays all available manga series
+ * Series List page - displays all available manga series with server-side filtering
  */
 export function SeriesListPage() {
-  const [series, setSeries] = useState<any[]>([]);
+  const [searchParams] = useSearchParams();
+  const [series, setSeries] = useState<Series[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Initialize filters from URL params
+  const [filters, setFilters] = useState<SeriesFilters>(() => {
+    const mustHaveTagsParam = searchParams.get("mustHaveTags");
+    const mustNotHaveTagsParam = searchParams.get("mustNotHaveTags");
+    const searchNameParam = searchParams.get("searchName");
+    const hasChaptersParam = searchParams.get("hasChapters");
+
+    return {
+      searchName: searchNameParam || "",
+      hasChapters: hasChaptersParam === "true",
+      mustHaveTags: mustHaveTagsParam ? mustHaveTagsParam.split(",") : [],
+      mustNotHaveTags: mustNotHaveTagsParam ? mustNotHaveTagsParam.split(",") : [],
+    };
+  });
+
+  // Reload when any filter changes
   useEffect(() => {
     loadSeries();
-  }, []);
+  }, [filters]);
 
   const loadSeries = async () => {
+    setLoading(true);
     try {
-      const result = await api.api.series.get();
+      // Build query parameters
+      const queryParams: any = {};
+
+      if (filters.searchName) {
+        queryParams.searchName = filters.searchName;
+      }
+
+      if (filters.hasChapters) {
+        queryParams.hasChapters = true;
+      }
+
+      if (filters.mustHaveTags.length > 0) {
+        queryParams.mustHaveTags = filters.mustHaveTags.join(",");
+      }
+
+      if (filters.mustNotHaveTags.length > 0) {
+        queryParams.mustNotHaveTags = filters.mustNotHaveTags.join(",");
+      }
+
+      // Call API with query parameters (or no query if no filters)
+      const result = Object.keys(queryParams).length > 0
+        ? await api.api.series.get({ query: queryParams })
+        : await api.api.series.get();
 
       if (result.data?.success && result.data.series) {
         setSeries(result.data.series);
@@ -31,11 +81,20 @@ export function SeriesListPage() {
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
       <div className="container mx-auto px-4 py-8">
         <header className="mb-8">
-          <Link to="/" className="text-blue-600 hover:underline mb-4 inline-block">
+          <Link
+            to="/"
+            className="text-blue-600 hover:underline mb-4 inline-block"
+          >
             ← Back to Home
           </Link>
           <h1 className="text-4xl font-bold text-gray-800">Manga Series</h1>
         </header>
+
+        {/* Filter Panel */}
+        <SeriesFilterPanel
+          onFilterChange={setFilters}
+          initialFilters={filters}
+        />
 
         {loading ? (
           <div className="text-center">
@@ -54,27 +113,7 @@ export function SeriesListPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {series.map((s) => (
-              <Link
-                key={s.id}
-                to={`/r/${s.id}`}
-                className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow"
-              >
-                <h3 className="text-xl font-bold text-gray-800 mb-2">
-                  {s.title}
-                </h3>
-                {s.tags && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {JSON.parse(s.tags).map((tag: string, i: number) => (
-                      <span
-                        key={i}
-                        className="text-xs bg-gray-200 px-2 py-1 rounded"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </Link>
+              <SeriesListItem key={s.id} series={s} />
             ))}
           </div>
         )}

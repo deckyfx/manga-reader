@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import html2canvas from "html2canvas";
 import { CaptionRectangle } from "./CaptionRectangle";
-import { api } from "../../lib/api";
+import { api } from "../lib/api";
 
 interface Rectangle {
   id: string;
@@ -63,20 +63,24 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
 
       if (result.data?.success && result.data.captions) {
         // Convert database captions to Rectangle format
-        const loadedRectangles: Rectangle[] = result.data.captions.map((caption) => ({
-          id: `caption-${caption.id}`,
-          captionId: caption.id, // Store database ID
-          x: caption.x,
-          y: caption.y,
-          width: caption.width,
-          height: caption.height,
-          capturedImage: caption.capturedImage,
-          rawText: caption.rawText,
-          translatedText: caption.translatedText || undefined,
-        }));
+        const loadedRectangles: Rectangle[] = result.data.captions.map(
+          (caption) => ({
+            id: `caption-${caption.id}`,
+            captionId: caption.id, // Store database ID
+            x: caption.x,
+            y: caption.y,
+            width: caption.width,
+            height: caption.height,
+            capturedImage: caption.capturedImage,
+            rawText: caption.rawText,
+            translatedText: caption.translatedText || undefined,
+          }),
+        );
 
         setRectangles(loadedRectangles);
-        console.log(`[MangaPage] Loaded ${loadedRectangles.length} captions for page ${page.id}`);
+        console.log(
+          `[MangaPage] Loaded ${loadedRectangles.length} captions for page ${page.id}`,
+        );
       }
     } catch (error) {
       console.error("[MangaPage] Failed to load captions:", error);
@@ -192,7 +196,7 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
     x: number,
     y: number,
     width: number,
-    height: number
+    height: number,
   ): Promise<string | null> => {
     if (!imageRef.current) return null;
 
@@ -237,7 +241,7 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
         0,
         0,
         naturalRect.width,
-        naturalRect.height
+        naturalRect.height,
       );
 
       return croppedCanvas.toDataURL("image/png");
@@ -356,7 +360,8 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
       {!editMode && rectangles.length > 0 && (
         <div className="bg-white rounded-lg shadow-lg p-4">
           <p className="text-sm text-gray-600">
-            📝 {rectangles.length} caption region{rectangles.length > 1 ? "s" : ""} saved
+            📝 {rectangles.length} caption region
+            {rectangles.length > 1 ? "s" : ""} saved
           </p>
           <p className="text-xs text-gray-500 mt-1">
             Click on a region to view/edit the caption

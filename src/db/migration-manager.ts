@@ -3,6 +3,8 @@ import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { Database } from "bun:sqlite";
 import { sql } from "drizzle-orm";
 import { readdir } from "node:fs/promises";
+import { join } from "node:path";
+import { envConfig } from "../env-config";
 
 /**
  * Migration manager configuration
@@ -32,7 +34,9 @@ export interface MigrationConfig {
  * Uses Drizzle's built-in migration system under the hood.
  */
 export class MigrationManager {
-  private static dbPath = "data/comic-reader.db";
+  private static get dbPath(): string {
+    return join(envConfig.DB_DIR, "comic-reader.db");
+  }
   private static migrationsDir = "drizzle";
 
   /**

@@ -1,7 +1,7 @@
 import React, { useState, useRef } from "react";
 import html2canvas from "html2canvas";
 import { DraggableResizable } from "./DraggableResizable";
-import { api } from "../../lib/api";
+import { api } from "../lib/api";
 
 /**
  * OCRSelector Component

@@ -1,33 +1,37 @@
 import { useState, useEffect, useRef } from "react";
-import { Link, useParams } from "react-router-dom";
-import { api } from "../../../lib/api";
+import { Link, useParams, useNavigate } from "react-router-dom";
+import { api } from "../../lib/api";
 import { useSnackbar } from "../../hooks/useSnackbar";
+import { ChapterGalleryItem } from "../../components/ChapterGalleryItem";
 
 interface Page {
   id: number;
   chapterId: number;
   originalImage: string;
   orderNum: number;
+  slug: string | null;
 }
 
 interface Chapter {
   id: number;
   seriesId: number;
   title: string;
-  slug: string;
+  slug: string | null;
+  chapterNumber: string;
 }
 
 interface Series {
   id: number;
   title: string;
-  slug: string;
+  slug: string | null;
 }
 
 /**
  * Chapter Gallery Page - displays all pages in a grid layout with management features
  */
 export function ChapterGalleryPage() {
-  const { seriesId, chapterId } = useParams();
+  const { seriesSlug, chapterSlug } = useParams();
+  const navigate = useNavigate();
   const { showSnackbar, SnackbarComponent } = useSnackbar();
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const [series, setSeries] = useState<Series | null>(null);
@@ -37,31 +41,68 @@ export function ChapterGalleryPage() {
   const [draggedPage, setDraggedPage] = useState<Page | null>(null);
   const [pageToDelete, setPageToDelete] = useState<Page | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
-    if (seriesId && chapterId) {
+    if (seriesSlug && chapterSlug) {
       loadChapterData();
     }
-  }, [seriesId, chapterId]);
+  }, [seriesSlug, chapterSlug]);
 
   const loadChapterData = async () => {
+    setLoading(true);
     try {
-      // Load series info
-      const seriesResult = await api.api.series({ id: seriesId! }).get();
-      if (seriesResult.data?.success && seriesResult.data.series) {
-        setSeries(seriesResult.data.series);
+      // Load chapter and series in parallel
+      const [chapterResult, seriesResult] = await Promise.all([
+        api.api.chapters({ slug: chapterSlug! }).get(),
+        api.api.series({ slug: seriesSlug! }).get(),
+      ]);
+
+      // Validate chapter exists
+      if (!chapterResult.data?.success || !chapterResult.data.chapter) {
+        setLoading(false);
+        return;
       }
 
-      // Load chapter info
-      const chapterResult = await api.api.chapters({ id: chapterId! }).get();
-      if (chapterResult.data?.success && chapterResult.data.chapter) {
-        setChapter(chapterResult.data.chapter);
+      // Validate series exists
+      if (!seriesResult.data?.success || !seriesResult.data.series) {
+        setLoading(false);
+        return;
       }
 
-      // Load pages
-      const pagesResult = await api.api.chapters({ id: chapterId! }).pages.get();
+      const chapter = chapterResult.data.chapter;
+      const series = seriesResult.data.series;
+
+      // Validate relationship: chapter must belong to series
+      if (chapter.seriesId !== series.id) {
+        console.warn(
+          `Chapter ${chapterSlug} does not belong to series ${seriesSlug}. Redirecting to correct series...`
+        );
+
+        // Load the correct series for this chapter
+        const correctSeriesResult = await api.api
+          .series({ slug: `s${String(chapter.seriesId).padStart(5, "0")}` })
+          .get();
+
+        if (correctSeriesResult.data?.success && correctSeriesResult.data.series) {
+          const correctSeries = correctSeriesResult.data.series;
+          // Redirect to correct URL
+          navigate(`/r/${correctSeries.slug}/${chapterSlug}`, {
+            replace: true,
+          });
+        }
+        return;
+      }
+
+      // Fetch all pages for the chapter
+      const pagesResult = await api.api
+        .chapters({ slug: chapterSlug! })
+        .pages.get();
+
       if (pagesResult.data?.success && pagesResult.data.pages) {
         setPages(pagesResult.data.pages);
+        setSeries(series);
+        setChapter(chapter);
       }
     } catch (error) {
       console.error("Failed to load chapter data:", error);
@@ -79,11 +120,11 @@ export function ChapterGalleryPage() {
   };
 
   const handleDeleteConfirm = async () => {
-    if (!pageToDelete) return;
+    if (!pageToDelete || !pageToDelete.slug) return;
 
     setDeleting(true);
     try {
-      const result = await api.api.pages({ id: pageToDelete.id.toString() }).delete();
+      const result = await api.api.pages({ slug: pageToDelete.slug }).delete();
 
       if (result.data?.success) {
         showSnackbar("Page deleted successfully!", "success");
@@ -106,24 +147,40 @@ export function ChapterGalleryPage() {
     setPageToDelete(null);
   };
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleAddPageClick = () => {
+    const fileInput = document.getElementById(
+      "page-upload",
+    ) as HTMLInputElement;
+    fileInput.click();
+  };
+
+  const handleFileSelected = async () => {
+    const fileInput = document.getElementById(
+      "page-upload",
+    ) as HTMLInputElement;
+    const selectedFile = fileInput.files?.[0];
+
+    if (!selectedFile) return;
+
+    // Validate file type
+    if (!selectedFile.type.startsWith("image/")) {
+      showSnackbar("Please upload an image file", "warning");
+      fileInput.value = "";
+      return;
+    }
+
+    setUploading(true);
 
     try {
-      // Always add to the end
-      const position = pages.length;
-
-      // Upload page
+      // Upload page (will be added at the end automatically)
       const result = await api.api["upload-page"].post({
-        chapterId: parseInt(chapterId!),
-        position: position,
-        image: file,
+        chapterId: chapter!.id.toString(),
+        image: selectedFile,
       });
 
       if (result.data?.success) {
         showSnackbar("Page uploaded successfully!", "success");
-        e.target.value = "";
+        fileInput.value = "";
         loadChapterData();
       } else {
         showSnackbar(result.data?.error || "Failed to upload page", "error");
@@ -131,6 +188,8 @@ export function ChapterGalleryPage() {
     } catch (error) {
       console.error("Failed to upload page:", error);
       showSnackbar("Failed to upload page", "error");
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -163,10 +222,12 @@ export function ChapterGalleryPage() {
     }));
 
     // Optimistically update UI
-    setPages(updates.map((u) => {
-      const page = pages.find((p) => p.id === u.id)!;
-      return { ...page, orderNum: u.orderNum };
-    }));
+    setPages(
+      updates.map((u) => {
+        const page = pages.find((p) => p.id === u.id)!;
+        return { ...page, orderNum: u.orderNum };
+      }),
+    );
 
     try {
       // Send batch update to server
@@ -200,7 +261,7 @@ export function ChapterGalleryPage() {
       <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
         <div className="container mx-auto px-4 py-8">
           <Link
-            to={`/r/${seriesId}`}
+            to={`/r/${series?.slug}`}
             className="text-blue-600 hover:underline mb-4 inline-block"
           >
             ← Back to Series
@@ -219,38 +280,43 @@ export function ChapterGalleryPage() {
         {/* Header */}
         <header className="mb-8">
           <Link
-            to={`/r/${seriesId}`}
+            to={`/r/${series?.slug}`}
             className="text-blue-600 hover:underline mb-4 inline-block"
           >
             ← Back to {series.title}
           </Link>
-          <h1 className="text-4xl font-bold text-gray-800">
-            Chapter {chapter.slug}: {chapter.title}
-          </h1>
-          <p className="text-lg text-gray-600 mt-2">
-            {pages.length} page{pages.length !== 1 ? "s" : ""}
-          </p>
-        </header>
-
-        {/* Upload Section */}
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">Upload Page</h2>
-          <div>
-            <label htmlFor="page-upload" className="block text-sm font-semibold text-gray-700 mb-2">
-              Select Image (will be added at the end)
-            </label>
-            <input
-              type="file"
-              id="page-upload"
-              accept="image/*"
-              onChange={handleUpload}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            />
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl font-bold text-gray-800">
+                Chapter {chapter.chapterNumber}: {chapter.title}
+              </h1>
+              <p className="text-lg text-gray-600 mt-2">
+                {pages.length} page{pages.length !== 1 ? "s" : ""} • Drag and
+                drop to reorder
+              </p>
+            </div>
+            <div>
+              <input
+                type="file"
+                id="page-upload"
+                accept="image/*"
+                onChange={handleFileSelected}
+                className="hidden"
+              />
+              <button
+                onClick={handleAddPageClick}
+                disabled={uploading}
+                className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+                  uploading
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-blue-500 hover:bg-blue-600 text-white"
+                }`}
+              >
+                {uploading ? "Uploading..." : "+ Add Page"}
+              </button>
+            </div>
           </div>
-          <p className="text-xs text-gray-500 mt-2">
-            Drag and drop pages below to reorder them
-          </p>
-        </div>
+        </header>
 
         {/* Pages Grid */}
         {pages.length === 0 ? (
@@ -260,36 +326,17 @@ export function ChapterGalleryPage() {
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {pages.map((page) => (
-              <div
+              <ChapterGalleryItem
                 key={page.id}
-                draggable
-                onDragStart={(e) => handleDragStart(page, e)}
+                page={page}
+                seriesSlug={series.slug!}
+                chapterSlug={chapter.slug!}
+                isDragging={draggedPage?.id === page.id}
+                onDragStart={handleDragStart}
                 onDragOver={handleDragOver}
-                onDrop={(e) => handleDrop(page, e)}
-                className={`bg-white rounded-lg shadow-lg overflow-hidden hover:shadow-2xl transition-shadow cursor-move relative ${
-                  draggedPage?.id === page.id ? "opacity-50" : ""
-                }`}
-              >
-                <Link to={`/r/${seriesId}/${chapterId}/${page.orderNum}`} className="block">
-                  <img
-                    src={page.originalImage}
-                    alt={`Page ${page.orderNum}`}
-                    className="w-full h-auto pointer-events-none"
-                  />
-                  <div className="p-3 text-center">
-                    <p className="text-sm font-semibold text-gray-700">
-                      Page {page.orderNum}
-                    </p>
-                  </div>
-                </Link>
-                <button
-                  onClick={(e) => handleDeleteClick(page, e)}
-                  className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold shadow-lg transition-colors z-10"
-                  title="Delete page"
-                >
-                  ×
-                </button>
-              </div>
+                onDrop={handleDrop}
+                onDeleteClick={handleDeleteClick}
+              />
             ))}
           </div>
         )}
@@ -305,7 +352,8 @@ export function ChapterGalleryPage() {
             Delete Page?
           </h2>
           <p className="text-gray-600 mb-6">
-            Are you sure you want to delete Page {pageToDelete?.orderNum}? This action cannot be undone.
+            Are you sure you want to delete Page {pageToDelete?.orderNum}? This
+            action cannot be undone.
           </p>
           <div className="flex gap-3 justify-end">
             <button

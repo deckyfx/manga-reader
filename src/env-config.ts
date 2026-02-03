@@ -57,23 +57,49 @@ class EnvConfig {
   }
 
   /**
+   * Base data directory path
+   */
+  get DATA_DIR(): string {
+    const dataDir = Bun.env.DATA_DIR;
+    return dataDir
+      ? join(process.cwd(), dataDir)
+      : join(process.cwd(), "data");
+  }
+
+  /**
+   * Database directory path
+   * Container: /app/db (via env)
+   * Standalone: ./data/db
+   */
+  get DB_DIR(): string {
+    return Bun.env.DB_DIR || join(this.DATA_DIR, "db");
+  }
+
+  /**
+   * Manga uploads directory path
+   * Container: /app/manga (via env)
+   * Standalone: ./data/manga
+   */
+  get MANGA_DIR(): string {
+    return Bun.env.MANGA_DIR || join(this.DATA_DIR, "manga");
+  }
+
+  /**
    * OCR output file path
+   * Container: /app/ocroutput/results.txt (via env)
+   * Standalone: ./data/ocroutput/results.txt
    */
   get OCR_OUTPUT_FILE(): string {
-    const customPath = Bun.env.OCR_OUTPUT_FILE;
-    return customPath
-      ? join(process.cwd(), customPath)
-      : join(process.cwd(), "data/ocroutput/results.txt");
+    return Bun.env.OCR_OUTPUT_FILE || join(this.DATA_DIR, "ocroutput/results.txt");
   }
 
   /**
    * OCR input directory path
+   * Container: /app/ocrinput (via env)
+   * Standalone: ./data/ocrinput
    */
   get OCR_INPUT_DIR(): string {
-    const customPath = Bun.env.OCR_INPUT_DIR;
-    return customPath
-      ? join(process.cwd(), customPath)
-      : join(process.cwd(), "data/ocrinput");
+    return Bun.env.OCR_INPUT_DIR || join(this.DATA_DIR, "ocrinput");
   }
 
   /**

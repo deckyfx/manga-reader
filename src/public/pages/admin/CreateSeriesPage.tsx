@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useSnackbar } from "../../hooks/useSnackbar";
-import { api } from "../../../lib/api";
+import { api } from "../../lib/api";
 
 /**
  * Admin page - create new manga series
@@ -75,10 +75,15 @@ export function CreateSeriesPage() {
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
       <div className="container mx-auto px-4 py-8">
         <header className="mb-8">
-          <Link to="/" className="text-blue-600 hover:underline mb-4 inline-block">
+          <Link
+            to="/"
+            className="text-blue-600 hover:underline mb-4 inline-block"
+          >
             ← Back to Home
           </Link>
-          <h1 className="text-4xl font-bold text-gray-800">Create New Series</h1>
+          <h1 className="text-4xl font-bold text-gray-800">
+            Create New Series
+          </h1>
         </header>
 
         <div className="max-w-6xl mx-auto bg-white rounded-lg shadow-lg p-8">
@@ -107,7 +112,9 @@ export function CreateSeriesPage() {
                         alt="Cover preview"
                         className="w-full rounded-lg shadow-md"
                       />
-                      <p className="text-xs text-center text-gray-500 mt-2">Click to change</p>
+                      <p className="text-xs text-center text-gray-500 mt-2">
+                        Click to change
+                      </p>
                     </div>
                   ) : (
                     <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors">

@@ -6,8 +6,8 @@ import { sql } from "drizzle-orm";
  */
 export const series = sqliteTable("series", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  slug: text("slug").unique(), // Auto-generated: s00001, s00002, etc.
   title: text("title").notNull(),
-  slug: text("slug").notNull().unique(),
   synopsis: text("synopsis"),
   coverArt: text("cover_art"),
   tags: text("tags"), // JSON string of tags array
@@ -21,11 +21,12 @@ export const series = sqliteTable("series", {
  */
 export const chapters = sqliteTable("chapters", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  slug: text("slug").unique(), // Auto-generated: c00001, c00002, etc.
   seriesId: integer("series_id")
     .notNull()
     .references(() => series.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
-  slug: text("slug").notNull(), // Chapter number (e.g., "1", "2", "1.5") - unique within series
+  chapterNumber: text("chapter_number").notNull(), // User-provided: "1", "2", "1.5"
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -36,6 +37,7 @@ export const chapters = sqliteTable("chapters", {
  */
 export const pages = sqliteTable("pages", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  slug: text("slug").unique(), // Auto-generated: p00001, p00002, etc.
   chapterId: integer("chapter_id")
     .notNull()
     .references(() => chapters.id, { onDelete: "cascade" }),
@@ -51,6 +53,7 @@ export const pages = sqliteTable("pages", {
  */
 export const userCaptions = sqliteTable("user_captions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  slug: text("slug").unique(), // Auto-generated: u00001, u00002, etc.
   pageId: integer("page_id")
     .notNull()
     .references(() => pages.id, { onDelete: "cascade" }),
