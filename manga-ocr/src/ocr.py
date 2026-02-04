@@ -7,6 +7,7 @@ Modernized version compatible with:
 - NumPy 1.26+
 """
 
+import os
 import re
 from pathlib import Path
 from typing import Union
@@ -20,6 +21,10 @@ from transformers import (
     VisionEncoderDecoderModel,
     ViTImageProcessor,
 )
+from transformers.utils import logging as transformers_logging
+
+# Set transformers logging to warning (show progress bars but reduce noise)
+transformers_logging.set_verbosity_warning()
 
 
 class MangaOcr:
@@ -44,10 +49,50 @@ class MangaOcr:
     ):
         logger.info(f"Loading OCR model from {pretrained_model_name_or_path}")
 
-        # Load model components
-        self.processor = ViTImageProcessor.from_pretrained(pretrained_model_name_or_path)
-        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path)
-        self.model = VisionEncoderDecoderModel.from_pretrained(pretrained_model_name_or_path)
+        # Check if model is already cached
+        # Docker mounts cache at: /root/.cache/huggingface/hub
+        # Local dev uses: ~/.cache/huggingface/hub
+        cache_path = Path.home() / ".cache" / "huggingface" / "hub"
+        model_slug = pretrained_model_name_or_path.replace("/", "--")
+        model_cached = cache_path.exists() and any(cache_path.glob(f"models--{model_slug}"))
+
+        # Get HF token
+        hf_token = os.environ.get("HF_TOKEN")
+
+        if not model_cached:
+            # Model needs to be downloaded
+            if not hf_token:
+                logger.warning(
+                    "HF_TOKEN not set. Downloads will show authentication warnings. "
+                    "Set HF_TOKEN in .env for cleaner logs. Get token from: https://huggingface.co/settings/tokens"
+                )
+            else:
+                logger.info("Using HF_TOKEN for authenticated download")
+
+            logger.info(f"📥 Downloading pretrained model {pretrained_model_name_or_path} ...")
+        else:
+            logger.info(f"Loading cached model {pretrained_model_name_or_path} into memory...")
+
+        # Load model components with token (if available)
+        # These calls are SYNCHRONOUS and will block until complete
+        self.processor = ViTImageProcessor.from_pretrained(
+            pretrained_model_name_or_path,
+            token=hf_token
+        )
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            pretrained_model_name_or_path,
+            token=hf_token
+        )
+        self.model = VisionEncoderDecoderModel.from_pretrained(
+            pretrained_model_name_or_path,
+            token=hf_token
+        )
+
+        # Log completion
+        if not model_cached:
+            logger.info(f"✅ Model {pretrained_model_name_or_path} downloaded and loaded!")
+        else:
+            logger.info(f"✅ Model {pretrained_model_name_or_path} loaded into memory!")
 
         # Device selection (GPU/CPU)
         if not force_cpu and torch.cuda.is_available():

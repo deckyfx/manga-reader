@@ -14,5 +14,5 @@ echo "   Port: ${SERVER_PORT:-3000}"
 echo ""
 
 # Start the compiled app binary
-# (migrations are handled automatically by the app at startup)
+# (migrations are auto-run by the app at startup)
 exec /app/app

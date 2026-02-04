@@ -55,11 +55,16 @@ async def startup_event():
     """Initialize OCR model on server startup"""
     global ocr_instance
     logger.info("🚀 Starting Manga OCR server...")
-    logger.info("📦 Loading OCR model (this may take a moment)...")
+    logger.info("📦 Loading OCR model into memory (please wait)...")
 
     try:
         ocr_instance = MangaOcr(force_cpu=True)
-        logger.success("✅ OCR model loaded successfully!")
+        logger.success("✅ Server ready! Model loaded and accepting requests.")
+        logger.info("")
+        logger.info("📡 Available endpoints:")
+        logger.info("   GET  /health      - Health check")
+        logger.info("   POST /scan        - Scan image (base64 JSON)")
+        logger.info("   POST /scan-upload - Scan image (file upload)")
     except Exception as e:
         logger.error(f"❌ Failed to load OCR model: {e}")
         raise
@@ -176,10 +181,10 @@ def start_server(socket_path: str = "/app/sock/manga-ocr.sock", log_level: str =
 
     # Remove existing socket file if it exists
     if os.path.exists(socket_path):
-        logger.warning(f"⚠️  Removing existing socket: {socket_path}")
         os.remove(socket_path)
 
-    logger.info(f"🌐 Starting server on Unix socket: {socket_path}")
+    logger.info(f"🌐 Binding to Unix socket: {socket_path}")
+    logger.info("⏳ Waiting for model to load before accepting requests...")
 
     try:
         # Start uvicorn with Unix domain socket

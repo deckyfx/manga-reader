@@ -1,7 +1,7 @@
 # ============================================
 # Stage 1: Builder
 # ============================================
-FROM oven/bun:1 AS builder
+FROM oven/bun:1.3.8 AS builder
 
 WORKDIR /app
 
@@ -30,6 +30,10 @@ COPY --from=builder /app/drizzle /app/drizzle
 
 # Copy migration script for database initialization
 COPY --from=builder /app/src/db/migrate.ts /app/migrate.ts
+
+# Copy healthcheck script
+COPY healthcheck.ts /usr/local/bin/healthcheck.ts
+RUN chmod +x /usr/local/bin/healthcheck.ts
 
 # Copy entrypoint script
 COPY docker-entrypoint.sh /usr/local/bin/

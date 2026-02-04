@@ -28,13 +28,24 @@ RUN pip install --user --no-cache-dir \
     torch torchvision \
     --index-url https://download.pytorch.org/whl/cpu
 
-# Copy our modernized manga-ocr package
+# Copy only dependency specification first (for caching)
 WORKDIR /build
 COPY pyproject.toml .
+
+# Create minimal dummy package structure for dependency installation
+RUN mkdir -p src && \
+    echo '"""Manga OCR Package"""' > src/__init__.py && \
+    echo 'from .ocr import MangaOcr' >> src/__init__.py && \
+    echo '__all__ = ["MangaOcr"]' >> src/__init__.py
+
+# Install dependencies (this layer will be cached if pyproject.toml doesn't change)
+RUN pip install --user --no-cache-dir .
+
+# Now copy the actual source code (changes here won't invalidate pip cache)
 COPY src/ src/
 
-# Install our modern manga-ocr package
-RUN pip install --user --no-cache-dir .
+# Reinstall package with real source (fast, deps already installed)
+RUN pip install --user --no-cache-dir --force-reinstall --no-deps .
 
 # OPTIMIZATION 1: Strip debug symbols from .so files (saves ~20% on compiled libs)
 RUN find /install -name "*.so" -exec strip --strip-debug {} \; 2>/dev/null || true
@@ -88,6 +99,10 @@ RUN mkdir -p /app/ocrinput /app/ocroutput /app/images /pip-cache
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+# Copy healthcheck script
+COPY healthcheck.py /usr/local/bin/healthcheck.py
+RUN chmod +x /usr/local/bin/healthcheck.py
 
 # Set entrypoint
 ENTRYPOINT ["/entrypoint.sh"]

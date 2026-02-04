@@ -32,6 +32,15 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Misc
 .claude/
 src/public/uploads/
 example/

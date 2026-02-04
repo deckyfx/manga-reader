@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@elysiajs/eden": "^1.4.6",
+    "@elysiajs/server-timing": "^1.4.0",
     "@elysiajs/static": "^1.4.7",
     "deepl-node": "^1.24.0",
     "drizzle-orm": "^0.45.1",
@@ -36,7 +37,8 @@
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.0",
     "tailwindcss": "^4.1.18",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "tsuki-logger": "^0.0.32"
   },
   "overrides": {
     "@sinclair/typebox": "0.34.0"

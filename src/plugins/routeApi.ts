@@ -64,32 +64,29 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
       ],
     };
   })
-  .get(
-    "/pages/:slug",
-    async ({ params }) => {
-      try {
-        const page = await PageStore.findBySlug(params.slug);
+  .get("/pages/:slug", async ({ params }) => {
+    try {
+      const page = await PageStore.findBySlug(params.slug);
 
-        if (!page) {
-          return {
-            success: false,
-            error: "Page not found",
-          };
-        }
-
-        return {
-          success: true,
-          page,
-        };
-      } catch (error) {
-        console.error("Get page error:", error);
+      if (!page) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to get page",
+          error: "Page not found",
         };
       }
+
+      return {
+        success: true,
+        page,
+      };
+    } catch (error) {
+      console.error("Get page error:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to get page",
+      };
     }
-  )
+  })
   .get(
     "/captions",
     async ({ query }) => {
@@ -107,7 +104,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.error("Get captions error:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to get captions",
+          error:
+            error instanceof Error ? error.message : "Failed to get captions",
           captions: [],
         };
       }
@@ -116,15 +114,19 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
       query: t.Object({
         pageId: t.Number(),
       }),
-    }
+    },
   )
-  .post("/echo", ({ body }) => {
-    return { echo: body };
-  }, {
-    body: t.Object({
-      message: t.String(),
-    }),
-  })
+  .post(
+    "/echo",
+    ({ body }) => {
+      return { echo: body };
+    },
+    {
+      body: t.Object({
+        message: t.String(),
+      }),
+    },
+  )
   .post(
     "/ocr",
     async ({ body }) => {
@@ -132,7 +134,10 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         const { pageId, imagePath, x, y, width, height, capturedImage } = body;
 
         // Decode base64 image
-        const base64Data = capturedImage.replace(/^data:image\/\w+;base64,/, "");
+        const base64Data = capturedImage.replace(
+          /^data:image\/\w+;base64,/,
+          "",
+        );
         const buffer = Buffer.from(base64Data, "base64");
 
         console.log(`[OCR] Processing image for page ${pageId}...`);
@@ -173,7 +178,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.error("OCR Error:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to process OCR",
+          error:
+            error instanceof Error ? error.message : "Failed to process OCR",
         };
       }
     },
@@ -187,7 +193,7 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         height: t.Number(),
         capturedImage: t.String(), // base64 data URL
       }),
-    }
+    },
   )
   .put(
     "/captions/:id",
@@ -213,7 +219,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.error("Update caption error:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to update caption",
+          error:
+            error instanceof Error ? error.message : "Failed to update caption",
         };
       }
     },
@@ -222,7 +229,7 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         rawText: t.String(),
         translatedText: t.Optional(t.String()),
       }),
-    }
+    },
   )
   .delete("/captions/:id", async ({ params: { id } }) => {
     try {
@@ -242,7 +249,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
       console.error("Delete caption error:", error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to delete caption",
+        error:
+          error instanceof Error ? error.message : "Failed to delete caption",
       };
     }
   })
@@ -296,7 +304,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.error("Get series error:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to get series",
+          error:
+            error instanceof Error ? error.message : "Failed to get series",
           series: [],
         };
       }
@@ -308,7 +317,7 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         mustHaveTags: t.Optional(t.String()), // Comma-separated
         mustNotHaveTags: t.Optional(t.String()), // Comma-separated
       }),
-    }
+    },
   )
   .get("/series/:slug", async ({ params }) => {
     try {
@@ -368,7 +377,9 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
 
           // Update series with cover art path (relative to public directory)
           const coverArtPath = `/uploads/${newSeries.id}/covers/${filename}`;
-          const updated = await SeriesStore.update(newSeries.id, { coverArt: coverArtPath });
+          const updated = await SeriesStore.update(newSeries.id, {
+            coverArt: coverArtPath,
+          });
 
           if (updated) {
             newSeries.coverArt = coverArtPath;
@@ -383,7 +394,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.error("Create series error:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to create series",
+          error:
+            error instanceof Error ? error.message : "Failed to create series",
         };
       }
     },
@@ -394,7 +406,7 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         tags: t.Optional(t.String()),
         coverArt: t.Optional(t.File({ type: "image" })),
       }),
-    }
+    },
   )
   .get("/series/:slug/chapters", async ({ params }) => {
     try {
@@ -418,7 +430,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
       console.error("Get chapters error:", error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to get chapters",
+        error:
+          error instanceof Error ? error.message : "Failed to get chapters",
         chapters: [],
       };
     }
@@ -508,7 +521,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.error("Update chapter error:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to update chapter",
+          error:
+            error instanceof Error ? error.message : "Failed to update chapter",
         };
       }
     },
@@ -517,7 +531,7 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         title: t.String(),
         chapterNumber: t.String(),
       }),
-    }
+    },
   )
   .post(
     "/chapters",
@@ -526,7 +540,9 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         const { seriesId: seriesIdStr, title, chapterNumber, zipFile } = body;
         const seriesId = parseInt(seriesIdStr);
 
-        console.log(`[Chapter Upload] Starting upload for series ${seriesId}, chapter ${chapterNumber}`);
+        console.log(
+          `[Chapter Upload] Starting upload for series ${seriesId}, chapter ${chapterNumber}`,
+        );
 
         // Check if chapter number already exists for this series
         const existingChapters = await ChapterStore.findBySeriesId(seriesId);
@@ -547,7 +563,12 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.log(`[Chapter Upload] Created chapter ${chapter.id}`);
 
         // Create chapter directory
-        const chapterDir = join(envConfig.MANGA_DIR, seriesId.toString(), "chapters", chapter.id.toString());
+        const chapterDir = join(
+          envConfig.MANGA_DIR,
+          seriesId.toString(),
+          "chapters",
+          chapter.id.toString(),
+        );
         await mkdir(chapterDir, { recursive: true });
 
         // Extract ZIP file
@@ -567,7 +588,9 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         }
 
         // Sort images by filename (natural sort)
-        imageFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        imageFiles.sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { numeric: true }),
+        );
 
         console.log(`[Chapter Upload] Found ${imageFiles.length} images`);
 
@@ -615,7 +638,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.error("Upload chapter error:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to upload chapter",
+          error:
+            error instanceof Error ? error.message : "Failed to upload chapter",
         };
       }
     },
@@ -626,7 +650,7 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         chapterNumber: t.String(),
         zipFile: t.File(),
       }),
-    }
+    },
   )
   .put(
     "/series/:slug",
@@ -696,7 +720,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.error("Update series error:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to update series",
+          error:
+            error instanceof Error ? error.message : "Failed to update series",
         };
       }
     },
@@ -707,7 +732,7 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         tags: t.Optional(t.String()),
         coverArt: t.Optional(t.File({ type: "image" })),
       }),
-    }
+    },
   )
   .delete("/series/:slug", async ({ params }) => {
     try {
@@ -727,7 +752,10 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.log(`🗑️  Deleted series folder: ${seriesDir}`);
       } catch (dirError) {
         // Folder might not exist, log but don't fail the deletion
-        console.warn(`⚠️  Could not delete series folder for series ${series.id}`, dirError);
+        console.warn(
+          `⚠️  Could not delete series folder for series ${series.id}`,
+          dirError,
+        );
       }
 
       // Delete database record (cascades to chapters, pages, and captions)
@@ -747,7 +775,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
       console.error("Delete series error:", error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to delete series",
+        error:
+          error instanceof Error ? error.message : "Failed to delete series",
       };
     }
   })
@@ -768,13 +797,16 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
           envConfig.MANGA_DIR,
           chapter.seriesId.toString(),
           "chapters",
-          chapter.id.toString()
+          chapter.id.toString(),
         );
         await rm(chapterDir, { recursive: true, force: true });
         console.log(`🗑️  Deleted chapter folder: ${chapterDir}`);
       } catch (dirError) {
         // Folder might not exist, log but don't fail the deletion
-        console.warn(`⚠️  Could not delete chapter folder for chapter ${chapter.id}`, dirError);
+        console.warn(
+          `⚠️  Could not delete chapter folder for chapter ${chapter.id}`,
+          dirError,
+        );
       }
 
       // Delete database record (cascades to pages and captions)
@@ -794,7 +826,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
       console.error("Delete chapter error:", error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : "Failed to delete chapter",
+        error:
+          error instanceof Error ? error.message : "Failed to delete chapter",
       };
     }
   })
@@ -820,7 +853,10 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.log(`🗑️  Deleted file: ${filePath}`);
       } catch (fileError) {
         // File might not exist, log but don't fail the deletion
-        console.warn(`⚠️  Could not delete file: ${page.originalImage}`, fileError);
+        console.warn(
+          `⚠️  Could not delete file: ${page.originalImage}`,
+          fileError,
+        );
       }
 
       // Delete database record
@@ -867,7 +903,7 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
           envConfig.MANGA_DIR,
           chapter.seriesId.toString(),
           "chapters",
-          chapter.id.toString()
+          chapter.id.toString(),
         );
         await mkdir(chapterDir, { recursive: true });
 
@@ -904,7 +940,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.error("Upload page error:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to upload page",
+          error:
+            error instanceof Error ? error.message : "Failed to upload page",
         };
       }
     },
@@ -913,7 +950,7 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         chapterId: t.String(), // FormData sends as string
         image: t.File({ type: "image" }),
       }),
-    }
+    },
   )
   .post(
     "/reorder-pages",
@@ -952,7 +989,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
         console.error("Reorder pages error:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : "Failed to reorder pages",
+          error:
+            error instanceof Error ? error.message : "Failed to reorder pages",
         };
       }
     },
@@ -962,8 +1000,8 @@ export const apiPlugin = new Elysia({ prefix: "/api" })
           t.Object({
             id: t.Number(),
             orderNum: t.Number(),
-          })
+          }),
         ),
       }),
-    }
+    },
   );
