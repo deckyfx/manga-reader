@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 interface Rectangle {
   id: string;
   captionId?: number; // Database ID for existing captions
+  captionSlug?: string; // Database slug for existing captions
   x: number;
   y: number;
   width: number;
@@ -25,6 +26,8 @@ interface MangaPageProps {
   page: PageData;
   onPrevious?: () => void;
   onNext?: () => void;
+  editMode: boolean;
+  onEditModeChange: (editMode: boolean) => void;
 }
 
 /**
@@ -38,8 +41,13 @@ interface MangaPageProps {
  * - Captions are automatically persisted to database
  * - Update/Discard workflow
  */
-export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
-  const [editMode, setEditMode] = useState(false);
+export function MangaPage({
+  page,
+  onPrevious,
+  onNext,
+  editMode,
+  onEditModeChange,
+}: MangaPageProps) {
   const [rectangles, setRectangles] = useState<Rectangle[]>([]);
   const [currentDraw, setCurrentDraw] = useState<{
     startX: number;
@@ -67,6 +75,7 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
           (caption) => ({
             id: `caption-${caption.id}`,
             captionId: caption.id, // Store database ID
+            captionSlug: caption.slug || undefined, // Store database slug (convert null to undefined)
             x: caption.x,
             y: caption.y,
             width: caption.width,
@@ -78,9 +87,6 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
         );
 
         setRectangles(loadedRectangles);
-        console.log(
-          `[MangaPage] Loaded ${loadedRectangles.length} captions for page ${page.id}`,
-        );
       }
     } catch (error) {
       console.error("[MangaPage] Failed to load captions:", error);
@@ -93,6 +99,16 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
   useEffect(() => {
     loadCaptions();
   }, [page.id]);
+
+  /**
+   * Reload captions and clear active popover when exiting edit mode
+   */
+  useEffect(() => {
+    if (!editMode) {
+      loadCaptions();
+      setActiveRectId(null);
+    }
+  }, [editMode]);
 
   /**
    * Handle image click for navigation (when not in edit mode)
@@ -117,7 +133,8 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
    * Handle mouse down - start drawing rectangle
    */
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!editMode || !containerRef.current) return;
+    // Don't allow drawing when editing a caption or not in edit mode
+    if (!editMode || !containerRef.current || activeRectId !== null) return;
 
     const rect = containerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -135,7 +152,8 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
    * Handle mouse move - update rectangle size
    */
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!currentDraw || !containerRef.current) return;
+    // Don't update drawing when editing a caption
+    if (!currentDraw || !containerRef.current || activeRectId !== null) return;
 
     const rect = containerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -152,7 +170,8 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
    * Handle mouse up - finish drawing and process OCR
    */
   const handleMouseUp = async () => {
-    if (!currentDraw || !imageRef.current) return;
+    // Don't complete drawing when editing a caption
+    if (!currentDraw || !imageRef.current || activeRectId !== null) return;
 
     // Calculate rectangle dimensions
     const x = Math.min(currentDraw.startX, currentDraw.currentX);
@@ -278,27 +297,6 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
 
   return (
     <div className="space-y-4">
-      {/* Edit Mode Toggle */}
-      <div className="flex justify-end">
-        <button
-          onClick={() => {
-            setEditMode(!editMode);
-            if (editMode) {
-              // Exiting edit mode - reload captions and clear active popover
-              loadCaptions();
-              setActiveRectId(null);
-            }
-          }}
-          className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
-            editMode
-              ? "bg-green-500 hover:bg-green-600 text-white"
-              : "bg-blue-500 hover:bg-blue-600 text-white"
-          }`}
-        >
-          {editMode ? "✓ Done Edit" : "✏️ Edit"}
-        </button>
-      </div>
-
       {/* Image Container */}
       <div
         ref={containerRef}
@@ -337,6 +335,7 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
             key={rect.id}
             id={rect.id}
             captionId={rect.captionId}
+            captionSlug={rect.captionSlug}
             pageId={page.id}
             x={rect.x}
             y={rect.y}
@@ -356,18 +355,6 @@ export function MangaPage({ page, onPrevious, onNext }: MangaPageProps) {
         ))}
       </div>
 
-      {/* Caption regions info */}
-      {!editMode && rectangles.length > 0 && (
-        <div className="bg-white rounded-lg shadow-lg p-4">
-          <p className="text-sm text-gray-600">
-            📝 {rectangles.length} caption region
-            {rectangles.length > 1 ? "s" : ""} saved
-          </p>
-          <p className="text-xs text-gray-500 mt-1">
-            Click on a region to view/edit the caption
-          </p>
-        </div>
-      )}
     </div>
   );
 }

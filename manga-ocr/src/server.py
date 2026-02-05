@@ -8,6 +8,9 @@ Endpoints:
 
 import base64
 import os
+import tomllib
+from pathlib import Path
+from contextlib import asynccontextmanager
 from io import BytesIO
 from typing import Optional
 
@@ -18,6 +21,16 @@ from PIL import Image
 from loguru import logger
 
 from .ocr import MangaOcr
+
+# Locate the pyproject.toml relative to this file
+def get_project_metadata():
+    path = Path(__file__).parent.parent / "pyproject.toml"
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+            return data.get("project", {})
+    except FileNotFoundError:
+        return {"title": "Manga OCR", "version": "0.0.0", "description": ""}
 
 
 class ImageRequest(BaseModel):
@@ -39,20 +52,17 @@ class HealthResponse(BaseModel):
     model_loaded: bool
 
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="Manga OCR Server",
-    description="OCR server for Japanese manga using Unix domain sockets",
-    version="1.0.0",
-)
-
 # Global OCR instance (initialized on startup)
 ocr_instance: Optional[MangaOcr] = None
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize OCR model on server startup"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for FastAPI app
+    Handles startup and shutdown events
+    """
+    # Startup: Initialize OCR model
     global ocr_instance
     logger.info("🚀 Starting Manga OCR server...")
     logger.info("📦 Loading OCR model into memory (please wait)...")
@@ -68,6 +78,22 @@ async def startup_event():
     except Exception as e:
         logger.error(f"❌ Failed to load OCR model: {e}")
         raise
+
+    yield
+
+    # Shutdown: Cleanup (if needed in future)
+    logger.info("👋 Shutting down Manga OCR server...")
+
+
+meta = get_project_metadata()
+
+# Initialize FastAPI app with lifespan
+app = FastAPI(
+    title=meta.get("name", "Manga OCR Server"),
+    description=meta.get("description", "OCR server for Japanese manga"),
+    version=meta.get("version", "0.0.3"),
+    lifespan=lifespan,
+)
 
 
 @app.get("/health", response_model=HealthResponse)

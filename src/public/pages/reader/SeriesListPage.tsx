@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { SeriesListItem } from "../../components/SeriesListItem";
 import { SeriesFilterPanel, type SeriesFilters } from "../../components/SeriesFilterPanel";
+import { StickyHeader } from "../../components/StickyHeader";
 
 interface Series {
   id: number;
@@ -79,16 +80,21 @@ export function SeriesListPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
-      <div className="container mx-auto px-4 py-8">
-        <header className="mb-8">
+      <StickyHeader
+        backLink="/"
+        backText="← Back to Home"
+        title="Manga Series"
+        actions={
           <Link
-            to="/"
-            className="text-blue-600 hover:underline mb-4 inline-block"
+            to="/a/create"
+            className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold transition-colors whitespace-nowrap"
           >
-            ← Back to Home
+            + Create Series
           </Link>
-          <h1 className="text-4xl font-bold text-gray-800">Manga Series</h1>
-        </header>
+        }
+      />
+
+      <div className="container mx-auto px-4 py-8">
 
         {/* Filter Panel */}
         <SeriesFilterPanel
@@ -112,9 +118,11 @@ export function SeriesListPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {series.map((s) => (
-              <SeriesListItem key={s.id} series={s} />
-            ))}
+            {series
+              .filter((s) => s.slug !== null) // Filter out series without slugs
+              .map((s) => (
+                <SeriesListItem key={s.id} series={s as any} />
+              ))}
           </div>
         )}
       </div>

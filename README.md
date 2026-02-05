@@ -1,6 +1,6 @@
 # Comic Reader
 
-A modern manga/comic reader with real-time OCR text extraction and translation capabilities.
+A manga/comic reader with OCR text extraction and translation capabilities.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/deckyfx/manga-reader/blob/main/LICENSE)
 [![GitHub](https://img.shields.io/badge/github-deckyfx%2Fmanga--reader-blue.svg)](https://github.com/deckyfx/manga-reader)
@@ -17,6 +17,23 @@ A modern manga/comic reader with real-time OCR text extraction and translation c
 - 💾 **Caption Database** - Save and manage OCR/translation results with SQLite
 - 🏷️ **Tagging System** - Filter and search series by tags
 - 🚀 **Fast Performance** - Bun runtime with Unix socket IPC for OCR service
+
+## Showcase
+
+<div align="center">
+  <table>
+    <tr>
+      <td width="33%"><img src="screenshoot/01.png" alt="Series List" width="100%"/></td>
+      <td width="33%"><img src="screenshoot/02.png" alt="Series Detail" width="100%"/></td>
+      <td width="33%"><img src="screenshoot/03.png" alt="Chapter Gallery" width="100%"/></td>
+    </tr>
+    <tr>
+      <td width="33%"><img src="screenshoot/04.png" alt="Reader View" width="100%"/></td>
+      <td width="33%"><img src="screenshoot/05.png" alt="OCR & Translation" width="100%"/></td>
+      <td width="33%"><img src="screenshoot/06.png" alt="Admin Panel" width="100%"/></td>
+    </tr>
+  </table>
+</div>
 
 ## Architecture
 

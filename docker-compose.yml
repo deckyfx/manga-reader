@@ -5,7 +5,7 @@ name: comic-reader
 services:
   # Main Bun application
   app:
-    image: deckyfx/comic-reader-app:latest
+    image: deckyfx/comic-reader-app:0.0.3
     container_name: comic-reader-app
     environment:
       # Container mode paths
@@ -26,8 +26,7 @@ services:
     networks:
       - comic-reader-network
     depends_on:
-      manga-ocr:
-        condition: service_healthy
+      - manga-ocr
     healthcheck:
       test: ["CMD", "bun", "run", "/usr/local/bin/healthcheck.ts"]
       interval: 10s
@@ -37,7 +36,7 @@ services:
 
   # Manga OCR service (Python FastAPI server)
   manga-ocr:
-    image: deckyfx/comic-reader-manga-ocr:latest
+    image: deckyfx/comic-reader-manga-ocr:0.0.3
     container_name: manga-ocr
     environment:
       # Hugging Face API token (optional)

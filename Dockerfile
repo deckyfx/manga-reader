@@ -18,7 +18,7 @@ RUN bun run build
 # ============================================
 # Stage 2: Runtime (Minimal Bun image)
 # ============================================
-FROM oven/bun:1-slim
+FROM oven/bun:1.3.8
 
 WORKDIR /app
 

@@ -66,19 +66,35 @@ export function SeriesListItem({ series }: SeriesListItemProps) {
         {/* Series Info */}
         <div className="flex-1 p-6">
           <h3 className="text-xl font-bold text-gray-800 mb-2">
-            {series.title}
+            {`${series.title.substring(0, 100)}...`}
           </h3>
           {series.tags && (
             <div className="flex flex-wrap gap-2 mt-2">
-              {series.tags.split(',').map((tag: string, i: number) => (
-                <button
-                  key={i}
-                  onClick={(e) => handleTagClick(e, tag)}
-                  className="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded transition-colors cursor-pointer"
-                >
-                  {tag.trim()}
-                </button>
-              ))}
+              {(() => {
+                const allTags = series.tags.split(",");
+                const visibleTags = allTags.slice(0, 2);
+                const remainingCount = allTags.length - 2;
+
+                return (
+                  <>
+                    {visibleTags.map((tag: string, i: number) => (
+                      <button
+                        key={i}
+                        onClick={(e) => handleTagClick(e, tag)}
+                        className="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded transition-colors cursor-pointer"
+                      >
+                        {tag.trim()}
+                      </button>
+                    ))}
+                    {remainingCount > 0 && (
+                      <span className="text-xs text-gray-500 px-2 py-1">
+                        +{remainingCount} more Tag
+                        {remainingCount > 1 ? "s" : ""}
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>

@@ -37,7 +37,8 @@ export function ViewOnlyCaptionBubble({
       style={{
         left: x,
         top: y,
-        maxWidth: 400,
+        width: 450,
+        maxWidth: "90vw",
       }}
     >
       <div className={`flex gap-3 ${isWideImage ? "flex-col" : "flex-row"}`}>
@@ -53,15 +54,12 @@ export function ViewOnlyCaptionBubble({
         </div>
 
         {/* Text Content */}
-        <div className="flex-1 min-w-0 space-y-2">
+        <div className="flex-1 space-y-2 overflow-hidden">
           {/* Original Text */}
           {rawText && (
             <div>
               <div className="text-xs text-gray-500 mb-1">Original:</div>
-              <div
-                className="text-sm text-gray-800 line-clamp-3"
-                style={{ minWidth: 300 }}
-              >
+              <div className="text-sm text-gray-800 break-words whitespace-pre-wrap">
                 {rawText}
               </div>
             </div>
@@ -71,10 +69,7 @@ export function ViewOnlyCaptionBubble({
           {translatedText && (
             <div>
               <div className="text-xs text-gray-500 mb-1">Translation:</div>
-              <div
-                className="text-sm text-blue-700 font-medium line-clamp-3"
-                style={{ minWidth: 300 }}
-              >
+              <div className="text-sm text-blue-700 font-medium break-words whitespace-pre-wrap">
                 {translatedText}
               </div>
             </div>

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSnackbar } from "../../hooks/useSnackbar";
 import { api } from "../../lib/api";
+import { StickyHeader } from "../../components/StickyHeader";
 
 /**
  * Admin page - edit existing manga series
@@ -117,17 +118,13 @@ export function EditSeriesPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
-      <div className="container mx-auto px-4 py-8">
-        <header className="mb-8">
-          <Link
-            to={`/r/${seriesSlug}`}
-            className="text-blue-600 hover:underline mb-4 inline-block"
-          >
-            ← Back to Series
-          </Link>
-          <h1 className="text-4xl font-bold text-gray-800">Edit Series</h1>
-        </header>
+      <StickyHeader
+        backLink={`/r/${seriesSlug}`}
+        backText="← Back to Series"
+        title="Edit Series"
+      />
 
+      <div className="container mx-auto px-4 py-8">
         <div className="max-w-6xl mx-auto bg-white rounded-lg shadow-lg p-8">
           <form onSubmit={handleSubmit}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -200,6 +197,7 @@ export function EditSeriesPage() {
                     onChange={(e) => setTitle(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="Enter series title"
+                    maxLength={200}
                     required
                   />
                 </div>
@@ -218,6 +216,7 @@ export function EditSeriesPage() {
                     onChange={(e) => setSynopsis(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
                     placeholder="Enter series description or synopsis"
+                    maxLength={1000}
                     rows={6}
                   />
                 </div>
@@ -237,6 +236,7 @@ export function EditSeriesPage() {
                     onChange={(e) => setTags(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="e.g., action, romance, comedy"
+                    maxLength={100}
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     Separate multiple tags with commas

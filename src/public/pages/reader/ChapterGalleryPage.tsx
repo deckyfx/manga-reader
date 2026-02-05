@@ -3,6 +3,7 @@ import { Link, useParams, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useSnackbar } from "../../hooks/useSnackbar";
 import { ChapterGalleryItem } from "../../components/ChapterGalleryItem";
+import { StickyHeader } from "../../components/StickyHeader";
 
 interface Page {
   id: number;
@@ -276,47 +277,38 @@ export function ChapterGalleryPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
+      <StickyHeader
+        backLink={`/r/${series?.slug}`}
+        backText={`← Back to ${series.title}`}
+        title={`Chapter ${chapter.chapterNumber}: ${chapter.title}`}
+        actions={
+          <>
+            <input
+              type="file"
+              id="page-upload"
+              accept="image/*"
+              onChange={handleFileSelected}
+              className="hidden"
+            />
+            <button
+              onClick={handleAddPageClick}
+              disabled={uploading}
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap ${
+                uploading
+                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  : "bg-blue-500 hover:bg-blue-600 text-white"
+              }`}
+            >
+              {uploading ? "Uploading..." : "+ Add Page"}
+            </button>
+          </>
+        }
+      />
+
       <div className="container mx-auto px-4 py-8">
-        {/* Header */}
-        <header className="mb-8">
-          <Link
-            to={`/r/${series?.slug}`}
-            className="text-blue-600 hover:underline mb-4 inline-block"
-          >
-            ← Back to {series.title}
-          </Link>
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-4xl font-bold text-gray-800">
-                Chapter {chapter.chapterNumber}: {chapter.title}
-              </h1>
-              <p className="text-lg text-gray-600 mt-2">
-                {pages.length} page{pages.length !== 1 ? "s" : ""} • Drag and
-                drop to reorder
-              </p>
-            </div>
-            <div>
-              <input
-                type="file"
-                id="page-upload"
-                accept="image/*"
-                onChange={handleFileSelected}
-                className="hidden"
-              />
-              <button
-                onClick={handleAddPageClick}
-                disabled={uploading}
-                className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
-                  uploading
-                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    : "bg-blue-500 hover:bg-blue-600 text-white"
-                }`}
-              >
-                {uploading ? "Uploading..." : "+ Add Page"}
-              </button>
-            </div>
-          </div>
-        </header>
+        <div className="mb-4 text-center text-gray-600">
+          {pages.length} page{pages.length !== 1 ? "s" : ""} • Drag and drop to reorder
+        </div>
 
         {/* Pages Grid */}
         {pages.length === 0 ? (

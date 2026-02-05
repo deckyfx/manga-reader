@@ -28,8 +28,7 @@ services:
     networks:
       - comic-reader-network
     depends_on:
-      manga-ocr:
-        condition: service_healthy
+      - manga-ocr
     healthcheck:
       test: ["CMD", "bun", "run", "/usr/local/bin/healthcheck.ts"]
       interval: 10s

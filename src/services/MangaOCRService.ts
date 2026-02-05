@@ -75,7 +75,6 @@ export class MangaOCRService {
    * const service = MangaOCRService.getInstance();
    * const imageBuffer = await Bun.file("manga.jpg").arrayBuffer();
    * const text = await service.extractText(Buffer.from(imageBuffer));
-   * console.log("OCR text:", text);
    * ```
    */
   public async extractText(imageBuffer: Buffer | Uint8Array): Promise<string> {
@@ -115,7 +114,6 @@ export class MangaOCRService {
    * ```typescript
    * const service = MangaOCRService.getInstance();
    * const text = await service.extractTextFromFile("manga.jpg");
-   * console.log("OCR text:", text);
    * ```
    */
   public async extractTextFromFile(filePath: string): Promise<string> {

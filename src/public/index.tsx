@@ -1,4 +1,3 @@
-import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { HomePage } from "./pages/HomePage";
@@ -25,14 +24,26 @@ function App() {
         {/* Reader Routes */}
         <Route path="/r" element={<SeriesListPage />} />
         <Route path="/r/:seriesSlug" element={<SeriesDetailPage />} />
-        <Route path="/r/:seriesSlug/:chapterSlug" element={<ChapterGalleryPage />} />
-        <Route path="/r/:seriesSlug/:chapterSlug/:pageNum" element={<ReaderPage />} />
+        <Route
+          path="/r/:seriesSlug/:chapterSlug"
+          element={<ChapterGalleryPage />}
+        />
+        <Route
+          path="/r/:seriesSlug/:chapterSlug/:pageNum"
+          element={<ReaderPage />}
+        />
 
         {/* Admin Routes */}
         <Route path="/a/create" element={<CreateSeriesPage />} />
         <Route path="/a/series/:seriesSlug/edit" element={<EditSeriesPage />} />
-        <Route path="/a/series/:seriesSlug/chapter" element={<UploadChapterPage />} />
-        <Route path="/a/chapters/:chapterSlug/edit" element={<EditChapterPage />} />
+        <Route
+          path="/a/series/:seriesSlug/chapter"
+          element={<UploadChapterPage />}
+        />
+        <Route
+          path="/a/chapters/:chapterSlug/edit"
+          element={<EditChapterPage />}
+        />
       </Routes>
     </BrowserRouter>
   );

@@ -65,12 +65,6 @@ export function RegionProcessor({
       const scaleX = canvasWidth / displayedWidth;
       const scaleY = canvasHeight / displayedHeight;
 
-      console.log("Image dimensions:", {
-        displayed: { width: displayedWidth, height: displayedHeight },
-        canvas: { width: canvasWidth, height: canvasHeight },
-        scaleFactors: { x: scaleX, y: scaleY },
-      });
-
       // Convert displayed selection coordinates to canvas coordinates
       const displayedRect = {
         x: selectionPosition.x,
@@ -86,9 +80,6 @@ export function RegionProcessor({
         width: displayedRect.width * scaleX,
         height: displayedRect.height * scaleY,
       };
-
-      console.log("Displayed selection:", displayedRect);
-      console.log("Canvas (scaled) coordinates:", naturalRect);
 
       // Create a new canvas for the cropped region
       const croppedCanvas = document.createElement("canvas");
@@ -154,7 +145,6 @@ export function RegionProcessor({
         setOcrMetadata({
           captionId: result.data.captionId,
         });
-        console.log("[RegionProcessor] Caption saved:", result.data.captionId);
       } else {
         setOcrResult(`Error: ${result.data?.error || "Failed to process OCR"}`);
         setOcrMetadata(null);

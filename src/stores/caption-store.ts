@@ -22,6 +22,19 @@ export class CaptionStore {
   }
 
   /**
+   * Find caption by slug
+   */
+  static async findBySlug(slug: string): Promise<UserCaption | null> {
+    const result = await db
+      .select()
+      .from(userCaptions)
+      .where(eq(userCaptions.slug, slug))
+      .limit(1);
+
+    return result[0] ?? null;
+  }
+
+  /**
    * Find all captions for a specific page
    */
   static async findByPageId(pageId: number): Promise<UserCaption[]> {
@@ -71,12 +84,40 @@ export class CaptionStore {
   }
 
   /**
+   * Update caption by slug
+   */
+  static async updateBySlug(
+    slug: string,
+    data: Partial<NewUserCaption>
+  ): Promise<UserCaption | null> {
+    const result = await db
+      .update(userCaptions)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(userCaptions.slug, slug))
+      .returning();
+
+    return result[0] ?? null;
+  }
+
+  /**
    * Delete caption by ID
    */
   static async delete(id: number): Promise<boolean> {
     const result = await db
       .delete(userCaptions)
       .where(eq(userCaptions.id, id))
+      .returning();
+
+    return result.length > 0;
+  }
+
+  /**
+   * Delete caption by slug
+   */
+  static async deleteBySlug(slug: string): Promise<boolean> {
+    const result = await db
+      .delete(userCaptions)
+      .where(eq(userCaptions.slug, slug))
       .returning();
 
     return result.length > 0;

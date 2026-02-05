@@ -35,7 +35,9 @@ export function ChapterListItem({
         <span className="text-sm font-semibold text-blue-600 bg-blue-100 px-3 py-1 rounded">
           Ch. {chapter.chapterNumber}
         </span>
-        <h3 className="text-xl font-bold text-gray-800">{chapter.title}</h3>
+        <h3 className="text-xl font-bold text-gray-800" title={chapter.title}>
+          {chapter.title.length > 50 ? `${chapter.title.substring(0, 100)}...` : chapter.title}
+        </h3>
       </Link>
       <div className="flex gap-2">
         <Link

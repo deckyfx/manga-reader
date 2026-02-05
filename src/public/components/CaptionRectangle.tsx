@@ -6,6 +6,7 @@ import { EditableCaptionBubble } from "./EditableCaptionBubble";
 interface CaptionRectangleProps {
   id: string;
   captionId?: number;
+  captionSlug?: string;
   pageId: number;
   x: number;
   y: number;
@@ -35,6 +36,7 @@ interface CaptionRectangleProps {
 export function CaptionRectangle({
   id,
   captionId,
+  captionSlug,
   pageId,
   x,
   y,
@@ -71,6 +73,7 @@ export function CaptionRectangle({
       {editMode && isActive && (
         <EditableCaptionBubble
           existingCaptionId={captionId}
+          existingCaptionSlug={captionSlug}
           existingRawText={rawText}
           existingTranslatedText={translatedText}
           pageId={pageId}

@@ -10,7 +10,7 @@ export const series = sqliteTable("series", {
   title: text("title").notNull(),
   synopsis: text("synopsis"),
   coverArt: text("cover_art"),
-  tags: text("tags"), // JSON string of tags array
+  tags: text("tags"), // Comma-separated string (e.g., "action,romance,comedy")
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

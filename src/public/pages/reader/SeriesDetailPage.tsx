@@ -3,6 +3,7 @@ import { Link, useParams, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useSnackbar } from "../../hooks/useSnackbar";
 import { ChapterListItem } from "../../components/ChapterListItem";
+import { StickyHeader } from "../../components/StickyHeader";
 
 /**
  * Series Detail page - displays series info and chapter list
@@ -144,34 +145,31 @@ export function SeriesDetailPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
-      <div className="container mx-auto px-4 py-8">
-        <Link
-          to="/r"
-          className="text-blue-600 hover:underline mb-4 inline-block"
-        >
-          ← Back to Series List
-        </Link>
+      <StickyHeader
+        backLink="/r"
+        backText="← Back to Series List"
+        title={series.title}
+        actions={
+          <>
+            <Link
+              to={`/a/series/${series.slug}/edit`}
+              className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold transition-colors whitespace-nowrap"
+            >
+              ✏️ Edit
+            </Link>
+            <button
+              onClick={handleDeleteClick}
+              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition-colors whitespace-nowrap"
+            >
+              🗑️ Delete
+            </button>
+          </>
+        }
+      />
 
+      <div className="container mx-auto px-4 py-8">
         {/* Series Info */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
-          <div className="flex justify-between items-start mb-4">
-            <h1 className="text-4xl font-bold text-gray-800">{series.title}</h1>
-
-            <div className="flex gap-2">
-              <Link
-                to={`/a/series/${series.slug}/edit`}
-                className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold transition-colors"
-              >
-                ✏️ Edit
-              </Link>
-              <button
-                onClick={handleDeleteClick}
-                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition-colors"
-              >
-                🗑️ Delete
-              </button>
-            </div>
-          </div>
 
           <div className="flex gap-6">
             {series.coverArt && (

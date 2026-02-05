@@ -40,7 +40,7 @@ export function ChapterNavigation({
   const navigate = useNavigate();
 
   // UI State
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const [isSeriesOpen, setIsSeriesOpen] = useState(false);
   const [isChaptersOpen, setIsChaptersOpen] = useState(false);
 
@@ -302,9 +302,12 @@ export function ChapterNavigation({
                         ? "bg-blue-100 font-semibold"
                         : ""
                     }`}
+                    title={chapter.title}
                   >
                     <div className="font-medium">Ch. {chapter.chapterNumber}</div>
-                    <div className="text-xs text-gray-600">{chapter.title}</div>
+                    <div className="text-xs text-gray-600">
+                      {chapter.title.length > 50 ? `${chapter.title.substring(0, 50)}...` : chapter.title}
+                    </div>
                   </button>
                 ))
               )}

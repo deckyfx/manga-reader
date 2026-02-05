@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSnackbar } from "../../hooks/useSnackbar";
 import { api } from "../../lib/api";
+import { StickyHeader } from "../../components/StickyHeader";
 
 /**
  * Admin page - upload compressed chapter containing pages
@@ -117,22 +118,13 @@ export function UploadChapterPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
-      <div className="container mx-auto px-4 py-8">
-        <header className="mb-8">
-          <Link
-            to={`/r/${series?.slug}`}
-            className="text-blue-600 hover:underline mb-4 inline-block"
-          >
-            ← Back to Series
-          </Link>
-          <h1 className="text-4xl font-bold text-gray-800">Upload Chapter</h1>
-          {series && (
-            <p className="text-lg text-gray-600 mt-2">
-              For series: <span className="font-semibold">{series.title}</span>
-            </p>
-          )}
-        </header>
+      <StickyHeader
+        backLink={`/r/${series?.slug}`}
+        backText="← Back to Series"
+        title={`Upload Chapter${series ? ` - ${series.title}` : ""}`}
+      />
 
+      <div className="container mx-auto px-4 py-8">
         <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Chapter Number */}
@@ -150,6 +142,7 @@ export function UploadChapterPage() {
                 onChange={(e) => setChapterNumber(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="e.g., 1, 2, 1.5, 1.1"
+                maxLength={5}
                 required
               />
               <p className="text-xs text-gray-500 mt-1">
@@ -172,6 +165,7 @@ export function UploadChapterPage() {
                 onChange={(e) => setChapterTitle(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="e.g., The Beginning"
+                maxLength={100}
                 required
               />
             </div>

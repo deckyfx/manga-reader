@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 
 interface EditableCaptionBubbleProps {
   existingCaptionId?: number;
+  existingCaptionSlug?: string;
   existingRawText?: string;
   existingTranslatedText?: string;
   pageId: number;
@@ -32,6 +33,7 @@ type ProcessState = "uploading" | "processing" | "success" | "error";
  */
 export function EditableCaptionBubble({
   existingCaptionId,
+  existingCaptionSlug,
   existingRawText,
   existingTranslatedText,
   pageId,
@@ -53,12 +55,22 @@ export function EditableCaptionBubble({
   const [captionId, setCaptionId] = useState<number | null>(
     existingCaptionId || null,
   );
+  const [captionSlug, setCaptionSlug] = useState<string | null>(
+    existingCaptionSlug || null,
+  );
   const [rawText, setRawText] = useState<string>(existingRawText || "");
   const [translatedText, setTranslatedText] = useState<string>(
     existingTranslatedText || "",
   );
+  const [originalRawText, setOriginalRawText] = useState<string>(existingRawText || "");
+  const [originalTranslatedText, setOriginalTranslatedText] = useState<string>(
+    existingTranslatedText || "",
+  );
   const [error, setError] = useState<string>("");
   const [isUpdating, setIsUpdating] = useState(false);
+
+  // Track if caption has unsaved changes
+  const isDirty = rawText !== originalRawText || translatedText !== originalTranslatedText;
 
   useEffect(() => {
     // Only run OCR for new captions (no existing ID)
@@ -93,8 +105,12 @@ export function EditableCaptionBubble({
           // Got result and saved to database!
           setState("success");
           setCaptionId(result.data.captionId);
+          setCaptionSlug(result.data.captionSlug);
           setRawText(result.data.rawText);
           setTranslatedText(result.data.translatedText || "");
+          // Store original values for dirty tracking
+          setOriginalRawText(result.data.rawText);
+          setOriginalTranslatedText(result.data.translatedText || "");
         } else {
           // Timeout
           setState("error");
@@ -115,17 +131,20 @@ export function EditableCaptionBubble({
    * Update caption in database
    */
   const handleUpdate = async () => {
-    if (!captionId) return;
+    if (!captionSlug) return;
 
     setIsUpdating(true);
     try {
-      const result = await api.api.captions({ id: captionId }).put({
+      const result = await api.api.captions({ slug: captionSlug }).put({
         rawText,
         translatedText: translatedText || undefined,
       });
 
       if (result.data?.success) {
         console.log("[EditableCaptionBubble] Caption updated successfully");
+        // Reset dirty state - update original values
+        setOriginalRawText(rawText);
+        setOriginalTranslatedText(translatedText);
         // Reload all captions from database to refresh UI
         onUpdate();
       } else {
@@ -143,16 +162,15 @@ export function EditableCaptionBubble({
    * Delete caption from database and remove from UI
    */
   const handleDelete = async () => {
-    if (!captionId) {
+    if (!captionSlug) {
       onDiscard();
       return;
     }
 
     try {
-      const result = await api.api.captions({ id: captionId }).delete();
+      const result = await api.api.captions({ slug: captionSlug }).delete();
 
       if (result.data?.success) {
-        console.log("[CaptionBubble] Caption deleted successfully");
         onDiscard();
       } else {
         setError("Failed to delete caption");
@@ -174,7 +192,8 @@ export function EditableCaptionBubble({
       style={{
         left: x,
         top: y,
-        maxWidth: 500,
+        width: 500,
+        maxWidth: "90vw",
       }}
     >
       {/* Close button */}
@@ -202,7 +221,7 @@ export function EditableCaptionBubble({
         </div>
 
         {/* Info Panel - Right Side or Bottom */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* Uploading State */}
           {state === "uploading" && (
             <div className="flex items-center gap-2 text-sm text-gray-600 py-2">
@@ -231,8 +250,7 @@ export function EditableCaptionBubble({
                   <textarea
                     value={rawText}
                     onChange={(e) => setRawText(e.target.value)}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    style={{ minWidth: "300px" }}
+                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
                     rows={3}
                   />
                 </div>
@@ -245,8 +263,7 @@ export function EditableCaptionBubble({
                   <textarea
                     value={translatedText}
                     onChange={(e) => setTranslatedText(e.target.value)}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-blue-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    style={{ minWidth: "300px" }}
+                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-blue-700 resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
                     rows={3}
                     placeholder="Enter translation..."
                   />
@@ -257,10 +274,11 @@ export function EditableCaptionBubble({
               <div className="flex gap-2">
                 <button
                   onClick={handleUpdate}
-                  disabled={isUpdating}
-                  className="flex-1 px-3 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white text-sm font-semibold rounded transition-colors"
+                  disabled={!isDirty || isUpdating}
+                  className="flex-1 px-3 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-sm font-semibold rounded transition-colors"
+                  title={!isDirty ? "No changes to save" : "Save changes"}
                 >
-                  {isUpdating ? "..." : "✓ Update"}
+                  {isUpdating ? "Saving..." : "✓ Update"}
                 </button>
                 <button
                   onClick={handleDelete}
