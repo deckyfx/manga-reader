@@ -5,6 +5,6 @@ export default {
   out: "./drizzle",
   dialect: "sqlite",
   dbCredentials: {
-    url: "./data/db/comic-reader.db",
+    url: "./data/db/manga-reader.db",
   },
 } satisfies Config;

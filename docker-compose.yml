@@ -1,12 +1,12 @@
 version: "3.8"
 
-name: comic-reader
+name: manga-reader
 
 services:
   # Main Bun application
   app:
-    image: deckyfx/comic-reader-app:0.0.3
-    container_name: comic-reader-app
+    image: deckyfx/manga-reader-app:0.0.4
+    container_name: manga-reader-app
     environment:
       # Container mode paths
       - DB_DIR=/app/db
@@ -24,7 +24,7 @@ services:
     ports:
       - "${SERVER_PORT:-3000}:3000"
     networks:
-      - comic-reader-network
+      - manga-reader-network
     depends_on:
       - manga-ocr
     healthcheck:
@@ -36,7 +36,7 @@ services:
 
   # Manga OCR service (Python FastAPI server)
   manga-ocr:
-    image: deckyfx/comic-reader-manga-ocr:0.0.3
+    image: deckyfx/manga-reader-manga-ocr:0.0.4
     container_name: manga-ocr
     environment:
       # Hugging Face API token (optional)
@@ -47,7 +47,7 @@ services:
       # Shared sockets directory (for IPC with main app)
       - ${DATA_DIR:-./data}/sock:/app/sock
     networks:
-      - comic-reader-network
+      - manga-reader-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "/usr/local/bin/healthcheck.py"]
@@ -57,5 +57,5 @@ services:
       start_period: 15s
 
 networks:
-  comic-reader-network:
+  manga-reader-network:
     driver: bridge

@@ -1,6 +1,6 @@
 version: "3.8"
 
-name: comic-reader
+name: manga-reader
 
 services:
   # Main Bun application
@@ -8,7 +8,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: comic-reader-app
+    container_name: manga-reader-app
     environment:
       # Container mode paths
       - DB_DIR=/app/db
@@ -26,7 +26,7 @@ services:
     ports:
       - "${SERVER_PORT:-3000}:3000"
     networks:
-      - comic-reader-network
+      - manga-reader-network
     depends_on:
       - manga-ocr
     healthcheck:
@@ -51,7 +51,7 @@ services:
       # Shared sockets directory (for IPC with main app)
       - ${DATA_DIR:-./data}/sock:/app/sock
     networks:
-      - comic-reader-network
+      - manga-reader-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "/usr/local/bin/healthcheck.py"]
@@ -61,5 +61,5 @@ services:
       start_period: 15s
 
 networks:
-  comic-reader-network:
+  manga-reader-network:
     driver: bridge

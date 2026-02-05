@@ -5,29 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.0.3] - 2026-02-05
-
-### Added
-- **README Showcase Section**: Added visual showcase with 3x2 thumbnail grid displaying application screenshots
-  - Series List view
-  - Series Detail with chapter management
-  - Chapter Gallery with page thumbnails
-  - Reader View with OCR captions
-  - OCR & Translation interface
-  - Admin Panel
+## [0.0.4] - 2026-02-05
 
 ### Changed
-- **Release Script Improvements**: Updated release script to build images before tagging
-  - Added `docker-compose build` step with `--no-cache` flag
-  - Interactive push confirmation prompt
-  - Better error handling and exit codes
-  - Ensures Docker images are built from latest code before release
+- **Project Rename**: Renamed project from "comic-reader" to "manga-reader"
+  - Updated all references, documentation, and configuration
+  - Aligned naming with project purpose and repository name
 
-### Fixed
-- **Docker Image Build Process**: Fixed release workflow to build fresh images instead of just tagging existing ones
-  - Uses `docker-compose.dev.yml` for building
-  - Properly tags built images before pushing
-  - Prevents outdated images from being published
+## [0.0.3] - 2026-02-05
+
+### No Changes just house keeping miss-push
 
 ## [0.0.2] - 2026-02-05
 
@@ -41,10 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Slug-based caption operations (update and delete)
   - Added `findBySlug`, `updateBySlug`, and `deleteBySlug` methods to CaptionStore
   - Caption slug included in OCR API response for immediate availability
-
-- **Browser Compatibility**:
-  - Added `crypto.randomUUID` polyfill for browsers that don't support it
-  - Fixes Eden Treaty client compatibility issues
 
 ### Fixed
 - **Caption Update/Delete Operations**:
@@ -117,6 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Drag-and-drop page reordering in gallery view
 - Edit mode for caption management
 
+[0.0.4]: https://github.com/deckyfx/manga-reader/releases/tag/v0.0.4
 [0.0.3]: https://github.com/deckyfx/manga-reader/releases/tag/v0.0.3
 [0.0.2]: https://github.com/deckyfx/manga-reader/releases/tag/v0.0.2
 [0.0.1]: https://github.com/deckyfx/manga-reader/releases/tag/v0.0.1

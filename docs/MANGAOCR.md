@@ -25,6 +25,7 @@ Model: kha-white/manga-ocr-base (Hugging Face)
 manga-ocr is a lightweight Python wrapper (~217 lines of code) around Hugging Face's transformers library, specifically designed for Japanese manga OCR. It uses a pre-trained Vision Transformer (ViT) encoder-decoder model.
 
 **Key Stats:**
+
 - Total code: 217 lines (5 files)
 - Model size: 424MB (neural weights) + 100KB (configs)
 - RAM usage: ~900MB-1GB during inference
@@ -36,54 +37,62 @@ manga-ocr is a lightweight Python wrapper (~217 lines of code) around Hugging Fa
 
 ### Core Dependencies (pyproject.toml)
 
-| Dependency | Size | Purpose | Can Remove? |
-|------------|------|---------|-------------|
-| `fire` | ~25KB | CLI framework - auto-generates CLI from functions | ❌ |
-| `fugashi` | ~1MB | Japanese morphological analyzer for tokenization | ❌ |
-| `jaconv` | ~50KB | Japanese text conversion (half-width ↔ full-width) | ❌ |
-| `loguru` | ~100KB | Modern logging library with colored output | ⚠️ |
-| `numpy` | ~15-20MB | Array operations (required by PyTorch) | ❌ |
-| `Pillow>=10.0.0` | ~2-3MB | Image loading and processing | ❌ |
-| `pyperclip` | ~10KB | Clipboard access (cross-platform) | ⚠️ |
-| **`torch>=1.0`** | **~3-4GB (CUDA)** | Deep learning framework **[MAIN SIZE CULPRIT]** | ✅ Use CPU version |
-| `transformers>=4.25.0` | ~500MB-1GB | Hugging Face transformers (ViT + BERT) | ❌ |
-| `unidic_lite` | ~50MB | Japanese morphological dictionary | ❌ |
+| Dependency             | Size              | Purpose                                            | Can Remove?        |
+| ---------------------- | ----------------- | -------------------------------------------------- | ------------------ |
+| `fire`                 | ~25KB             | CLI framework - auto-generates CLI from functions  | ❌                 |
+| `fugashi`              | ~1MB              | Japanese morphological analyzer for tokenization   | ❌                 |
+| `jaconv`               | ~50KB             | Japanese text conversion (half-width ↔ full-width) | ❌                 |
+| `loguru`               | ~100KB            | Modern logging library with colored output         | ⚠️                 |
+| `numpy`                | ~15-20MB          | Array operations (required by PyTorch)             | ❌                 |
+| `Pillow>=10.0.0`       | ~2-3MB            | Image loading and processing                       | ❌                 |
+| `pyperclip`            | ~10KB             | Clipboard access (cross-platform)                  | ⚠️                 |
+| **`torch>=1.0`**       | **~3-4GB (CUDA)** | Deep learning framework **[MAIN SIZE CULPRIT]**    | ✅ Use CPU version |
+| `transformers>=4.25.0` | ~500MB-1GB        | Hugging Face transformers (ViT + BERT)             | ❌                 |
+| `unidic_lite`          | ~50MB             | Japanese morphological dictionary                  | ❌                 |
 
 ### Dependency Details
 
 #### 1. `fire` (CLI Framework)
+
 ```python
 # Used in: __main__.py, run.py
 import fire
 fire.Fire(run)  # Converts run() function into CLI
 ```
+
 **Purpose:** Auto-generate CLI with argument parsing
 **Example:** `manga_ocr --read-from clipboard --write-to output.txt`
 
 #### 2. `fugashi` (Japanese Tokenizer)
+
 **Purpose:** Japanese morphological analyzer for word segmentation
 **Works with:** `unidic_lite` dictionary
 **Used by:** transformers/tokenizer internally
 
 #### 3. `jaconv` (Japanese Text Conversion)
+
 ```python
 # Used in: ocr.py line 62
 text = jaconv.h2z(text, ascii=True, digit=True)
 ```
+
 **Purpose:** Normalize characters (half-width → full-width)
 **Example:** `ABC123` → `ＡＢＣ１２３`
 
 #### 4. `loguru` (Logging)
+
 ```python
 # Used throughout: ocr.py, run.py
 from loguru import logger
 logger.info(f"Loading OCR model from {pretrained_model_name_or_path}")
 logger.info(f"Text recognized in {t1 - t0:0.03f} s: {text}")
 ```
+
 **Purpose:** Better logging than standard `logging` module
 **Features:** Colored output, automatic formatting, timing info
 
 #### 5. `numpy` (Numerical Arrays)
+
 ```python
 # Used in: run.py line 19-22
 def are_images_identical(img1, img2):
@@ -91,9 +100,11 @@ def are_images_identical(img1, img2):
     img2 = np.array(img2)
     return (img1.shape == img2.shape) and (img1 == img2).all()
 ```
+
 **Purpose:** Fast array operations for image comparison and tensor operations
 
 #### 6. `Pillow` (Image Processing)
+
 ```python
 # Used extensively: ocr.py, run.py
 from PIL import Image, ImageGrab
@@ -102,9 +113,11 @@ img = Image.open(img_or_path)
 img = img.convert("L").convert("RGB")  # Grayscale → RGB
 img = ImageGrab.grabclipboard()  # Read from clipboard
 ```
+
 **Purpose:** Load images, format conversion, clipboard access
 
 #### 7. `pyperclip` (Clipboard)
+
 ```python
 # Used in: run.py
 import pyperclip
@@ -112,9 +125,11 @@ import pyperclip
 pyperclip.copy(text)  # Copy OCR result to clipboard
 pyperclip.set_clipboard("wl-clipboard")  # Wayland support
 ```
+
 **Purpose:** Cross-platform clipboard access (Windows, Mac, Linux/Wayland)
 
 #### 8. `torch` (PyTorch) 🔴 **CRITICAL**
+
 ```python
 # Used in: ocr.py
 import torch
@@ -127,10 +142,12 @@ elif not force_cpu and torch.backends.mps.is_available():
 else:
     # CPU mode
 ```
+
 **Purpose:** Deep learning framework for running Vision Transformer
 **Size Issue:** Defaults to CUDA version (~3-4GB) instead of CPU (~900MB)
 
 #### 9. `transformers` (Hugging Face)
+
 ```python
 # Used in: ocr.py
 from transformers import ViTImageProcessor, AutoTokenizer, VisionEncoderDecoderModel
@@ -139,10 +156,12 @@ self.processor = ViTImageProcessor.from_pretrained("kha-white/manga-ocr-base")
 self.tokenizer = AutoTokenizer.from_pretrained("kha-white/manga-ocr-base")
 self.model = MangaOcrModel.from_pretrained("kha-white/manga-ocr-base")
 ```
+
 **Purpose:** Provides Vision Transformer architecture and pre-trained weights
 **Components:** ViT encoder + BERT decoder
 
 #### 10. `unidic_lite` (Japanese Dictionary)
+
 **Purpose:** Lightweight Japanese morphological dictionary
 **Used by:** `fugashi` for tokenization
 **Size:** ~50MB dictionary data
@@ -171,6 +190,7 @@ manga_ocr/
 #### 1. `ocr.py` (64 lines) - The Brain 🧠
 
 **Main Classes:**
+
 ```python
 class MangaOcrModel(VisionEncoderDecoderModel, GenerationMixin):
     pass  # Extends Hugging Face model
@@ -204,6 +224,7 @@ class MangaOcr:
 ```
 
 **Post-processing:**
+
 ```python
 def post_process(text):
     text = "".join(text.split())              # Remove whitespace
@@ -214,6 +235,7 @@ def post_process(text):
 ```
 
 **Example:**
+
 ```
 Raw:   "こんに ちは ABC 123 …"
 Clean: "こんにちはＡＢＣ１２３..."
@@ -222,6 +244,7 @@ Clean: "こんにちはＡＢＣ１２３..."
 #### 2. `run.py` (139 lines) - Background Watcher 👁️
 
 **Two modes:**
+
 ```python
 def run(read_from="clipboard", write_to="clipboard",
         force_cpu=False, delay_secs=0.1):
@@ -247,6 +270,7 @@ def run(read_from="clipboard", write_to="clipboard",
 ```
 
 **Features:**
+
 - Clipboard monitoring (Windows, Mac, Linux/Wayland)
 - Directory watching for new images
 - Output to clipboard or text file
@@ -266,6 +290,7 @@ if __name__ == "__main__":
 ```
 
 **CLI Usage:**
+
 ```bash
 # Default: clipboard → clipboard
 manga_ocr
@@ -333,6 +358,7 @@ manga_ocr --pretrained-model-name-or-path my-model
 ### Model Architecture Details
 
 **Base Models:**
+
 - **Encoder:** `google/vit-base-patch16-224` (Vision Transformer)
   - Input: 384×384 RGB image
   - Patch size: 16×16 pixels
@@ -347,6 +373,7 @@ manga_ocr --pretrained-model-name-or-path my-model
   - Vocab size: 4000+ Japanese characters
 
 **Fine-tuning:**
+
 - Pre-trained on manga images
 - Specialized for vertical text, speech bubbles, stylized fonts
 - Recognizes hiragana, katakana, kanji
@@ -385,17 +412,19 @@ data/models/huggingface/hub/models--kha-white--manga-ocr-base/
 
 **Two formats (DUPLICATE - only one needed):**
 
-| File | Size | Format | Used? |
-|------|------|--------|-------|
-| `pytorch_model.bin` | 424MB | PyTorch (ZIP) | ✅ Default |
-| `model.safetensors` | 424MB | SafeTensors | ⚠️ Fallback |
+| File                | Size  | Format        | Used?       |
+| ------------------- | ----- | ------------- | ----------- |
+| `pytorch_model.bin` | 424MB | PyTorch (ZIP) | ✅ Default  |
+| `model.safetensors` | 424MB | SafeTensors   | ⚠️ Fallback |
 
 **Content:** Millions of neural network parameters
+
 - Encoder weights (ViT layers)
 - Decoder weights (BERT layers)
 - Attention matrices, embeddings, layer norms
 
 **Loading:**
+
 ```python
 self.model = MangaOcrModel.from_pretrained(...)
 # ↑ Loads pytorch_model.bin by default
@@ -482,7 +511,7 @@ self.model = MangaOcrModel.from_pretrained(...)
   "do_resize": true,
   "image_mean": [0.5, 0.5, 0.5],
   "image_std": [0.5, 0.5, 0.5],
-  "size": {"height": 384, "width": 384}
+  "size": { "height": 384, "width": 384 }
 }
 ```
 
@@ -520,6 +549,7 @@ Total: 848MB
 ```
 
 **Memory Usage During Inference:**
+
 - Model weights in RAM: ~424MB
 - PyTorch runtime overhead: ~500MB
 - **Total RAM: ~900MB-1GB**
@@ -531,6 +561,7 @@ Total: 848MB
 ### Problem: 8GB Docker Image
 
 **Current Dockerfile.base:**
+
 ```dockerfile
 FROM python:3.11-slim          # ~150MB
 RUN pip install manga-ocr      # Downloads CUDA PyTorch (~3-4GB)
@@ -552,6 +583,7 @@ Total:                               ~8,002 MB (8.02 GB)
 ### Why CUDA PyTorch is Installed
 
 When `pip install manga-ocr` runs, it installs `torch>=1.0` which defaults to:
+
 - **CUDA-enabled version** (~3-4GB)
 - Includes NVIDIA CUDA toolkit
 - Includes cuDNN libraries
@@ -568,6 +600,7 @@ When `pip install manga-ocr` runs, it installs `torch>=1.0` which defaults to:
 **Reduces image: 8GB → 1.5-2GB (75% reduction)**
 
 **Modified Dockerfile.base:**
+
 ```dockerfile
 FROM python:3.11-slim
 
@@ -595,6 +628,7 @@ WORKDIR /app
 ```
 
 **Why this works:**
+
 - Installing torch BEFORE manga-ocr prevents CUDA download
 - Uses PyTorch's CPU-specific wheel repository
 - ~900MB instead of ~3-4GB
@@ -644,6 +678,7 @@ WORKDIR /app
 ```
 
 **Benefits:**
+
 - Build tools (gcc, g++) only in stage 1
 - Final image has only runtime dependencies
 - Smaller base image
@@ -703,13 +738,13 @@ WORKDIR /app
 
 ### 5. Expected Results
 
-| Strategy | Image Size | Reduction | Complexity |
-|----------|------------|-----------|------------|
-| **Current (CUDA)** | **8.0 GB** | — | — |
-| **CPU-only PyTorch** | **1.5-2 GB** | **75%** | ⭐ Easy |
-| Multi-stage | 1.2-1.5 GB | 80% | ⭐⭐ Medium |
-| Remove duplicates | -424 MB | Model cache | ⭐ Easy |
-| Alpine | 800MB-1.2GB | 85% | ⭐⭐⭐ Hard |
+| Strategy             | Image Size   | Reduction   | Complexity  |
+| -------------------- | ------------ | ----------- | ----------- |
+| **Current (CUDA)**   | **8.0 GB**   | —           | —           |
+| **CPU-only PyTorch** | **1.5-2 GB** | **75%**     | ⭐ Easy     |
+| Multi-stage          | 1.2-1.5 GB   | 80%         | ⭐⭐ Medium |
+| Remove duplicates    | -424 MB      | Model cache | ⭐ Easy     |
+| Alpine               | 800MB-1.2GB  | 85%         | ⭐⭐⭐ Hard |
 
 **Recommended:** Start with CPU-only PyTorch (easiest, biggest impact)
 
@@ -726,7 +761,7 @@ WORKDIR /app
 docker-compose build
 
 # 4. Verify size
-docker images | grep comic-reader
+docker images | grep manga-reader
 # Should show ~1.5-2GB instead of 8GB
 ```
 

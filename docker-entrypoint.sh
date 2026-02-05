@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Starting Comic Reader..."
+echo "🚀 Starting Manga Reader..."
 
 # Ensure required directories exist
 echo "📁 Creating required directories..."

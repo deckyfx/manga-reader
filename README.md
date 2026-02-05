@@ -1,6 +1,6 @@
-# Comic Reader
+# Manga Reader
 
-A manga/comic reader with OCR text extraction and translation capabilities.
+A manga reader with OCR text extraction and translation capabilities.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/deckyfx/manga-reader/blob/main/LICENSE)
 [![GitHub](https://img.shields.io/badge/github-deckyfx%2Fmanga--reader-blue.svg)](https://github.com/deckyfx/manga-reader)
@@ -107,7 +107,7 @@ Create `.env` file in the project root:
 
 ```bash
 # Application
-APP_NAME=comic-reader
+APP_NAME=manga-reader
 NODE_ENV=development
 SERVER_PORT=3000
 

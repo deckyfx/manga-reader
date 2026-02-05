@@ -91,7 +91,7 @@ meta = get_project_metadata()
 app = FastAPI(
     title=meta.get("name", "Manga OCR Server"),
     description=meta.get("description", "OCR server for Japanese manga"),
-    version=meta.get("version", "0.0.3"),
+    version=meta.get("version", "0.0.4"),
     lifespan=lifespan,
 )
 

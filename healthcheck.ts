@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Health check script for comic-reader app
+ * Health check script for manga-reader app
  *
  * Checks if the server is responding on port 3000
  */

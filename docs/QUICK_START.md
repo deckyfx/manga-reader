@@ -15,11 +15,11 @@ docker-compose logs -f
 
 ## 📦 What Gets Downloaded Once
 
-| Component | Size | Where Cached | When Re-downloaded |
-|-----------|------|--------------|-------------------|
-| PyTorch | ~900MB | Base image | Only if you rebuild base |
-| manga-ocr model | ~400MB | `./data/models/` | Never (volume persists) |
-| Pip wheels | Variable | `./data/pip-cache/` | Never (volume persists) |
+| Component       | Size     | Where Cached        | When Re-downloaded       |
+| --------------- | -------- | ------------------- | ------------------------ |
+| PyTorch         | ~900MB   | Base image          | Only if you rebuild base |
+| manga-ocr model | ~400MB   | `./data/models/`    | Never (volume persists)  |
+| Pip wheels      | Variable | `./data/pip-cache/` | Never (volume persists)  |
 
 ## 🔄 Regular Usage
 
@@ -57,12 +57,13 @@ ls -lh ./data/pip-cache/
 ls -lh ./data/models/huggingface/hub/
 
 # Check base image exists
-docker images | grep comic-reader-base
+docker images | grep manga-reader-base
 ```
 
 ## 🔧 Common Tasks
 
 ### Code changes
+
 ```bash
 # Just rebuild (fast - uses cache)
 docker-compose build
@@ -70,6 +71,7 @@ docker-compose up -d
 ```
 
 ### Update manga-ocr version
+
 ```bash
 # Edit requirements.txt, then:
 ./build-base.sh              # Rebuild base
@@ -78,10 +80,11 @@ docker-compose up -d
 ```
 
 ### Start fresh
+
 ```bash
 # Remove all caches
 rm -rf ./data/pip-cache/*
-docker rmi comic-reader-base:latest
+docker rmi manga-reader-base:latest
 
 # Rebuild from scratch
 ./build-base.sh

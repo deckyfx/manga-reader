@@ -9,12 +9,14 @@
 This guide shows how to build a **minimal Docker image** for manga-ocr that's ~1GB instead of 8GB.
 
 **Current Setup (Untouched):**
-- `Dockerfile.base` → `comic-reader-base:latest` (8GB - working)
-- `Dockerfile` → `comic-reader-app:latest` (8GB - working)
+
+- `Dockerfile.base` → `manga-reader-base:latest` (8GB - working)
+- `Dockerfile` → `manga-reader-app:latest` (8GB - working)
 - `docker-compose.yml` → Uses `latest` tags
 
 **New Optimized Setup (Separate):**
-- `Dockerfile.base.optimized` → `comic-reader-base:optimized` (~1GB - new)
+
+- `Dockerfile.base.optimized` → `manga-reader-base:optimized` (~1GB - new)
 - `Dockerfile.optimized` → Uses `optimized` tag
 - `docker-compose.optimized.yml` → Test setup
 
@@ -23,9 +25,11 @@ This guide shows how to build a **minimal Docker image** for manga-ocr that's ~1
 ## Files Created
 
 ### 1. `Dockerfile.base.optimized`
+
 **Multi-stage build with aggressive optimization**
 
 **Optimizations:**
+
 1. ✅ CPU-only PyTorch (900MB vs 3-4GB CUDA)
 2. ✅ Strip debug symbols from .so files (~20% size reduction)
 3. ✅ Remove tests, examples, docs (~200MB)
@@ -36,21 +40,25 @@ This guide shows how to build a **minimal Docker image** for manga-ocr that's ~1
 **Result:** ~900MB-1.2GB (87% reduction from 8GB)
 
 ### 2. `build-base-optimized.sh`
+
 **Build script for optimized base image**
 
-Creates `comic-reader-base:optimized` tag (does NOT touch `:latest`)
+Creates `manga-reader-base:optimized` tag (does NOT touch `:latest`)
 
 ### 3. `Dockerfile.optimized`
+
 **Uses optimized base image**
 
-Inherits from `comic-reader-base:optimized`
+Inherits from `manga-reader-base:optimized`
 
 ### 4. `docker-compose.optimized.yml`
+
 **Test docker-compose file**
 
 Uses optimized images with separate container name
 
 ### 5. `test-optimized.sh`
+
 **Automated test script**
 
 Verifies the optimized image works correctly
@@ -66,18 +74,20 @@ Verifies the optimized image works correctly
 ```
 
 **What it does:**
-- Builds new image with tag `comic-reader-base:optimized`
-- Does NOT overwrite `comic-reader-base:latest`
+
+- Builds new image with tag `manga-reader-base:optimized`
+- Does NOT overwrite `manga-reader-base:latest`
 - Shows size comparison
 
 **Expected output:**
+
 ```
 ✅ Optimized base image built successfully!
 
 📊 Size comparison:
 REPOSITORY            TAG          SIZE
-comic-reader-base     latest       8.02GB    ← Original (untouched)
-comic-reader-base     optimized    1.1GB     ← New optimized
+manga-reader-base     latest       8.02GB    ← Original (untouched)
+manga-reader-base     optimized    1.1GB     ← New optimized
 ```
 
 ### Step 2: Test Optimized Image
@@ -87,6 +97,7 @@ comic-reader-base     optimized    1.1GB     ← New optimized
 ```
 
 **What it tests:**
+
 1. Image exists
 2. Image size
 3. manga-ocr import works
@@ -94,6 +105,7 @@ comic-reader-base     optimized    1.1GB     ← New optimized
 5. Shows size comparison
 
 **Expected output:**
+
 ```
 ✅ All tests passed!
 
@@ -122,7 +134,7 @@ docker-compose -f docker-compose.optimized.yml down
 
 ```bash
 # Tag optimized as latest
-docker tag comic-reader-base:optimized comic-reader-base:latest
+docker tag manga-reader-base:optimized manga-reader-base:latest
 
 # Rebuild main app with new base
 docker-compose build
@@ -134,15 +146,17 @@ docker-compose up
 ### Option B: Update Dockerfile Directly
 
 **Edit `Dockerfile`:**
+
 ```dockerfile
 # Change this:
-FROM comic-reader-base:latest
+FROM manga-reader-base:latest
 
 # To this:
-FROM comic-reader-base:optimized
+FROM manga-reader-base:optimized
 ```
 
 Then rebuild:
+
 ```bash
 docker-compose build
 docker-compose up
@@ -151,8 +165,9 @@ docker-compose up
 ### Option C: Keep Both (Testing)
 
 Keep both versions available:
-- `comic-reader-base:latest` (8GB - stable)
-- `comic-reader-base:optimized` (1GB - testing)
+
+- `manga-reader-base:latest` (8GB - stable)
+- `manga-reader-base:optimized` (1GB - testing)
 
 Switch between them by changing the tag in `Dockerfile`.
 
@@ -165,6 +180,7 @@ Switch between them by changing the tag in `Dockerfile`.
 **Error:** `gcc: command not found` or similar
 
 **Fix:** Stage 1 installs build tools, this shouldn't happen. Check Docker cache:
+
 ```bash
 docker builder prune -a
 ./build-base-optimized.sh
@@ -175,8 +191,9 @@ docker builder prune -a
 **Error:** `libgomp1: not found`
 
 **Fix:** Runtime dependency missing. Dockerfile should install it, but verify:
+
 ```bash
-docker run --rm comic-reader-base:optimized ldd /usr/local/lib/python3.11/site-packages/torch/lib/libtorch.so
+docker run --rm manga-reader-base:optimized ldd /usr/local/lib/python3.11/site-packages/torch/lib/libtorch.so
 ```
 
 ### manga-ocr Import Fails
@@ -184,8 +201,9 @@ docker run --rm comic-reader-base:optimized ldd /usr/local/lib/python3.11/site-p
 **Error:** `ModuleNotFoundError: No module named 'torch'`
 
 **Fix:** Packages not copied correctly from Stage 1. Check copy path:
+
 ```bash
-docker run --rm comic-reader-base:optimized ls -la /usr/local/lib/python3.11/site-packages/
+docker run --rm manga-reader-base:optimized ls -la /usr/local/lib/python3.11/site-packages/
 ```
 
 ### Model Download Issues
@@ -193,10 +211,11 @@ docker run --rm comic-reader-base:optimized ls -la /usr/local/lib/python3.11/sit
 **Error:** `Connection timeout` when initializing
 
 **Fix:** Model cache not mounted. Ensure volume is mounted:
+
 ```bash
 docker run --rm \
   -v $(pwd)/data/models/huggingface/hub:/root/.cache/huggingface/hub \
-  comic-reader-base:optimized \
+  manga-reader-base:optimized \
   python -c "from manga_ocr import MangaOcr; MangaOcr()"
 ```
 
@@ -205,15 +224,17 @@ docker run --rm \
 **Expected:** ~1.0-1.2GB for optimized image
 
 **If larger:**
+
 1. Check if CPU-only torch was installed:
+
    ```bash
-   docker run --rm comic-reader-base:optimized pip show torch | grep Version
+   docker run --rm manga-reader-base:optimized pip show torch | grep Version
    # Should show: Version: 2.1.2+cpu
    ```
 
 2. Check for leftover files:
    ```bash
-   docker run --rm comic-reader-base:optimized find /usr/local -name "*.h" -o -name "*.cpp" | wc -l
+   docker run --rm manga-reader-base:optimized find /usr/local -name "*.h" -o -name "*.cpp" | wc -l
    # Should show: 0
    ```
 
@@ -223,39 +244,39 @@ docker run --rm \
 
 ### What's Removed from Final Image
 
-| Item | Size | Impact |
-|------|------|--------|
-| CUDA PyTorch | 2.5GB | ✅ Use CPU version |
-| Build tools (gcc, g++) | 500MB | ✅ Only in Stage 1 |
-| pip cache | 200MB | ✅ `--no-cache-dir` |
-| Tests & examples | 150MB | ✅ Deleted |
-| Source headers (.h, .c, .cpp) | 50MB | ✅ Deleted |
-| Debug symbols in .so | 100MB | ✅ Stripped |
-| Documentation | 10MB | ✅ Deleted |
-| **Total saved** | **~3.5GB** | **87% reduction** |
+| Item                          | Size       | Impact              |
+| ----------------------------- | ---------- | ------------------- |
+| CUDA PyTorch                  | 2.5GB      | ✅ Use CPU version  |
+| Build tools (gcc, g++)        | 500MB      | ✅ Only in Stage 1  |
+| pip cache                     | 200MB      | ✅ `--no-cache-dir` |
+| Tests & examples              | 150MB      | ✅ Deleted          |
+| Source headers (.h, .c, .cpp) | 50MB       | ✅ Deleted          |
+| Debug symbols in .so          | 100MB      | ✅ Stripped         |
+| Documentation                 | 10MB       | ✅ Deleted          |
+| **Total saved**               | **~3.5GB** | **87% reduction**   |
 
 ### What's Kept in Final Image
 
-| Item | Size | Purpose |
-|------|------|---------|
-| Python runtime | 50MB | Required |
-| PyTorch CPU (.so files) | 700MB | Neural network engine |
-| Transformers | 100MB | Model framework |
-| manga-ocr | 50MB | OCR wrapper + dependencies |
-| Runtime libs (libgomp, etc.) | 20MB | Required by .so files |
-| **Total** | **~920MB** | **Minimal working image** |
+| Item                         | Size       | Purpose                    |
+| ---------------------------- | ---------- | -------------------------- |
+| Python runtime               | 50MB       | Required                   |
+| PyTorch CPU (.so files)      | 700MB      | Neural network engine      |
+| Transformers                 | 100MB      | Model framework            |
+| manga-ocr                    | 50MB       | OCR wrapper + dependencies |
+| Runtime libs (libgomp, etc.) | 20MB       | Required by .so files      |
+| **Total**                    | **~920MB** | **Minimal working image**  |
 
 ---
 
 ## Performance Comparison
 
-| Metric | Original | Optimized | Change |
-|--------|----------|-----------|--------|
-| **Image Size** | 8.02 GB | 1.1 GB | -87% |
-| **Build Time** | 10 min | 8 min | -20% |
-| **Startup Time** | 3-5s | 2-4s | Similar |
-| **OCR Speed** | 1-3s | 1-3s | Same |
-| **Memory Usage** | 1.2 GB | 1.0 GB | -17% |
+| Metric           | Original | Optimized | Change  |
+| ---------------- | -------- | --------- | ------- |
+| **Image Size**   | 8.02 GB  | 1.1 GB    | -87%    |
+| **Build Time**   | 10 min   | 8 min     | -20%    |
+| **Startup Time** | 3-5s     | 2-4s      | Similar |
+| **OCR Speed**    | 1-3s     | 1-3s      | Same    |
+| **Memory Usage** | 1.2 GB   | 1.0 GB    | -17%    |
 
 **Key Insight:** Optimized image is **87% smaller** with **no performance loss**!
 
@@ -287,6 +308,7 @@ rm snapshots/*/model.safetensors
 ### Pre-compile Python Bytecode
 
 **Already done in Dockerfile.base.optimized:**
+
 ```dockerfile
 RUN python -m compileall -q /usr/local/lib/python3.11/site-packages
 ```
@@ -304,19 +326,20 @@ RUN python -m compileall -q /usr/local/lib/python3.11/site-packages
 docker-compose down
 
 # Original images are untouched
-docker images | grep comic-reader-base
+docker images | grep manga-reader-base
 # Should show both:
-#   comic-reader-base:latest     8.02GB (original - working)
-#   comic-reader-base:optimized  1.1GB  (new - testing)
+#   manga-reader-base:latest     8.02GB (original - working)
+#   manga-reader-base:optimized  1.1GB  (new - testing)
 
 # Continue using original
 docker-compose up
 ```
 
 **To remove optimized images:**
+
 ```bash
-docker rmi comic-reader-base:optimized
-docker rmi comic-reader-app-optimized
+docker rmi manga-reader-base:optimized
+docker rmi manga-reader-app-optimized
 ```
 
 ---
@@ -330,6 +353,7 @@ docker rmi comic-reader-app-optimized
 ✅ **Migration:** Easy switch when ready
 
 **Next Steps:**
+
 1. Run `./build-base-optimized.sh` to build
 2. Run `./test-optimized.sh` to verify
 3. Test with your app

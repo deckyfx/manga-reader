@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { envConfig } from "../env-config";
 import { join } from "node:path";
 
-const dbPath = join(envConfig.DB_DIR, "comic-reader.db");
+const dbPath = join(envConfig.DB_DIR, "manga-reader.db");
 const sqlite = new Database(dbPath);
 
 export const db = drizzle(sqlite);

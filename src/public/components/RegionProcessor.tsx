@@ -212,7 +212,7 @@ export function RegionProcessor({
         <img
           ref={imageRef}
           src={imageUrl}
-          alt="Comic page for OCR"
+          alt="Manga page for OCR"
           className="max-w-full h-auto rounded-lg shadow-lg"
           crossOrigin="anonymous"
         />

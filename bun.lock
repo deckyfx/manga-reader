@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "comic-reader",
+      "name": "manga-reader",
       "dependencies": {
         "@elysiajs/eden": "^1.4.6",
         "@elysiajs/server-timing": "^1.4.0",

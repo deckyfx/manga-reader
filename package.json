@@ -1,7 +1,7 @@
 {
-  "name": "comic-reader",
-  "version": "0.0.3",
-  "description": "A modern manga/comic reader with real-time OCR text extraction and translation capabilities",
+  "name": "manga-reader",
+  "version": "0.0.4",
+  "description": "A modern manga/manga reader with real-time OCR text extraction and translation capabilities",
   "module": "src/index.ts",
   "type": "module",
   "private": true,

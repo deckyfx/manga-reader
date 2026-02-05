@@ -35,7 +35,7 @@ export interface MigrationConfig {
  */
 export class MigrationManager {
   private static get dbPath(): string {
-    return join(envConfig.DB_DIR, "comic-reader.db");
+    return join(envConfig.DB_DIR, "manga-reader.db");
   }
   private static migrationsDir = "drizzle";
 

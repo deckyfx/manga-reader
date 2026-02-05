@@ -12,7 +12,7 @@ import { EditChapterPage } from "./pages/admin/EditChapterPage";
 import "./global.css";
 
 /**
- * Main Comic Reader App with routing
+ * Main Manga Reader App with routing
  */
 function App() {
   return (

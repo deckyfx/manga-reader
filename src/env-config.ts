@@ -39,7 +39,7 @@ class EnvConfig {
    * Application name
    */
   get APP_NAME(): string {
-    return Bun.env.APP_NAME ?? "comic-reader";
+    return Bun.env.APP_NAME ?? "manga-reader";
   }
 
   /**

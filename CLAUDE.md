@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a comic reader application built with Bun. The project is currently in initial setup phase.
+This is a manga reader application built with Bun. The project is currently in initial setup phase.
 
 ## Development Commands
 

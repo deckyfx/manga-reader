@@ -54,13 +54,13 @@ async function reindexChapterPages(chapterId: number) {
  */
 export const apiPlugin = new Elysia({ prefix: "/api" })
   .get("/hello", () => {
-    return { message: "Hello from Comic Reader API!" };
+    return { message: "Hello from Manga Reader API!" };
   })
-  .get("/comics", () => {
+  .get("/mangas", () => {
     return {
-      comics: [
-        { id: 1, title: "Sample Comic 1", pages: 20 },
-        { id: 2, title: "Sample Comic 2", pages: 30 },
+      mangas: [
+        { id: 1, title: "Sample Manga 1", pages: 20 },
+        { id: 2, title: "Sample Manga 2", pages: 30 },
       ],
     };
   })
