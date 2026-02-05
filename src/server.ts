@@ -4,6 +4,7 @@ import { serverTiming } from "@elysiajs/server-timing";
 import { envConfig } from "./env-config";
 import { apiPlugin } from "./plugins/routeApi";
 import { appPlugin } from "./plugins/routeApp";
+import { appPluginBinary } from "./plugins/routeAppBinary";
 import { MangaOCRService } from "./services/MangaOCRService";
 import { MigrationManager } from "./db/migration-manager";
 import { createLogger } from "tsuki-logger/elysia";
@@ -51,7 +52,7 @@ await initializeMangaOCR();
  * Main Elysia server with API and React app plugins
  */
 const app = new Elysia()
-  // Logging middleware // Logging middleware
+  // Logging middleware
   .use(
     createLogger({
       level: "debug",
@@ -64,7 +65,7 @@ const app = new Elysia()
   .use(serverTiming())
 
   .use(apiPlugin) // API routes first
-  .use(appPlugin) // React app last (wildcard route)
+  .use(envConfig.IS_BINARY_MODE ? appPluginBinary : appPlugin) // Load correct app plugin based on run mode
   .listen(envConfig.SERVER_PORT);
 
 console.log(`🚀 Server running at http://localhost:${envConfig.SERVER_PORT}`);

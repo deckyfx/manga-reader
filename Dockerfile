@@ -25,6 +25,11 @@ WORKDIR /app
 # Copy compiled binary from builder
 COPY --from=builder /app/app /app/app
 
+# Copy dist folder (static assets needed by binary)
+# Exclude source maps to reduce image size (~5.7MB saved)
+COPY --from=builder /app/dist /app/dist
+RUN find /app/dist -name "*.map" -delete
+
 # Copy migration files (needed for database initialization)
 COPY --from=builder /app/drizzle /app/drizzle
 

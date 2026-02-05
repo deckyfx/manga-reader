@@ -57,6 +57,23 @@ class EnvConfig {
   }
 
   /**
+   * Run mode (set at build time via define)
+   * - "binary": Running from compiled binary
+   * - "" (empty): Running from source in dev mode
+   * Use process.env instead of Bun.env to catch build-time defines
+   */
+  get RUN_MODE(): string {
+    return process.env.RUN_MODE ?? "";
+  }
+
+  /**
+   * Check if running in binary mode
+   */
+  get IS_BINARY_MODE(): boolean {
+    return this.RUN_MODE === "binary";
+  }
+
+  /**
    * Base data directory path
    */
   get DATA_DIR(): string {
@@ -107,3 +124,6 @@ class EnvConfig {
 
 // Export singleton instance
 export const envConfig = EnvConfig.getInstance();
+
+// Log run mode
+console.log("🔧 Run mode:", envConfig.RUN_MODE || "source");
