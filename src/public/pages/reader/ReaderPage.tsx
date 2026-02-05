@@ -4,6 +4,7 @@ import { MangaPage } from "../../components/MangaPage";
 import { ChapterNavigation } from "../../components/ChapterNavigation";
 import { StickyHeader } from "../../components/StickyHeader";
 import { api } from "../../lib/api";
+import { catchError } from "../../../lib/error-handler";
 
 /**
  * Reader page - displays a single manga page with navigation
@@ -41,82 +42,108 @@ export function ReaderPage() {
   // Load chapter data ONCE (series, chapter, all pages)
   const loadChapter = async () => {
     setLoading(true);
-    try {
-      // Load chapter and series in parallel
-      const [chapterResult, seriesResult] = await Promise.all([
+
+    // Load chapter and series in parallel
+    const [error1, results] = await catchError(
+      Promise.all([
         api.api.chapters({ slug: chapterSlug! }).get(),
         api.api.series({ slug: seriesSlug! }).get(),
-      ]);
+      ])
+    );
 
-      // Validate chapter exists
-      if (!chapterResult.data?.success || !chapterResult.data.chapter) {
-        setLoading(false);
-        return;
-      }
-
-      // Validate series exists
-      if (!seriesResult.data?.success || !seriesResult.data.series) {
-        setLoading(false);
-        return;
-      }
-
-      const chapter = chapterResult.data.chapter;
-      const series = seriesResult.data.series;
-
-      // Set chapter title
-      setChapterTitle(chapter.title);
-
-      // Validate relationship: chapter must belong to series
-      if (chapter.seriesId !== series.id) {
-        console.warn(
-          `Chapter ${chapterSlug} does not belong to series ${seriesSlug}. Redirecting to correct series...`
-        );
-
-        // Load the correct series for this chapter
-        const correctSeriesResult = await api.api
-          .series({ slug: `s${String(chapter.seriesId).padStart(5, "0")}` })
-          .get();
-
-        if (correctSeriesResult.data?.success && correctSeriesResult.data.series) {
-          const correctSeries = correctSeriesResult.data.series;
-          // Redirect to correct URL
-          navigate(`/r/${correctSeries.slug}/${chapterSlug}/${pageNum}`, {
-            replace: true,
-          });
-        }
-        return;
-      }
-
-      // Fetch all pages for the chapter (ONCE)
-      const pagesResult = await api.api
-        .chapters({ slug: chapterSlug! })
-        .pages.get();
-
-      if (pagesResult.data?.success && pagesResult.data.pages) {
-        const pages = pagesResult.data.pages;
-        setPagesCache(pages); // Cache all pages
-        setTotalPages(pages.length);
-
-        // Set initial page
-        const page = pages.find((p: any) => p.orderNum === currentPage);
-        if (page) {
-          setPageData(page);
-        }
-      }
-
-      // Fetch all chapters for the series (for next/previous chapter navigation)
-      const chaptersResult = await api.api
-        .series({ slug: seriesSlug! })
-        .chapters.get();
-
-      if (chaptersResult.data?.success && chaptersResult.data.chapters) {
-        setChaptersCache(chaptersResult.data.chapters);
-      }
-    } catch (error) {
-      console.error("Failed to load chapter:", error);
-    } finally {
+    if (error1) {
+      console.error("Failed to load chapter:", error1);
       setLoading(false);
+      return;
     }
+
+    const [chapterResult, seriesResult] = results;
+
+    // Validate chapter exists
+    if (!chapterResult.data?.success || !chapterResult.data.chapter) {
+      setLoading(false);
+      return;
+    }
+
+    // Validate series exists
+    if (!seriesResult.data?.success || !seriesResult.data.series) {
+      setLoading(false);
+      return;
+    }
+
+    const chapter = chapterResult.data.chapter;
+    const series = seriesResult.data.series;
+
+    // Set chapter title
+    setChapterTitle(chapter.title);
+
+    // Validate relationship: chapter must belong to series
+    if (chapter.seriesId !== series.id) {
+      console.warn(
+        `Chapter ${chapterSlug} does not belong to series ${seriesSlug}. Redirecting to correct series...`
+      );
+
+      // Load the correct series for this chapter
+      const [error2, correctSeriesResult] = await catchError(
+        api.api.series({ slug: `s${String(chapter.seriesId).padStart(5, "0")}` }).get()
+      );
+
+      if (error2) {
+        console.error("Failed to load correct series:", error2);
+        setLoading(false);
+        return;
+      }
+
+      if (correctSeriesResult.data?.success && correctSeriesResult.data.series) {
+        const correctSeries = correctSeriesResult.data.series;
+        // Redirect to correct URL
+        navigate(`/r/${correctSeries.slug}/${chapterSlug}/${pageNum}`, {
+          replace: true,
+        });
+      }
+      setLoading(false);
+      return;
+    }
+
+    // Fetch all pages for the chapter (ONCE)
+    const [error3, pagesResult] = await catchError(
+      api.api.chapters({ slug: chapterSlug! }).pages.get()
+    );
+
+    if (error3) {
+      console.error("Failed to load pages:", error3);
+      setLoading(false);
+      return;
+    }
+
+    if (pagesResult.data?.success && pagesResult.data.pages) {
+      const pages = pagesResult.data.pages;
+      setPagesCache(pages); // Cache all pages
+      setTotalPages(pages.length);
+
+      // Set initial page
+      const page = pages.find((p: any) => p.orderNum === currentPage);
+      if (page) {
+        setPageData(page);
+      }
+    }
+
+    // Fetch all chapters for the series (for next/previous chapter navigation)
+    const [error4, chaptersResult] = await catchError(
+      api.api.series({ slug: seriesSlug! }).chapters.get()
+    );
+
+    if (error4) {
+      console.error("Failed to load chapters:", error4);
+      setLoading(false);
+      return;
+    }
+
+    if (chaptersResult.data?.success && chaptersResult.data.chapters) {
+      setChaptersCache(chaptersResult.data.chapters);
+    }
+
+    setLoading(false);
   };
 
   // Update current page from cache (no API call)
@@ -140,22 +167,23 @@ export function ReaderPage() {
       if (currentChapterIndex > 0) {
         const previousChapter = chaptersCache[currentChapterIndex - 1];
 
-        try {
-          // Load previous chapter's pages to get last page
-          const pagesResult = await api.api
-            .chapters({ slug: previousChapter.slug })
-            .pages.get();
+        // Load previous chapter's pages to get last page
+        const [error, pagesResult] = await catchError(
+          api.api.chapters({ slug: previousChapter.slug }).pages.get()
+        );
 
-          if (
-            pagesResult.data?.success &&
-            pagesResult.data.pages &&
-            pagesResult.data.pages.length > 0
-          ) {
-            const lastPage = pagesResult.data.pages.length;
-            navigate(`/r/${seriesSlug}/${previousChapter.slug}/${lastPage}`);
-          }
-        } catch (error) {
+        if (error) {
           console.error("Failed to load previous chapter:", error);
+          return;
+        }
+
+        if (
+          pagesResult.data?.success &&
+          pagesResult.data.pages &&
+          pagesResult.data.pages.length > 0
+        ) {
+          const lastPage = pagesResult.data.pages.length;
+          navigate(`/r/${seriesSlug}/${previousChapter.slug}/${lastPage}`);
         }
       }
     }
@@ -174,21 +202,22 @@ export function ReaderPage() {
       if (currentChapterIndex !== -1 && currentChapterIndex < chaptersCache.length - 1) {
         const nextChapter = chaptersCache[currentChapterIndex + 1];
 
-        try {
-          // Load next chapter's pages to check if it has pages
-          const pagesResult = await api.api
-            .chapters({ slug: nextChapter.slug })
-            .pages.get();
+        // Load next chapter's pages to check if it has pages
+        const [error, pagesResult] = await catchError(
+          api.api.chapters({ slug: nextChapter.slug }).pages.get()
+        );
 
-          if (
-            pagesResult.data?.success &&
-            pagesResult.data.pages &&
-            pagesResult.data.pages.length > 0
-          ) {
-            navigate(`/r/${seriesSlug}/${nextChapter.slug}/1`);
-          }
-        } catch (error) {
+        if (error) {
           console.error("Failed to load next chapter:", error);
+          return;
+        }
+
+        if (
+          pagesResult.data?.success &&
+          pagesResult.data.pages &&
+          pagesResult.data.pages.length > 0
+        ) {
+          navigate(`/r/${seriesSlug}/${nextChapter.slug}/1`);
         }
       }
     }

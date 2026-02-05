@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSnackbar } from "../../hooks/useSnackbar";
 import { api } from "../../lib/api";
 import { StickyHeader } from "../../components/StickyHeader";
+import { catchError } from "../../../lib/error-handler";
 
 /**
  * Admin page - edit existing manga series
@@ -27,30 +28,34 @@ export function EditSeriesPage() {
   }, [seriesSlug]);
 
   const loadSeries = async () => {
-    try {
-      const result = await api.api.series({ slug: seriesSlug! }).get();
+    const [error, result] = await catchError(
+      api.api.series({ slug: seriesSlug! }).get()
+    );
 
-      if (result.data?.success && result.data.series) {
-        const series = result.data.series;
-        setTitle(series.title);
-        setSynopsis(series.synopsis || "");
-        setExistingCover(series.coverArt || null);
-
-        // Tags are already comma-separated
-        if (series.tags) {
-          setTags(series.tags);
-        }
-      } else {
-        showSnackbar("Series not found", "error");
-        navigate("/r");
-      }
-    } catch (error) {
+    if (error) {
       console.error("Failed to load series:", error);
       showSnackbar("Failed to load series", "error");
       navigate("/r");
-    } finally {
       setLoadingSeries(false);
+      return;
     }
+
+    if (result.data?.success && result.data.series) {
+      const series = result.data.series;
+      setTitle(series.title);
+      setSynopsis(series.synopsis || "");
+      setExistingCover(series.coverArt || null);
+
+      // Tags are already comma-separated
+      if (series.tags) {
+        setTags(series.tags);
+      }
+    } else {
+      showSnackbar("Series not found", "error");
+      navigate("/r");
+    }
+
+    setLoadingSeries(false);
   };
 
   const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -80,32 +85,37 @@ export function EditSeriesPage() {
     }
 
     setLoading(true);
-    try {
-      const formData = {
-        title: title.trim(),
-        synopsis: synopsis.trim() || undefined,
-        tags: tags.trim() || undefined,
-        coverArt: coverArt || undefined,
-      };
 
-      const result = await api.api.series({ slug: seriesSlug! }).put(formData);
+    const formData = {
+      title: title.trim(),
+      synopsis: synopsis.trim() || undefined,
+      tags: tags.trim() || undefined,
+      coverArt: coverArt || undefined,
+    };
 
-      if (result.data?.success) {
-        showSnackbar("Series updated successfully!", "success");
+    const [error, result] = await catchError(
+      api.api.series({ slug: seriesSlug! }).put(formData)
+    );
 
-        // Navigate after a short delay to show the success message
-        setTimeout(() => {
-          navigate(`/r/${seriesSlug}`);
-        }, 1000);
-      } else {
-        showSnackbar(result.data?.error || "Failed to update series", "error");
-      }
-    } catch (error) {
+    if (error) {
       console.error("Failed to update series:", error);
       showSnackbar("Failed to update series", "error");
-    } finally {
       setLoading(false);
+      return;
     }
+
+    if (result.data?.success) {
+      showSnackbar("Series updated successfully!", "success");
+
+      // Navigate after a short delay to show the success message
+      setTimeout(() => {
+        navigate(`/r/${seriesSlug}`);
+      }, 1000);
+    } else {
+      showSnackbar(result.data?.error || "Failed to update series", "error");
+    }
+
+    setLoading(false);
   };
 
   if (loadingSeries) {

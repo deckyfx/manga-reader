@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useSnackbar } from "../../hooks/useSnackbar";
 import { api } from "../../lib/api";
 import { StickyHeader } from "../../components/StickyHeader";
+import { catchError } from "../../../lib/error-handler";
 
 /**
  * Admin page - create new manga series
@@ -44,32 +45,37 @@ export function CreateSeriesPage() {
     }
 
     setLoading(true);
-    try {
-      const formData = {
-        title: title.trim(),
-        synopsis: synopsis.trim() || undefined,
-        tags: tags.trim() || undefined,
-        coverArt: coverArt || undefined,
-      };
 
-      const result = await api.api.series.post(formData);
+    const formData = {
+      title: title.trim(),
+      synopsis: synopsis.trim() || undefined,
+      tags: tags.trim() || undefined,
+      coverArt: coverArt || undefined,
+    };
 
-      if (result.data?.success) {
-        showSnackbar("Series created successfully!", "success");
+    const [error, result] = await catchError(
+      api.api.series.post(formData)
+    );
 
-        // Navigate after a short delay to show the success message
-        setTimeout(() => {
-          navigate("/r");
-        }, 1000);
-      } else {
-        showSnackbar(result.data?.error || "Failed to create series", "error");
-      }
-    } catch (error) {
+    if (error) {
       console.error("Failed to create series:", error);
       showSnackbar("Failed to create series", "error");
-    } finally {
       setLoading(false);
+      return;
     }
+
+    if (result.data?.success) {
+      showSnackbar("Series created successfully!", "success");
+
+      // Navigate after a short delay to show the success message
+      setTimeout(() => {
+        navigate("/r");
+      }, 1000);
+    } else {
+      showSnackbar(result.data?.error || "Failed to create series", "error");
+    }
+
+    setLoading(false);
   };
 
   return (

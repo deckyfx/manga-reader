@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import { catchError } from "../../lib/error-handler";
 
 interface ChapterNavigationProps {
   currentSeriesSlug: string;
@@ -66,16 +67,20 @@ export function ChapterNavigation({
     setIsSeriesOpen(newOpen);
 
     if (newOpen && !seriesLoaded) {
-      try {
-        const result = await api.api.series.get({
+      const [error, result] = await catchError(
+        api.api.series.get({
           query: { hasChapters: true },
-        });
-        if (result.data?.success && result.data.series) {
-          setSeriesList(result.data.series);
-          setSeriesLoaded(true);
-        }
-      } catch (error) {
+        })
+      );
+
+      if (error) {
         console.error("Failed to load series:", error);
+        return;
+      }
+
+      if (result.data?.success && result.data.series) {
+        setSeriesList(result.data.series);
+        setSeriesLoaded(true);
       }
     }
   };
@@ -86,16 +91,18 @@ export function ChapterNavigation({
     setIsChaptersOpen(newOpen);
 
     if (newOpen && !chaptersLoaded) {
-      try {
-        const result = await api.api
-          .series({ slug: currentSeriesSlug })
-          .chapters.get();
-        if (result.data?.success && result.data.chapters) {
-          setChaptersList(result.data.chapters);
-          setChaptersLoaded(true);
-        }
-      } catch (error) {
+      const [error, result] = await catchError(
+        api.api.series({ slug: currentSeriesSlug }).chapters.get()
+      );
+
+      if (error) {
         console.error("Failed to load chapters:", error);
+        return;
+      }
+
+      if (result.data?.success && result.data.chapters) {
+        setChaptersList(result.data.chapters);
+        setChaptersLoaded(true);
       }
     }
   };
@@ -114,16 +121,20 @@ export function ChapterNavigation({
 
   // Navigate to selected series (first chapter, first page)
   const handleSeriesSelect = async (seriesSlug: string) => {
-    try {
-      const result = await api.api.series({ slug: seriesSlug }).chapters.get();
-      if (result.data?.success && result.data.chapters && result.data.chapters.length > 0) {
-        const firstChapter = result.data.chapters[0];
-        navigate(`/r/${seriesSlug}/${firstChapter?.slug}/1`);
-        setIsSeriesOpen(false);
-        setSeriesFilter("");
-      }
-    } catch (error) {
+    const [error, result] = await catchError(
+      api.api.series({ slug: seriesSlug }).chapters.get()
+    );
+
+    if (error) {
       console.error("Failed to navigate to series:", error);
+      return;
+    }
+
+    if (result.data?.success && result.data.chapters && result.data.chapters.length > 0) {
+      const firstChapter = result.data.chapters[0];
+      navigate(`/r/${seriesSlug}/${firstChapter?.slug}/1`);
+      setIsSeriesOpen(false);
+      setSeriesFilter("");
     }
   };
 

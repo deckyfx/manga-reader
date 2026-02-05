@@ -1,4 +1,5 @@
 import { envConfig } from "../env-config";
+import { catchError } from "../lib/error-handler";
 
 /**
  * Manga OCR Service Response
@@ -177,11 +178,12 @@ export class MangaOCRService {
    * Check if OCR service is available
    */
   public async isAvailable(): Promise<boolean> {
-    try {
-      const health = await this.healthCheck();
-      return health.status === "healthy" && health.model_loaded;
-    } catch {
+    const [error, health] = await catchError(this.healthCheck());
+
+    if (error) {
       return false;
     }
+
+    return health.status === "healthy" && health.model_loaded;
   }
 }

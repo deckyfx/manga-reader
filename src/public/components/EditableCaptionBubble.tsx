@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { api } from "../lib/api";
+import { catchError } from "../../lib/error-handler";
 
 interface EditableCaptionBubbleProps {
   existingCaptionId?: number;
@@ -83,12 +84,12 @@ export function EditableCaptionBubble({
    * Upload image to OCR API and save to database immediately
    */
   const uploadImage = async () => {
-    try {
-      setState("uploading");
-      setState("processing");
+    setState("uploading");
+    setState("processing");
 
-      // Use Eden Treaty for type-safe API call
-      const result = await api.api.ocr.post({
+    // Use Eden Treaty for type-safe API call
+    const [err, result] = await catchError(
+      api.api.ocr.post({
         pageId,
         imagePath,
         x: rectX,
@@ -96,34 +97,37 @@ export function EditableCaptionBubble({
         width: rectWidth,
         height: rectHeight,
         capturedImage,
-      });
+      })
+    );
 
-      console.log("[CaptionBubble] API Response:", result.data);
-
-      if (result.data?.success) {
-        if (result.data.rawText) {
-          // Got result and saved to database!
-          setState("success");
-          setCaptionId(result.data.captionId);
-          setCaptionSlug(result.data.captionSlug);
-          setRawText(result.data.rawText);
-          setTranslatedText(result.data.translatedText || "");
-          // Store original values for dirty tracking
-          setOriginalRawText(result.data.rawText);
-          setOriginalTranslatedText(result.data.translatedText || "");
-        } else {
-          // Timeout
-          setState("error");
-          setError("OCR processing timed out");
-        }
-      } else {
-        setState("error");
-        setError(result.data?.error || "Upload failed");
-      }
-    } catch (err) {
+    if (err) {
       console.error("Upload error:", err);
       setState("error");
       setError(err instanceof Error ? err.message : "Failed to upload");
+      return;
+    }
+
+    console.log("[CaptionBubble] API Response:", result.data);
+
+    if (result.data?.success) {
+      if (result.data.rawText) {
+        // Got result and saved to database!
+        setState("success");
+        setCaptionId(result.data.captionId);
+        setCaptionSlug(result.data.captionSlug);
+        setRawText(result.data.rawText);
+        setTranslatedText(result.data.translatedText || "");
+        // Store original values for dirty tracking
+        setOriginalRawText(result.data.rawText);
+        setOriginalTranslatedText(result.data.translatedText || "");
+      } else {
+        // Timeout
+        setState("error");
+        setError("OCR processing timed out");
+      }
+    } else {
+      setState("error");
+      setError(result.data?.error || "Upload failed");
     }
   };
 
@@ -134,28 +138,33 @@ export function EditableCaptionBubble({
     if (!captionSlug) return;
 
     setIsUpdating(true);
-    try {
-      const result = await api.api.captions({ slug: captionSlug }).put({
+
+    const [err, result] = await catchError(
+      api.api.captions({ slug: captionSlug }).put({
         rawText,
         translatedText: translatedText || undefined,
-      });
+      })
+    );
 
-      if (result.data?.success) {
-        console.log("[EditableCaptionBubble] Caption updated successfully");
-        // Reset dirty state - update original values
-        setOriginalRawText(rawText);
-        setOriginalTranslatedText(translatedText);
-        // Reload all captions from database to refresh UI
-        onUpdate();
-      } else {
-        setError("Failed to update caption");
-      }
-    } catch (err) {
+    if (err) {
       console.error("Update error:", err);
       setError(err instanceof Error ? err.message : "Failed to update");
-    } finally {
       setIsUpdating(false);
+      return;
     }
+
+    if (result.data?.success) {
+      console.log("[EditableCaptionBubble] Caption updated successfully");
+      // Reset dirty state - update original values
+      setOriginalRawText(rawText);
+      setOriginalTranslatedText(translatedText);
+      // Reload all captions from database to refresh UI
+      onUpdate();
+    } else {
+      setError("Failed to update caption");
+    }
+
+    setIsUpdating(false);
   };
 
   /**
@@ -167,17 +176,20 @@ export function EditableCaptionBubble({
       return;
     }
 
-    try {
-      const result = await api.api.captions({ slug: captionSlug }).delete();
+    const [err, result] = await catchError(
+      api.api.captions({ slug: captionSlug }).delete()
+    );
 
-      if (result.data?.success) {
-        onDiscard();
-      } else {
-        setError("Failed to delete caption");
-      }
-    } catch (err) {
+    if (err) {
       console.error("Delete error:", err);
       setError(err instanceof Error ? err.message : "Failed to delete");
+      return;
+    }
+
+    if (result.data?.success) {
+      onDiscard();
+    } else {
+      setError("Failed to delete caption");
     }
   };
 

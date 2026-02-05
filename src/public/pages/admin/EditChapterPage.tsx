@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSnackbar } from "../../hooks/useSnackbar";
 import { api } from "../../lib/api";
 import { StickyHeader } from "../../components/StickyHeader";
+import { catchError } from "../../../lib/error-handler";
 
 /**
  * Admin page - edit chapter details (title and slug)
@@ -25,29 +26,33 @@ export function EditChapterPage() {
   }, [chapterSlug]);
 
   const loadChapter = async () => {
-    try {
-      const result = await api.api.chapters({ slug: chapterSlug! }).get();
+    const [error, result] = await catchError(
+      api.api.chapters({ slug: chapterSlug! }).get()
+    );
 
-      if (result.data?.success && result.data.chapter) {
-        setChapter(result.data.chapter);
-        setChapterTitle(result.data.chapter.title);
-        setChapterNumber(result.data.chapter.chapterNumber);
-
-        // Load series to get its slug
-        const seriesId = result.data.chapter.seriesId;
-        const seriesSlugString = `s${String(seriesId).padStart(5, "0")}`;
-        setSeriesSlug(seriesSlugString);
-      } else {
-        showSnackbar("Chapter not found", "error");
-        navigate("/r");
-      }
-    } catch (error) {
+    if (error) {
       console.error("Failed to load chapter:", error);
       showSnackbar("Failed to load chapter", "error");
       navigate("/r");
-    } finally {
       setLoadingChapter(false);
+      return;
     }
+
+    if (result.data?.success && result.data.chapter) {
+      setChapter(result.data.chapter);
+      setChapterTitle(result.data.chapter.title);
+      setChapterNumber(result.data.chapter.chapterNumber);
+
+      // Load series to get its slug
+      const seriesId = result.data.chapter.seriesId;
+      const seriesSlugString = `s${String(seriesId).padStart(5, "0")}`;
+      setSeriesSlug(seriesSlugString);
+    } else {
+      showSnackbar("Chapter not found", "error");
+      navigate("/r");
+    }
+
+    setLoadingChapter(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -68,28 +73,33 @@ export function EditChapterPage() {
     }
 
     setLoading(true);
-    try {
-      const result = await api.api.chapters({ slug: chapterSlug! }).put({
+
+    const [error, result] = await catchError(
+      api.api.chapters({ slug: chapterSlug! }).put({
         title: chapterTitle.trim(),
         chapterNumber: chapterNumber.trim(),
-      });
+      })
+    );
 
-      if (result.data?.success) {
-        showSnackbar("Chapter updated successfully!", "success");
-
-        // Navigate back to series list after a short delay
-        setTimeout(() => {
-          navigate("/r");
-        }, 1500);
-      } else {
-        showSnackbar(result.data?.error || "Failed to update chapter", "error");
-      }
-    } catch (error) {
+    if (error) {
       console.error("Failed to update chapter:", error);
       showSnackbar("Failed to update chapter", "error");
-    } finally {
       setLoading(false);
+      return;
     }
+
+    if (result.data?.success) {
+      showSnackbar("Chapter updated successfully!", "success");
+
+      // Navigate back to series list after a short delay
+      setTimeout(() => {
+        navigate("/r");
+      }, 1500);
+    } else {
+      showSnackbar(result.data?.error || "Failed to update chapter", "error");
+    }
+
+    setLoading(false);
   };
 
   if (loadingChapter) {

@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react";
 import html2canvas from "html2canvas";
 import { DraggableResizable } from "./DraggableResizable";
 import { api } from "../lib/api";
+import { catchError } from "../../lib/error-handler";
 
 /**
  * RegionProcessor Component
@@ -44,73 +45,76 @@ export function RegionProcessor({
   const captureRegion = async () => {
     if (!imageRef.current || !containerRef.current) return;
 
-    try {
-      // Get displayed image dimensions using getBoundingClientRect()
-      const imgRect = imageRef.current.getBoundingClientRect();
-      const displayedWidth = imgRect.width;
-      const displayedHeight = imgRect.height;
+    // Get displayed image dimensions using getBoundingClientRect()
+    const imgRect = imageRef.current.getBoundingClientRect();
+    const displayedWidth = imgRect.width;
+    const displayedHeight = imgRect.height;
 
-      // Capture the image element as canvas (at actual natural resolution)
-      const canvas = await html2canvas(imageRef.current, {
+    // Capture the image element as canvas (at actual natural resolution)
+    const [error, canvas] = await catchError(
+      html2canvas(imageRef.current, {
         useCORS: true,
         allowTaint: true,
-      });
+      })
+    );
 
-      // Use CANVAS dimensions as the true natural size (not imageRef.naturalWidth!)
-      // html2canvas captures at the actual image resolution
-      const canvasWidth = canvas.width;
-      const canvasHeight = canvas.height;
-
-      // Calculate scale factors between displayed and canvas dimensions
-      const scaleX = canvasWidth / displayedWidth;
-      const scaleY = canvasHeight / displayedHeight;
-
-      // Convert displayed selection coordinates to canvas coordinates
-      const displayedRect = {
-        x: selectionPosition.x,
-        y: selectionPosition.y,
-        width: selectionSize.width,
-        height: selectionSize.height,
-      };
-
-      // Scale coordinates manually using canvas dimensions
-      const naturalRect = {
-        x: displayedRect.x * scaleX,
-        y: displayedRect.y * scaleY,
-        width: displayedRect.width * scaleX,
-        height: displayedRect.height * scaleY,
-      };
-
-      // Create a new canvas for the cropped region
-      const croppedCanvas = document.createElement("canvas");
-      const ctx = croppedCanvas.getContext("2d");
-      if (!ctx) return;
-
-      // Set cropped canvas size to match scaled dimensions
-      croppedCanvas.width = naturalRect.width;
-      croppedCanvas.height = naturalRect.height;
-
-      // Draw the cropped region using natural coordinates
-      ctx.drawImage(
-        canvas,
-        naturalRect.x,
-        naturalRect.y,
-        naturalRect.width,
-        naturalRect.height,
-        0,
-        0,
-        naturalRect.width,
-        naturalRect.height,
-      );
-
-      // Convert to data URL for preview
-      const dataUrl = croppedCanvas.toDataURL("image/png");
-      setCapturedImage(dataUrl);
-      setShowSelector(false);
-    } catch (error) {
+    if (error) {
       console.error("Capture Error:", error);
       alert("Error capturing image. Please try again.");
+      return;
     }
+
+    // Use CANVAS dimensions as the true natural size (not imageRef.naturalWidth!)
+    // html2canvas captures at the actual image resolution
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
+
+    // Calculate scale factors between displayed and canvas dimensions
+    const scaleX = canvasWidth / displayedWidth;
+    const scaleY = canvasHeight / displayedHeight;
+
+    // Convert displayed selection coordinates to canvas coordinates
+    const displayedRect = {
+      x: selectionPosition.x,
+      y: selectionPosition.y,
+      width: selectionSize.width,
+      height: selectionSize.height,
+    };
+
+    // Scale coordinates manually using canvas dimensions
+    const naturalRect = {
+      x: displayedRect.x * scaleX,
+      y: displayedRect.y * scaleY,
+      width: displayedRect.width * scaleX,
+      height: displayedRect.height * scaleY,
+    };
+
+    // Create a new canvas for the cropped region
+    const croppedCanvas = document.createElement("canvas");
+    const ctx = croppedCanvas.getContext("2d");
+    if (!ctx) return;
+
+    // Set cropped canvas size to match scaled dimensions
+    croppedCanvas.width = naturalRect.width;
+    croppedCanvas.height = naturalRect.height;
+
+    // Draw the cropped region using natural coordinates
+    ctx.drawImage(
+      canvas,
+      naturalRect.x,
+      naturalRect.y,
+      naturalRect.width,
+      naturalRect.height,
+      0,
+      0,
+      naturalRect.width,
+      naturalRect.height,
+    );
+
+    // Convert to data URL for preview
+    const dataUrl = croppedCanvas.toDataURL("image/png");
+    setCapturedImage(dataUrl);
+    setShowSelector(false);
   };
 
   /**
@@ -122,12 +126,12 @@ export function RegionProcessor({
     setIsProcessing(true);
     setProgress(0);
 
-    try {
-      // Simulate progress during upload
-      setProgress(30);
+    // Simulate progress during upload
+    setProgress(30);
 
-      // Send to server-side OCR endpoint with immediate database persistence
-      const result = await api.api.ocr.post({
+    // Send to server-side OCR endpoint with immediate database persistence
+    const [error, result] = await catchError(
+      api.api.ocr.post({
         pageId,
         imagePath: imageUrl,
         x: selectionPosition.x,
@@ -135,27 +139,32 @@ export function RegionProcessor({
         width: selectionSize.width,
         height: selectionSize.height,
         capturedImage,
-      });
+      })
+    );
 
-      setProgress(100);
-
-      if (result.data?.success) {
-        // Got OCR result and saved to database
-        setOcrResult(result.data.rawText || "");
-        setOcrMetadata({
-          captionId: result.data.captionId,
-        });
-      } else {
-        setOcrResult(`Error: ${result.data?.error || "Failed to process OCR"}`);
-        setOcrMetadata(null);
-      }
-    } catch (error) {
+    if (error) {
       console.error("OCR Error:", error);
       setOcrResult("Error processing image. Please try again.");
-    } finally {
       setIsProcessing(false);
       setProgress(0);
+      return;
     }
+
+    setProgress(100);
+
+    if (result.data?.success) {
+      // Got OCR result and saved to database
+      setOcrResult(result.data.rawText || "");
+      setOcrMetadata({
+        captionId: result.data.captionId,
+      });
+    } else {
+      setOcrResult(`Error: ${result.data?.error || "Failed to process OCR"}`);
+      setOcrMetadata(null);
+    }
+
+    setIsProcessing(false);
+    setProgress(0);
   };
 
   /**

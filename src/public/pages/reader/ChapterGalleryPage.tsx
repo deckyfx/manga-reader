@@ -4,6 +4,7 @@ import { api } from "../../lib/api";
 import { useSnackbar } from "../../hooks/useSnackbar";
 import { ChapterGalleryItem } from "../../components/ChapterGalleryItem";
 import { StickyHeader } from "../../components/StickyHeader";
+import { catchError } from "../../../lib/error-handler";
 
 interface Page {
   id: number;
@@ -52,65 +53,86 @@ export function ChapterGalleryPage() {
 
   const loadChapterData = async () => {
     setLoading(true);
-    try {
-      // Load chapter and series in parallel
-      const [chapterResult, seriesResult] = await Promise.all([
+
+    // Load chapter and series in parallel
+    const [error1, results] = await catchError(
+      Promise.all([
         api.api.chapters({ slug: chapterSlug! }).get(),
         api.api.series({ slug: seriesSlug! }).get(),
-      ]);
+      ])
+    );
 
-      // Validate chapter exists
-      if (!chapterResult.data?.success || !chapterResult.data.chapter) {
-        setLoading(false);
-        return;
-      }
-
-      // Validate series exists
-      if (!seriesResult.data?.success || !seriesResult.data.series) {
-        setLoading(false);
-        return;
-      }
-
-      const chapter = chapterResult.data.chapter;
-      const series = seriesResult.data.series;
-
-      // Validate relationship: chapter must belong to series
-      if (chapter.seriesId !== series.id) {
-        console.warn(
-          `Chapter ${chapterSlug} does not belong to series ${seriesSlug}. Redirecting to correct series...`
-        );
-
-        // Load the correct series for this chapter
-        const correctSeriesResult = await api.api
-          .series({ slug: `s${String(chapter.seriesId).padStart(5, "0")}` })
-          .get();
-
-        if (correctSeriesResult.data?.success && correctSeriesResult.data.series) {
-          const correctSeries = correctSeriesResult.data.series;
-          // Redirect to correct URL
-          navigate(`/r/${correctSeries.slug}/${chapterSlug}`, {
-            replace: true,
-          });
-        }
-        return;
-      }
-
-      // Fetch all pages for the chapter
-      const pagesResult = await api.api
-        .chapters({ slug: chapterSlug! })
-        .pages.get();
-
-      if (pagesResult.data?.success && pagesResult.data.pages) {
-        setPages(pagesResult.data.pages);
-        setSeries(series);
-        setChapter(chapter);
-      }
-    } catch (error) {
-      console.error("Failed to load chapter data:", error);
+    if (error1) {
+      console.error("Failed to load chapter data:", error1);
       showSnackbar("Failed to load chapter", "error");
-    } finally {
       setLoading(false);
+      return;
     }
+
+    const [chapterResult, seriesResult] = results;
+
+    // Validate chapter exists
+    if (!chapterResult.data?.success || !chapterResult.data.chapter) {
+      setLoading(false);
+      return;
+    }
+
+    // Validate series exists
+    if (!seriesResult.data?.success || !seriesResult.data.series) {
+      setLoading(false);
+      return;
+    }
+
+    const chapter = chapterResult.data.chapter;
+    const series = seriesResult.data.series;
+
+    // Validate relationship: chapter must belong to series
+    if (chapter.seriesId !== series.id) {
+      console.warn(
+        `Chapter ${chapterSlug} does not belong to series ${seriesSlug}. Redirecting to correct series...`
+      );
+
+      // Load the correct series for this chapter
+      const [error2, correctSeriesResult] = await catchError(
+        api.api.series({ slug: `s${String(chapter.seriesId).padStart(5, "0")}` }).get()
+      );
+
+      if (error2) {
+        console.error("Failed to load correct series:", error2);
+        setLoading(false);
+        return;
+      }
+
+      if (correctSeriesResult.data?.success && correctSeriesResult.data.series) {
+        const correctSeries = correctSeriesResult.data.series;
+        // Redirect to correct URL
+        navigate(`/r/${correctSeries.slug}/${chapterSlug}`, {
+          replace: true,
+        });
+      }
+      setLoading(false);
+      return;
+    }
+
+    // Fetch all pages for the chapter
+    const [error3, pagesResult] = await catchError(
+      api.api.chapters({ slug: chapterSlug! }).pages.get()
+    );
+
+    if (error3) {
+      console.error("Failed to load pages:", error3);
+      showSnackbar("Failed to load chapter", "error");
+      setLoading(false);
+      return;
+    }
+
+    if (pagesResult.data?.success && pagesResult.data.pages) {
+      setPages(pagesResult.data.pages);
+      setSeries(series);
+      setChapter(chapter);
+    }
+
+    setLoading(false);
   };
 
   const handleDeleteClick = (page: Page, e: React.MouseEvent) => {
@@ -124,23 +146,28 @@ export function ChapterGalleryPage() {
     if (!pageToDelete || !pageToDelete.slug) return;
 
     setDeleting(true);
-    try {
-      const result = await api.api.pages({ slug: pageToDelete.slug }).delete();
 
-      if (result.data?.success) {
-        showSnackbar("Page deleted successfully!", "success");
-        deleteDialogRef.current?.close();
-        setPageToDelete(null);
-        loadChapterData();
-      } else {
-        showSnackbar(result.data?.error || "Failed to delete page", "error");
-      }
-    } catch (error) {
+    const [error, result] = await catchError(
+      api.api.pages({ slug: pageToDelete.slug }).delete()
+    );
+
+    if (error) {
       console.error("Failed to delete page:", error);
       showSnackbar("Failed to delete page", "error");
-    } finally {
       setDeleting(false);
+      return;
     }
+
+    if (result.data?.success) {
+      showSnackbar("Page deleted successfully!", "success");
+      deleteDialogRef.current?.close();
+      setPageToDelete(null);
+      loadChapterData();
+    } else {
+      showSnackbar(result.data?.error || "Failed to delete page", "error");
+    }
+
+    setDeleting(false);
   };
 
   const handleDeleteCancel = () => {
@@ -172,26 +199,30 @@ export function ChapterGalleryPage() {
 
     setUploading(true);
 
-    try {
-      // Upload page (will be added at the end automatically)
-      const result = await api.api["upload-page"].post({
+    // Upload page (will be added at the end automatically)
+    const [error, result] = await catchError(
+      api.api.pages.upload.post({
         chapterId: chapter!.id.toString(),
         image: selectedFile,
-      });
+      })
+    );
 
-      if (result.data?.success) {
-        showSnackbar("Page uploaded successfully!", "success");
-        fileInput.value = "";
-        loadChapterData();
-      } else {
-        showSnackbar(result.data?.error || "Failed to upload page", "error");
-      }
-    } catch (error) {
+    if (error) {
       console.error("Failed to upload page:", error);
       showSnackbar("Failed to upload page", "error");
-    } finally {
       setUploading(false);
+      return;
     }
+
+    if (result.data?.success) {
+      showSnackbar("Page uploaded successfully!", "success");
+      fileInput.value = "";
+      loadChapterData();
+    } else {
+      showSnackbar(result.data?.error || "Failed to upload page", "error");
+    }
+
+    setUploading(false);
   };
 
   const handleDragStart = (page: Page, e: React.DragEvent) => {
@@ -230,19 +261,23 @@ export function ChapterGalleryPage() {
       }),
     );
 
-    try {
-      // Send batch update to server
-      const result = await api.api["reorder-pages"].post({ updates });
+    // Send batch update to server
+    const [error, result] = await catchError(
+      api.api.pages.reorder.post({ updates })
+    );
 
-      if (result.data?.success) {
-        showSnackbar("Pages reordered successfully!", "success");
-      } else {
-        showSnackbar(result.data?.error || "Failed to reorder pages", "error");
-        loadChapterData(); // Reload on error
-      }
-    } catch (error) {
+    if (error) {
       console.error("Failed to reorder pages:", error);
       showSnackbar("Failed to reorder pages", "error");
+      loadChapterData(); // Reload on error
+      setDraggedPage(null);
+      return;
+    }
+
+    if (result.data?.success) {
+      showSnackbar("Pages reordered successfully!", "success");
+    } else {
+      showSnackbar(result.data?.error || "Failed to reorder pages", "error");
       loadChapterData(); // Reload on error
     }
 

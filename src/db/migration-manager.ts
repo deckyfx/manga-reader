@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { envConfig } from "../env-config";
+import { catchError, catchErrorSync } from "../lib/error-handler";
 
 /**
  * Migration manager configuration
@@ -98,28 +99,34 @@ export class MigrationManager {
     const sqlite = new Database(this.dbPath, { create: true });
     const db = drizzle(sqlite);
 
-    try {
-      // Use Drizzle's migrate() - handles tracking automatically
-      await migrate(db, { migrationsFolder: this.migrationsDir });
-      console.log("\n🎉 Migrations completed successfully");
-    } catch (error) {
+    // Use Drizzle's migrate() - handles tracking automatically
+    const [error, _result] = await catchError(
+      (async () => {
+        await migrate(db, { migrationsFolder: this.migrationsDir });
+      })(),
+    );
+
+    sqlite.close();
+
+    if (error) {
       console.error("\n❌ Migration failed:", error);
       throw error;
-    } finally {
-      sqlite.close();
     }
+
+    console.log("\n🎉 Migrations completed successfully");
   }
 
   /**
    * Check if migration files exist
    */
   private static async hasMigrationFiles(): Promise<boolean> {
-    try {
-      const files = await readdir(this.migrationsDir);
-      return files.some((f) => f.endsWith(".sql"));
-    } catch {
+    const [error, files] = await catchError(readdir(this.migrationsDir));
+
+    if (error) {
       return false;
     }
+
+    return files.some((f) => f.endsWith(".sql"));
   }
 
   /**
@@ -127,35 +134,35 @@ export class MigrationManager {
    * Compares migration files vs Drizzle's tracking table
    */
   private static async getPendingCount(): Promise<number> {
-    try {
-      // Get all migration files
-      const files = await readdir(this.migrationsDir);
-      const migrationFiles = files.filter((f) => f.endsWith(".sql")).sort();
+    const [readdirError, files] = await catchError(readdir(this.migrationsDir));
 
-      if (migrationFiles.length === 0) {
-        return 0;
-      }
-
-      const sqlite = new Database(this.dbPath, { create: true });
-      const db = drizzle(sqlite);
-
-      try {
-        // Query Drizzle's tracking table
-        const applied = db.all<{ hash: string; created_at: number }>(
-          sql`SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at`
-        );
-
-        sqlite.close();
-
-        // Compare counts
-        return migrationFiles.length - applied.length;
-      } catch (error) {
-        // If __drizzle_migrations doesn't exist, all migrations are pending
-        sqlite.close();
-        return migrationFiles.length;
-      }
-    } catch {
+    if (readdirError) {
       return 0;
     }
+
+    const migrationFiles = files.filter((f) => f.endsWith(".sql")).sort();
+
+    if (migrationFiles.length === 0) {
+      return 0;
+    }
+
+    const sqlite = new Database(this.dbPath, { create: true });
+    const db = drizzle(sqlite);
+
+    const [queryError, applied] = catchErrorSync(() =>
+      db.all<{ hash: string; created_at: number }>(
+        sql`SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at`,
+      ),
+    );
+
+    sqlite.close();
+
+    if (queryError) {
+      // If __drizzle_migrations doesn't exist, all migrations are pending
+      return migrationFiles.length;
+    }
+
+    // Compare counts
+    return migrationFiles.length - applied.length;
   }
 }

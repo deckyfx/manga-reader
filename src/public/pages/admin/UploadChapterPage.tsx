@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSnackbar } from "../../hooks/useSnackbar";
 import { api } from "../../lib/api";
 import { StickyHeader } from "../../components/StickyHeader";
+import { catchError } from "../../../lib/error-handler";
 
 /**
  * Admin page - upload compressed chapter containing pages
@@ -24,22 +25,26 @@ export function UploadChapterPage() {
   }, [seriesSlug]);
 
   const loadSeries = async () => {
-    try {
-      const result = await api.api.series({ slug: seriesSlug! }).get();
+    const [error, result] = await catchError(
+      api.api.series({ slug: seriesSlug! }).get()
+    );
 
-      if (result.data?.success && result.data.series) {
-        setSeries(result.data.series);
-      } else {
-        showSnackbar("Series not found", "error");
-        navigate("/r");
-      }
-    } catch (error) {
+    if (error) {
       console.error("Failed to load series:", error);
       showSnackbar("Failed to load series", "error");
       navigate("/r");
-    } finally {
       setLoadingSeries(false);
+      return;
     }
+
+    if (result.data?.success && result.data.series) {
+      setSeries(result.data.series);
+    } else {
+      showSnackbar("Series not found", "error");
+      navigate("/r");
+    }
+
+    setLoadingSeries(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -79,33 +84,37 @@ export function UploadChapterPage() {
 
     setLoading(true);
 
-    try {
-      const result = await api.api.chapters.post({
+    const [error, result] = await catchError(
+      api.api.chapters.post({
         seriesId: series!.id.toString(), // Send actual series ID (not slug)
         title: chapterTitle.trim(),
         chapterNumber: chapterNumber.trim(),
         zipFile: selectedFile,
-      });
+      })
+    );
 
-      if (result.data?.success) {
-        showSnackbar(
-          `Chapter uploaded successfully! ${result.data.pagesCount} pages created.`,
-          "success",
-        );
-
-        // Navigate after a short delay
-        setTimeout(() => {
-          navigate(`/r/${series!.slug}`);
-        }, 1500);
-      } else {
-        showSnackbar(result.data?.error || "Failed to upload chapter", "error");
-      }
-    } catch (error) {
+    if (error) {
       console.error("Failed to upload chapter:", error);
       showSnackbar("Failed to upload chapter", "error");
-    } finally {
       setLoading(false);
+      return;
     }
+
+    if (result.data?.success) {
+      showSnackbar(
+        `Chapter uploaded successfully! ${result.data.pagesCount} pages created.`,
+        "success",
+      );
+
+      // Navigate after a short delay
+      setTimeout(() => {
+        navigate(`/r/${series!.slug}`);
+      }, 1500);
+    } else {
+      showSnackbar(result.data?.error || "Failed to upload chapter", "error");
+    }
+
+    setLoading(false);
   };
 
   if (loadingSeries) {

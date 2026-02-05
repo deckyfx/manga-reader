@@ -4,6 +4,7 @@ import { api } from "../../lib/api";
 import { SeriesListItem } from "../../components/SeriesListItem";
 import { SeriesFilterPanel, type SeriesFilters } from "../../components/SeriesFilterPanel";
 import { StickyHeader } from "../../components/StickyHeader";
+import { catchError } from "../../../lib/error-handler";
 
 interface Series {
   id: number;
@@ -43,39 +44,44 @@ export function SeriesListPage() {
 
   const loadSeries = async () => {
     setLoading(true);
-    try {
-      // Build query parameters
-      const queryParams: any = {};
 
-      if (filters.searchName) {
-        queryParams.searchName = filters.searchName;
-      }
+    // Build query parameters
+    const queryParams: any = {};
 
-      if (filters.hasChapters) {
-        queryParams.hasChapters = true;
-      }
-
-      if (filters.mustHaveTags.length > 0) {
-        queryParams.mustHaveTags = filters.mustHaveTags.join(",");
-      }
-
-      if (filters.mustNotHaveTags.length > 0) {
-        queryParams.mustNotHaveTags = filters.mustNotHaveTags.join(",");
-      }
-
-      // Call API with query parameters (or no query if no filters)
-      const result = Object.keys(queryParams).length > 0
-        ? await api.api.series.get({ query: queryParams })
-        : await api.api.series.get();
-
-      if (result.data?.success && result.data.series) {
-        setSeries(result.data.series);
-      }
-    } catch (error) {
-      console.error("Failed to load series:", error);
-    } finally {
-      setLoading(false);
+    if (filters.searchName) {
+      queryParams.searchName = filters.searchName;
     }
+
+    if (filters.hasChapters) {
+      queryParams.hasChapters = true;
+    }
+
+    if (filters.mustHaveTags.length > 0) {
+      queryParams.mustHaveTags = filters.mustHaveTags.join(",");
+    }
+
+    if (filters.mustNotHaveTags.length > 0) {
+      queryParams.mustNotHaveTags = filters.mustNotHaveTags.join(",");
+    }
+
+    // Call API with query parameters (or no query if no filters)
+    const [error, result] = await catchError(
+      Object.keys(queryParams).length > 0
+        ? api.api.series.get({ query: queryParams })
+        : api.api.series.get()
+    );
+
+    if (error) {
+      console.error("Failed to load series:", error);
+      setLoading(false);
+      return;
+    }
+
+    if (result.data?.success && result.data.series) {
+      setSeries(result.data.series);
+    }
+
+    setLoading(false);
   };
 
   return (

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import html2canvas from "html2canvas";
 import { CaptionRectangle } from "./CaptionRectangle";
 import { api } from "../lib/api";
+import { catchError } from "../../lib/error-handler";
 
 interface Rectangle {
   id: string;
@@ -64,32 +65,35 @@ export function MangaPage({
    * Load saved captions from database
    */
   const loadCaptions = async () => {
-    try {
-      const result = await api.api.captions.get({
+    const [error, result] = await catchError(
+      api.api.captions.get({
         query: { pageId: page.id },
-      });
+      })
+    );
 
-      if (result.data?.success && result.data.captions) {
-        // Convert database captions to Rectangle format
-        const loadedRectangles: Rectangle[] = result.data.captions.map(
-          (caption) => ({
-            id: `caption-${caption.id}`,
-            captionId: caption.id, // Store database ID
-            captionSlug: caption.slug || undefined, // Store database slug (convert null to undefined)
-            x: caption.x,
-            y: caption.y,
-            width: caption.width,
-            height: caption.height,
-            capturedImage: caption.capturedImage,
-            rawText: caption.rawText,
-            translatedText: caption.translatedText || undefined,
-          }),
-        );
-
-        setRectangles(loadedRectangles);
-      }
-    } catch (error) {
+    if (error) {
       console.error("[MangaPage] Failed to load captions:", error);
+      return;
+    }
+
+    if (result.data?.success && result.data.captions) {
+      // Convert database captions to Rectangle format
+      const loadedRectangles: Rectangle[] = result.data.captions.map(
+        (caption) => ({
+          id: `caption-${caption.id}`,
+          captionId: caption.id, // Store database ID
+          captionSlug: caption.slug || undefined, // Store database slug (convert null to undefined)
+          x: caption.x,
+          y: caption.y,
+          width: caption.width,
+          height: caption.height,
+          capturedImage: caption.capturedImage,
+          rawText: caption.rawText,
+          translatedText: caption.translatedText || undefined,
+        }),
+      );
+
+      setRectangles(loadedRectangles);
     }
   };
 
@@ -219,55 +223,57 @@ export function MangaPage({
   ): Promise<string | null> => {
     if (!imageRef.current) return null;
 
-    try {
-      // Get displayed and canvas dimensions
-      const imgRect = imageRef.current.getBoundingClientRect();
-      const displayedWidth = imgRect.width;
-      const displayedHeight = imgRect.height;
+    // Get displayed and canvas dimensions
+    const imgRect = imageRef.current.getBoundingClientRect();
+    const displayedWidth = imgRect.width;
+    const displayedHeight = imgRect.height;
 
-      // Capture image
-      const canvas = await html2canvas(imageRef.current, {
+    // Capture image
+    const [error, canvas] = await catchError(
+      html2canvas(imageRef.current, {
         useCORS: true,
         allowTaint: true,
-      });
+      })
+    );
 
-      // Calculate scale factors
-      const scaleX = canvas.width / displayedWidth;
-      const scaleY = canvas.height / displayedHeight;
-
-      // Scale coordinates
-      const naturalRect = {
-        x: x * scaleX,
-        y: y * scaleY,
-        width: width * scaleX,
-        height: height * scaleY,
-      };
-
-      // Crop region
-      const croppedCanvas = document.createElement("canvas");
-      const ctx = croppedCanvas.getContext("2d");
-      if (!ctx) return null;
-
-      croppedCanvas.width = naturalRect.width;
-      croppedCanvas.height = naturalRect.height;
-
-      ctx.drawImage(
-        canvas,
-        naturalRect.x,
-        naturalRect.y,
-        naturalRect.width,
-        naturalRect.height,
-        0,
-        0,
-        naturalRect.width,
-        naturalRect.height,
-      );
-
-      return croppedCanvas.toDataURL("image/png");
-    } catch (error) {
+    if (error) {
       console.error("Capture Error:", error);
       return null;
     }
+
+    // Calculate scale factors
+    const scaleX = canvas.width / displayedWidth;
+    const scaleY = canvas.height / displayedHeight;
+
+    // Scale coordinates
+    const naturalRect = {
+      x: x * scaleX,
+      y: y * scaleY,
+      width: width * scaleX,
+      height: height * scaleY,
+    };
+
+    // Crop region
+    const croppedCanvas = document.createElement("canvas");
+    const ctx = croppedCanvas.getContext("2d");
+    if (!ctx) return null;
+
+    croppedCanvas.width = naturalRect.width;
+    croppedCanvas.height = naturalRect.height;
+
+    ctx.drawImage(
+      canvas,
+      naturalRect.x,
+      naturalRect.y,
+      naturalRect.width,
+      naturalRect.height,
+      0,
+      0,
+      naturalRect.width,
+      naturalRect.height,
+    );
+
+    return croppedCanvas.toDataURL("image/png");
   };
 
   /**

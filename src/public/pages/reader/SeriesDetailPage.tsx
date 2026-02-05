@@ -4,6 +4,7 @@ import { api } from "../../lib/api";
 import { useSnackbar } from "../../hooks/useSnackbar";
 import { ChapterListItem } from "../../components/ChapterListItem";
 import { StickyHeader } from "../../components/StickyHeader";
+import { catchError } from "../../../lib/error-handler";
 
 /**
  * Series Detail page - displays series info and chapter list
@@ -28,24 +29,30 @@ export function SeriesDetailPage() {
   }, [seriesSlug]);
 
   const loadSeriesData = async () => {
-    try {
-      const [seriesResult, chaptersResult] = await Promise.all([
+    const [error, results] = await catchError(
+      Promise.all([
         api.api.series({ slug: seriesSlug! }).get(),
         api.api.series({ slug: seriesSlug! }).chapters.get(),
-      ]);
+      ])
+    );
 
-      if (seriesResult.data?.success && seriesResult.data.series) {
-        setSeries(seriesResult.data.series);
-      }
-
-      if (chaptersResult.data?.success && chaptersResult.data.chapters) {
-        setChapters(chaptersResult.data.chapters);
-      }
-    } catch (error) {
+    if (error) {
       console.error("Failed to load series data:", error);
-    } finally {
       setLoading(false);
+      return;
     }
+
+    const [seriesResult, chaptersResult] = results;
+
+    if (seriesResult.data?.success && seriesResult.data.series) {
+      setSeries(seriesResult.data.series);
+    }
+
+    if (chaptersResult.data?.success && chaptersResult.data.chapters) {
+      setChapters(chaptersResult.data.chapters);
+    }
+
+    setLoading(false);
   };
 
   const handleDeleteClick = () => {
@@ -54,26 +61,31 @@ export function SeriesDetailPage() {
 
   const handleDeleteConfirm = async () => {
     setDeleting(true);
-    try {
-      const result = await api.api.series({ slug: seriesSlug! }).delete();
 
-      if (result.data?.success) {
-        showSnackbar("Series deleted successfully!", "success");
-        deleteDialogRef.current?.close();
+    const [error, result] = await catchError(
+      api.api.series({ slug: seriesSlug! }).delete()
+    );
 
-        // Navigate after a short delay
-        setTimeout(() => {
-          navigate("/r");
-        }, 1000);
-      } else {
-        showSnackbar(result.data?.error || "Failed to delete series", "error");
-      }
-    } catch (error) {
+    if (error) {
       console.error("Failed to delete series:", error);
       showSnackbar("Failed to delete series", "error");
-    } finally {
       setDeleting(false);
+      return;
     }
+
+    if (result.data?.success) {
+      showSnackbar("Series deleted successfully!", "success");
+      deleteDialogRef.current?.close();
+
+      // Navigate after a short delay
+      setTimeout(() => {
+        navigate("/r");
+      }, 1000);
+    } else {
+      showSnackbar(result.data?.error || "Failed to delete series", "error");
+    }
+
+    setDeleting(false);
   };
 
   const handleDeleteCancel = () => {
@@ -89,27 +101,30 @@ export function SeriesDetailPage() {
     if (!chapterToDelete) return;
 
     setDeletingChapter(true);
-    try {
-      const result = await api.api
-        .chapters({ slug: chapterToDelete.slug })
-        .delete();
 
-      if (result.data?.success) {
-        showSnackbar("Chapter deleted successfully!", "success");
-        deleteChapterDialogRef.current?.close();
-        setChapterToDelete(null);
+    const [error, result] = await catchError(
+      api.api.chapters({ slug: chapterToDelete.slug }).delete()
+    );
 
-        // Reload chapters list
-        loadSeriesData();
-      } else {
-        showSnackbar(result.data?.error || "Failed to delete chapter", "error");
-      }
-    } catch (error) {
+    if (error) {
       console.error("Failed to delete chapter:", error);
       showSnackbar("Failed to delete chapter", "error");
-    } finally {
       setDeletingChapter(false);
+      return;
     }
+
+    if (result.data?.success) {
+      showSnackbar("Chapter deleted successfully!", "success");
+      deleteChapterDialogRef.current?.close();
+      setChapterToDelete(null);
+
+      // Reload chapters list
+      loadSeriesData();
+    } else {
+      showSnackbar(result.data?.error || "Failed to delete chapter", "error");
+    }
+
+    setDeletingChapter(false);
   };
 
   const handleDeleteChapterCancel = () => {
