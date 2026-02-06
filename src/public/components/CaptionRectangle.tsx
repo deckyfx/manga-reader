@@ -1,4 +1,5 @@
 import { useState } from "react";
+import * as Popover from "@radix-ui/react-popover";
 import { RectangleOverlay } from "./RectangleOverlay";
 import { ViewOnlyCaptionBubble } from "./ViewOnlyCaptionBubble";
 import { EditableCaptionBubble } from "./EditableCaptionBubble";
@@ -75,52 +76,124 @@ export function CaptionRectangle({
         />
       )}
 
-      {/* Rectangle overlay - visible in both modes */}
-      <RectangleOverlay
-        x={x}
-        y={y}
-        width={width}
-        height={height}
-        editMode={editMode}
-        onClick={() => editMode && onActivate()}
-        onMouseEnter={() => !editMode && setIsHovered(true)}
-        onMouseLeave={() => !editMode && setIsHovered(false)}
-      />
+      {/* Edit mode: Popover with positioned anchor */}
+      {editMode ? (
+        <Popover.Root open={isActive} modal={false}>
+          {/* Anchor: Positioned span at rectangle location for Radix reference */}
+          <Popover.Anchor asChild>
+            <span
+              className="absolute pointer-events-none"
+              style={{ left: x, top: y, width, height }}
+            />
+          </Popover.Anchor>
 
-      {/* Edit mode: Full editing interface */}
-      {editMode && isActive && (
-        <EditableCaptionBubble
-          existingCaptionId={captionId}
-          existingCaptionSlug={captionSlug}
-          existingRawText={rawText}
-          existingTranslatedText={translatedText}
-          existingPatchImagePath={patchImagePath}
-          pageId={pageId}
-          capturedImage={capturedImage}
-          imagePath={imagePath}
-          x={x + width + 10}
-          y={y}
-          rectX={x}
-          rectY={y}
-          rectWidth={width}
-          rectHeight={height}
-          onDiscard={onDiscard}
-          onUpdate={onUpdate}
-          onClose={onClose}
-        />
-      )}
+          {/* Visual overlay: The clickable rectangle */}
+          <RectangleOverlay
+            x={x}
+            y={y}
+            width={width}
+            height={height}
+            editMode={editMode}
+            onClick={() => {
+              // Log rectangle information when clicked in edit mode
+              console.log("📍 Rectangle clicked:", {
+                rectangle: { x, y, width, height },
+                scroll: { x: window.scrollX, y: window.scrollY },
+                screen: {
+                  width: window.innerWidth,
+                  height: window.innerHeight,
+                },
+                viewport: {
+                  width: document.documentElement.clientWidth,
+                  height: document.documentElement.clientHeight,
+                },
+              });
+              onActivate();
+            }}
+          />
 
-      {/* View mode: Hover preview with captured image and text */}
-      {!editMode && isHovered && (
-        <ViewOnlyCaptionBubble
-          capturedImage={capturedImage}
-          rawText={rawText}
-          translatedText={translatedText}
-          x={x + width + 10}
-          y={y}
-          width={width}
-          height={height}
-        />
+          {/* Content: Auto-positioned editable bubble */}
+          <Popover.Portal>
+            <Popover.Content
+              side="right"
+              align="start"
+              sideOffset={10}
+              collisionPadding={20}
+              className="z-50 popover-content"
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              onInteractOutside={(e) => {
+                // Prevent closing when clicking inside the popover
+                e.preventDefault();
+              }}
+            >
+              <EditableCaptionBubble
+                existingCaptionId={captionId!}
+                existingCaptionSlug={captionSlug!}
+                existingRawText={rawText}
+                existingTranslatedText={translatedText}
+                existingPatchImagePath={patchImagePath}
+                pageId={pageId}
+                capturedImage={capturedImage}
+                imagePath={imagePath}
+                x={0}
+                y={0}
+                rectX={x}
+                rectY={y}
+                rectWidth={width}
+                rectHeight={height}
+                onDiscard={onDiscard}
+                onUpdate={onUpdate}
+                onClose={onClose}
+              />
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+      ) : (
+        /* View mode: Popover with hover trigger */
+        <Popover.Root open={isHovered}>
+          {/* Anchor: Positioned span at rectangle location for Radix reference */}
+          <Popover.Anchor asChild>
+            <span
+              className="absolute pointer-events-none"
+              style={{ left: x, top: y, width, height }}
+            />
+          </Popover.Anchor>
+
+          {/* Visual overlay: The hoverable rectangle */}
+          <RectangleOverlay
+            x={x}
+            y={y}
+            width={width}
+            height={height}
+            editMode={editMode}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
+          />
+
+          {/* Content: Auto-positioned hover preview */}
+          <Popover.Portal>
+            <Popover.Content
+              side="right"
+              align="start"
+              sideOffset={10}
+              collisionPadding={20}
+              className="z-50"
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              onMouseEnter={() => setIsHovered(true)}
+              onMouseLeave={() => setIsHovered(false)}
+            >
+              <ViewOnlyCaptionBubble
+                capturedImage={capturedImage}
+                rawText={rawText}
+                translatedText={translatedText}
+                x={0}
+                y={0}
+                width={width}
+                height={height}
+              />
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
       )}
     </div>
   );

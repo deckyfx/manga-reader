@@ -22,17 +22,13 @@ export function SeriesDetailPage() {
   const [deletingChapter, setDeletingChapter] = useState(false);
   const [chapterToDelete, setChapterToDelete] = useState<any>(null);
 
-  console.log("[SeriesDetailPage] Component rendering, loading:", loading, "series:", series);
-
   useEffect(() => {
-    console.log("[SeriesDetailPage] useEffect triggered, seriesSlug:", seriesSlug);
     if (seriesSlug) {
       loadSeriesData();
     }
   }, [seriesSlug]);
 
   const loadSeriesData = async () => {
-    console.log("[SeriesDetailPage] Loading series data for:", seriesSlug);
     const [error, results] = await catchError(
       Promise.all([
         api.api.series({ slug: seriesSlug! }).get(),
@@ -46,12 +42,7 @@ export function SeriesDetailPage() {
       return;
     }
 
-    console.log("[SeriesDetailPage] API results:", results);
-
     const [seriesResult, chaptersResult] = results;
-
-    console.log("[SeriesDetailPage] Series result:", seriesResult.data);
-    console.log("[SeriesDetailPage] Chapters result:", chaptersResult.data);
 
     if (seriesResult.data?.success && seriesResult.data.series) {
       setSeries(seriesResult.data.series);
@@ -61,7 +52,6 @@ export function SeriesDetailPage() {
       setChapters(chaptersResult.data.chapters);
     }
 
-    console.log("[SeriesDetailPage] Setting loading to false");
     setLoading(false);
   };
 

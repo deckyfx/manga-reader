@@ -34,7 +34,7 @@ export class TranslationService {
     const [error, apiKey] = catchErrorSync(() => envConfig.DEEPL_API_KEY);
 
     if (error) {
-      console.log("⚠️ DeepL API key not configured, translation disabled");
+      console.warn("⚠️ DeepL API key not configured, translation disabled");
       this.hasApiKey = false;
       return;
     }
@@ -42,7 +42,7 @@ export class TranslationService {
     if (apiKey) {
       this.translator = new deepl.Translator(apiKey);
       this.hasApiKey = true;
-      console.log("✅ DeepL Translation Service initialized");
+      console.warn("✅ DeepL Translation Service initialized");
     }
   }
 

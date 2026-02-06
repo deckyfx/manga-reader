@@ -34,29 +34,13 @@ export function ReaderPage() {
 
   const currentPage = parseInt(pageNum || "1");
 
-  console.log(
-    "[ReaderPage] Render - pageNum:",
-    pageNum,
-    "currentPage:",
-    currentPage,
-    "pagesCache length:",
-    pagesCache.length,
-  );
-
   // Load chapter data ONCE when chapter changes
   useEffect(() => {
-    console.log("[ReaderPage] Chapter changed, loading chapter:", chapterSlug);
     loadChapter();
   }, [seriesSlug, chapterSlug]);
 
   // Update current page when pageNum changes (no API call)
   useEffect(() => {
-    console.log(
-      "[ReaderPage] pageNum changed to:",
-      pageNum,
-      "pagesCache length:",
-      pagesCache.length,
-    );
     if (pagesCache.length > 0) {
       updateCurrentPage();
     }
@@ -433,7 +417,7 @@ export function ReaderPage() {
       {showPatchConfirm && (
         <div
           className="fixed inset-0 flex items-center justify-center z-50"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.50)' }}
+          style={{ backgroundColor: "rgba(0, 0, 0, 0.50)" }}
         >
           <div className="bg-white rounded-lg shadow-2xl p-6 max-w-md mx-4">
             <div className="flex items-start gap-3 mb-4">

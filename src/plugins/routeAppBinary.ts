@@ -16,14 +16,10 @@ export const appPluginBinary = new Elysia()
     staticPlugin({
       assets: "./dist",
       prefix: "/",
+      alwaysStatic: true,
     }),
   )
   // Manual static file serving for /uploads/* using Bun.file()
   .get("/uploads/*", serveUploadedFiles)
   // React app routes - serve built HTML
-  .get("/", index)
-  .get("/a/", index)
-  .get("/a/*", index)
-  .get("/r/", index)
-  .get("/r/*", index)
-  .get("/font-test", index);
+  .get("/*", index);

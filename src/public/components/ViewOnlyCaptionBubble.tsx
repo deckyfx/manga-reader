@@ -31,6 +31,10 @@ export function ViewOnlyCaptionBubble({
   // If height > width, image is vertical/tall -> display horizontally (image on left)
   const isWideImage = width > height;
 
+  // If x and y are both 0, we're inside Radix Popover (auto-positioning)
+  // Otherwise, use manual positioning (for backward compatibility)
+  const useRadixPositioning = x === 0 && y === 0;
+
   // Calculate if popup would overflow right edge
   // Consider both rectangle position and its width
   const popupWidth = 450;
@@ -50,23 +54,29 @@ export function ViewOnlyCaptionBubble({
   const adjustedY = wouldOverflowBottom ? y - 100 : y;
 
   // Position popup: if would overflow right, position to the left of rectangle with gap
-  const popupStyle = wouldOverflowRight
+  const popupStyle = useRadixPositioning
     ? {
-        left: x - popupWidth - popupGap,
-        top: adjustedY,
+        // Radix handles positioning - just set width constraints
         width: popupWidth,
         maxWidth: "90vw",
       }
-    : {
-        left: x,
-        top: adjustedY,
-        width: popupWidth,
-        maxWidth: "90vw",
-      };
+    : wouldOverflowRight
+      ? {
+          left: x - popupWidth - popupGap,
+          top: adjustedY,
+          width: popupWidth,
+          maxWidth: "90vw",
+        }
+      : {
+          left: x,
+          top: adjustedY,
+          width: popupWidth,
+          maxWidth: "90vw",
+        };
 
   return (
     <div
-      className="absolute bg-white rounded-lg shadow-2xl border-2 border-blue-500 p-3 z-10 pointer-events-none"
+      className={`bg-white rounded-lg shadow-2xl border-2 border-blue-500 p-3 pointer-events-none ${useRadixPositioning ? "" : "absolute z-10"}`}
       style={popupStyle}
     >
       <div className={`flex gap-3 ${isWideImage ? "flex-col" : "flex-row"}`}>

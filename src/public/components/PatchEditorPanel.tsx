@@ -85,7 +85,6 @@ export function PatchEditorPanel({
     }
 
     if (result.data?.success && result.data.patchUrl) {
-      console.log("[PatchEditorPanel] Patch generated:", result.data.patchUrl);
       onPatchGenerated(result.data.patchUrl);
     } else {
       setError(result.data?.error || "Failed to generate patch");

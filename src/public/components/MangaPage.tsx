@@ -67,6 +67,8 @@ export function MangaPage({
   const [activeRectId, setActiveRectId] = useState<string | null>(null);
   const [isPatching, setIsPatching] = useState(false);
   const [imageSrc, setImageSrc] = useState(`${page.originalImage}?t=${Date.now()}`);
+  const [isCreatingCaption, setIsCreatingCaption] = useState(false);
+  const [creatingCaptionPos, setCreatingCaptionPos] = useState<{ x: number; y: number } | null>(null);
 
   /**
    * Update image source when page prop changes
@@ -131,16 +133,6 @@ export function MangaPage({
    */
   useEffect(() => {
     const hasPatches = rectangles.some((r) => r.patchImagePath);
-    console.log("[MangaPage] Patches available check:", {
-      rectangleCount: rectangles.length,
-      hasPatches,
-      rectanglesWithPatches: rectangles.filter(r => r.patchImagePath).map(r => ({
-        id: r.id,
-        captionId: r.captionId,
-        captionSlug: r.captionSlug,
-        patchPath: r.patchImagePath
-      }))
-    });
     onPatchesAvailable?.(hasPatches);
   }, [rectangles, onPatchesAvailable]);
 
@@ -229,27 +221,76 @@ export function MangaPage({
       return;
     }
 
-    // Create rectangle and capture immediately
-    const rectId = `rect-${Date.now()}`;
-
     setCurrentDraw(null);
-    setActiveRectId(rectId);
 
     // Capture the region
     const capturedImage = await captureRegion(x, y, width, height);
 
-    if (capturedImage) {
-      const newRect: Rectangle = {
-        id: rectId,
+    if (!capturedImage) {
+      return;
+    }
+
+    // Show loading popup
+    setIsCreatingCaption(true);
+    setCreatingCaptionPos({ x: x + width / 2, y: y + height / 2 });
+
+    // Create placeholder in database immediately to get real ID
+    console.log("🔄 Creating placeholder caption in database...");
+    const [error, result] = await catchError(
+      api.api.ocr.post({
+        pageId: page.id,
+        imagePath: page.originalImage,
         x,
         y,
         width,
         height,
         capturedImage,
-      };
+      })
+    );
 
-      setRectangles([...rectangles, newRect]);
+    // Hide loading popup
+    setIsCreatingCaption(false);
+    setCreatingCaptionPos(null);
+
+    if (error) {
+      console.error("❌ Failed to create caption:", error);
+      showNotification?.("Failed to create caption", "error");
+      return;
     }
+
+    if (!result.data?.success || !result.data.captionId) {
+      console.error("❌ No caption ID returned from API");
+      showNotification?.("Failed to create caption", "error");
+      return;
+    }
+
+    // Got real database ID - create rectangle with it
+    const captionId = result.data.captionId;
+    const captionSlug = result.data.captionSlug || undefined;
+    const rectId = `caption-${captionId}`;
+
+    console.log("✅ Caption created in database:", {
+      captionId,
+      captionSlug,
+      rectId,
+    });
+
+    const newRect: Rectangle = {
+      id: rectId,
+      captionId: captionId,
+      captionSlug: captionSlug,
+      x,
+      y,
+      width,
+      height,
+      capturedImage,
+      rawText: result.data.rawText,
+      translatedText: result.data.translatedText || undefined,
+    };
+
+    setRectangles([...rectangles, newRect]);
+    setActiveRectId(rectId);
+    console.log("🎯 Rectangle created with real database ID:", rectId);
   };
 
   /**
@@ -322,7 +363,7 @@ export function MangaPage({
   const handleDiscard = (rectId: string) => {
     setRectangles((prev) => prev.filter((r) => r.id !== rectId));
     if (activeRectId === rectId) {
-      setActiveRectId(null);
+      setActiveRectId(null); // Close popover when discarding
     }
   };
 
@@ -461,6 +502,25 @@ export function MangaPage({
             onClose={() => setActiveRectId(null)}
           />
         ))}
+
+        {/* Loading popup while creating caption */}
+        {isCreatingCaption && creatingCaptionPos && (
+          <div
+            className="absolute bg-white rounded-lg shadow-2xl border-2 border-blue-500 p-4 pointer-events-none z-50"
+            style={{
+              left: creatingCaptionPos.x - 75,
+              top: creatingCaptionPos.y - 40,
+              width: 150,
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+              <span className="text-sm text-gray-700 font-medium">
+                Creating...
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

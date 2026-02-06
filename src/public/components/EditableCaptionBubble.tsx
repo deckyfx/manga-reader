@@ -4,8 +4,8 @@ import { catchError } from "../../lib/error-handler";
 import { PatchEditorPanel } from "./PatchEditorPanel";
 
 interface EditableCaptionBubbleProps {
-  existingCaptionId?: number;
-  existingCaptionSlug?: string;
+  existingCaptionId: number; // Always required now
+  existingCaptionSlug: string; // Always required now
   existingRawText?: string;
   existingTranslatedText?: string;
   existingPatchImagePath?: string;
@@ -23,16 +23,15 @@ interface EditableCaptionBubbleProps {
   onClose: () => void;
 }
 
-type ProcessState = "uploading" | "processing" | "success" | "error";
-
 /**
  * EditableCaptionBubble Component
  *
- * Full-featured editing interface for caption regions
+ * Editing interface for existing caption regions
+ * - Caption is always created in database before this component opens
  * - Shows captured image preview
- * - Handles API upload and immediate persistence
  * - Displays editable textareas for original and translated text
  * - Shows Update/Discard buttons
+ * - Generates patch images for translation overlay
  */
 export function EditableCaptionBubble({
   existingCaptionId,
@@ -53,15 +52,9 @@ export function EditableCaptionBubble({
   onUpdate,
   onClose,
 }: EditableCaptionBubbleProps) {
-  const [state, setState] = useState<ProcessState>(
-    existingCaptionId ? "success" : "uploading",
-  );
-  const [captionId, setCaptionId] = useState<number | null>(
-    existingCaptionId || null,
-  );
-  const [captionSlug, setCaptionSlug] = useState<string | null>(
-    existingCaptionSlug || null,
-  );
+  // Always editing an existing caption (created in MangaPage before popover opens)
+  const [captionId] = useState<number>(existingCaptionId!);
+  const [captionSlug] = useState<string>(existingCaptionSlug!);
   const [rawText, setRawText] = useState<string>(existingRawText || "");
   const [translatedText, setTranslatedText] = useState<string>(
     existingTranslatedText || "",
@@ -85,67 +78,29 @@ export function EditableCaptionBubble({
     rawText !== originalRawText || translatedText !== originalTranslatedText;
 
   useEffect(() => {
-    // Only run OCR for new captions (no existing ID)
-    if (!existingCaptionId) {
-      uploadImage();
-    }
-  }, [existingCaptionId]);
-
-  /**
-   * Upload image to OCR API and save to database immediately
-   */
-  const uploadImage = async () => {
-    setState("uploading");
-    setState("processing");
-
-    // Use Eden Treaty for type-safe API call
-    const [err, result] = await catchError(
-      api.api.ocr.post({
-        pageId,
-        imagePath,
-        x: rectX,
-        y: rectY,
-        width: rectWidth,
-        height: rectHeight,
-        capturedImage,
-      }),
-    );
-
-    if (err) {
-      console.error("Upload error:", err);
-      setState("error");
-      setError(err instanceof Error ? err.message : "Failed to upload");
-      return;
-    }
-
-    console.log("[CaptionBubble] API Response:", result.data);
-
-    if (result.data?.success) {
-      if (result.data.rawText) {
-        // Got result and saved to database!
-        setState("success");
-        setCaptionId(result.data.captionId);
-        setCaptionSlug(result.data.captionSlug);
-        setRawText(result.data.rawText);
-        setTranslatedText(result.data.translatedText || "");
-        // Store original values for dirty tracking
-        setOriginalRawText(result.data.rawText);
-        setOriginalTranslatedText(result.data.translatedText || "");
-      } else {
-        // Timeout
-        setState("error");
-        setError("OCR processing timed out");
-      }
-    } else {
-      setState("error");
-      setError(result.data?.error || "Upload failed");
-    }
-  };
+    console.log("✅ Caption loaded for editing:", {
+      captionId,
+      captionSlug,
+      hasRawText: !!existingRawText,
+      hasTranslatedText: !!existingTranslatedText,
+    });
+  }, []);
 
   /**
    * Update caption in database
    */
   const handleUpdate = async () => {
+    console.log("🔄 Update button clicked:", {
+      captionSlug,
+      captionId,
+      isDirty,
+      rawText,
+      translatedText,
+      originalRawText,
+      originalTranslatedText,
+      patchImagePath,
+    });
+
     if (!captionSlug) return;
 
     setIsUpdating(true);
@@ -165,17 +120,26 @@ export function EditableCaptionBubble({
     }
 
     if (result.data?.success) {
-      console.log("[EditableCaptionBubble] Caption updated successfully");
+      console.log("✅ Update successful:", {
+        captionSlug,
+        captionId,
+        updatedRawText: rawText,
+        updatedTranslatedText: translatedText,
+      });
       // Reset dirty state - update original values
       setOriginalRawText(rawText);
       setOriginalTranslatedText(translatedText);
       // Reload all captions from database to refresh UI
       onUpdate();
+      console.log("🔄 Called onUpdate() to reload captions from DB");
+      // Don't close popover - let user manually close with X button
     } else {
+      console.error("❌ Update failed:", result.data);
       setError("Failed to update caption");
     }
 
     setIsUpdating(false);
+    console.log("🏁 Update handler completed, isUpdating set to false");
   };
 
   /**
@@ -227,7 +191,6 @@ export function EditableCaptionBubble({
     }
 
     if (result.data?.success && result.data.caption) {
-      console.log("[EditableCaptionBubble] Translation retried successfully");
       // Update translated text with new result
       setTranslatedText(result.data.caption.translatedText || "");
       setOriginalTranslatedText(result.data.caption.translatedText || "");
@@ -266,6 +229,10 @@ export function EditableCaptionBubble({
 
   // Calculate if popup would overflow bottom edge
   // Estimate popup height (can vary, but use a reasonable max height)
+  // If x and y are both 0, we're inside Radix Popover (auto-positioning)
+  // Otherwise, use manual positioning (for backward compatibility)
+  const useRadixPositioning = x === 0 && y === 0;
+
   const estimatedPopupHeight = 600;
   const wouldOverflowBottom = y + estimatedPopupHeight > windowHeight;
 
@@ -273,23 +240,29 @@ export function EditableCaptionBubble({
   const adjustedY = wouldOverflowBottom ? y - 300 : y;
 
   // Position popup: if would overflow right, position to the left of rectangle with gap
-  const popupStyle = wouldOverflowRight
+  const popupStyle = useRadixPositioning
     ? {
-        left: x - popupWidth - popupGap,
-        top: adjustedY,
+        // Radix handles positioning - just set width constraints
         width: popupWidth,
         maxWidth: "90vw",
       }
-    : {
-        left: x,
-        top: adjustedY,
-        width: popupWidth,
-        maxWidth: "90vw",
-      };
+    : wouldOverflowRight
+      ? {
+          left: x - popupWidth - popupGap,
+          top: adjustedY,
+          width: popupWidth,
+          maxWidth: "90vw",
+        }
+      : {
+          left: x,
+          top: adjustedY,
+          width: popupWidth,
+          maxWidth: "90vw",
+        };
 
   return (
     <div
-      className="absolute bg-white rounded-lg shadow-2xl border-2 border-gray-300 p-3 z-10"
+      className={`bg-white rounded-lg shadow-2xl border-2 border-gray-300 p-3 ${useRadixPositioning ? "" : "absolute z-10"}`}
       style={popupStyle}
     >
       {/* Close button */}
@@ -340,126 +313,97 @@ export function EditableCaptionBubble({
 
         {/* Info Panel - Right Side or Bottom */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          {/* Uploading State */}
-          {state === "uploading" && (
-            <div className="flex items-center gap-2 text-sm text-gray-600 py-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-              <span>Uploading...</span>
+          <div className="text-sm text-gray-700 mb-3 flex-1 space-y-2">
+            {/* Original Japanese Text - Editable */}
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">
+                Original:
+              </label>
+              <textarea
+                value={rawText}
+                onChange={(e) => setRawText(e.target.value)}
+                className="w-full px-2 py-1 text-sm border border-gray-300 rounded resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={3}
+                placeholder="Enter original text..."
+              />
             </div>
-          )}
 
-          {/* Processing State */}
-          {state === "processing" && (
-            <div className="flex items-center gap-2 text-sm text-gray-600 py-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-500"></div>
-              <span>Processing OCR...</span>
-            </div>
-          )}
-
-          {/* Success State - Editable Textareas */}
-          {state === "success" && (
-            <>
-              <div className="text-sm text-gray-700 mb-3 flex-1 space-y-2">
-                {/* Original Japanese Text - Editable */}
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 block">
-                    Original:
-                  </label>
-                  <textarea
-                    value={rawText}
-                    onChange={(e) => setRawText(e.target.value)}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    rows={3}
-                  />
-                </div>
-
-                {/* Translated English Text - Editable */}
-                <div>
-                  <label className="text-xs text-gray-500 mb-1 flex items-center justify-between">
-                    <span>Translation:</span>
-                    <button
-                      onClick={handleRetryTranslate}
-                      disabled={isRetranslating}
-                      className="text-xs px-2 py-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded transition-colors flex items-center gap-1"
-                      title="Retranslate"
-                    >
-                      {isRetranslating ? (
-                        <>
-                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
-                          <span>Translating...</span>
-                        </>
-                      ) : (
-                        <>
-                          <i className="fas fa-redo text-xs"></i>
-                          <span>Retranslate</span>
-                        </>
-                      )}
-                    </button>
-                  </label>
-                  <textarea
-                    value={translatedText}
-                    onChange={(e) => setTranslatedText(e.target.value)}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-blue-700 resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    rows={3}
-                    placeholder="Enter translation..."
-                  />
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex gap-2 mb-2">
+            {/* Translated English Text - Editable */}
+            <div>
+              <label className="text-xs text-gray-500 mb-1 flex items-center justify-between">
+                <span>Translation:</span>
                 <button
-                  onClick={handleUpdate}
-                  disabled={!isDirty || isUpdating}
-                  className="flex-1 px-3 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-sm font-semibold rounded transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                  title={!isDirty ? "No changes to save" : "Save changes"}
+                  onClick={handleRetryTranslate}
+                  disabled={isRetranslating}
+                  className="text-xs px-2 py-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded transition-colors flex items-center gap-1"
+                  title="Retranslate"
                 >
-                  {isUpdating ? (
-                    "Saving..."
+                  {isRetranslating ? (
+                    <>
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+                      <span>Translating...</span>
+                    </>
                   ) : (
                     <>
-                      <i className="fas fa-check"></i>
-                      <span>Update</span>
+                      <i className="fas fa-redo text-xs"></i>
+                      <span>Retranslate</span>
                     </>
                   )}
                 </button>
-                <button
-                  onClick={handleDelete}
-                  className="flex-1 px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <i className="fas fa-trash"></i>
-                  <span>Discard</span>
-                </button>
-              </div>
-
-              {/* Patch Editor Panel */}
-              <PatchEditorPanel
-                isOpen={isPatchEditorOpen}
-                onToggle={() => setIsPatchEditorOpen(!isPatchEditorOpen)}
-                capturedImage={capturedImage}
-                translatedText={translatedText}
-                captionSlug={captionSlug}
-                onPatchGenerated={handlePatchGenerated}
-                currentPatchUrl={patchImagePath}
+              </label>
+              <textarea
+                value={translatedText}
+                onChange={(e) => setTranslatedText(e.target.value)}
+                className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-blue-700 resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={3}
+                placeholder="Enter translation..."
               />
-            </>
+            </div>
+          </div>
+
+          {/* Error Display */}
+          {error && (
+            <div className="text-sm text-red-600 mb-2 p-2 bg-red-50 rounded">
+              ❌ {error}
+            </div>
           )}
 
-          {/* Error State */}
-          {state === "error" && (
-            <>
-              <div className="text-sm text-red-600 mb-2 p-2 bg-red-50 rounded flex-1">
-                ❌ {error}
-              </div>
-              <button
-                onClick={onDiscard}
-                className="w-full px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded transition-colors flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <i className="fas fa-times"></i>
-                <span>Close</span>
-              </button>
-            </>
-          )}
+          {/* Action Buttons */}
+          <div className="flex gap-2 mb-2">
+            <button
+              onClick={handleUpdate}
+              disabled={!isDirty || isUpdating}
+              className="flex-1 px-3 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-sm font-semibold rounded transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              title={!isDirty ? "No changes to save" : "Save changes"}
+            >
+              {isUpdating ? (
+                "Saving..."
+              ) : (
+                <>
+                  <i className="fas fa-check"></i>
+                  <span>Update</span>
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleDelete}
+              className="flex-1 px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <i className="fas fa-trash"></i>
+              <span>Discard</span>
+            </button>
+          </div>
+
+          {/* Patch Editor Panel */}
+          <PatchEditorPanel
+            isOpen={isPatchEditorOpen}
+            onToggle={() => setIsPatchEditorOpen(!isPatchEditorOpen)}
+            capturedImage={capturedImage}
+            translatedText={translatedText}
+            captionSlug={captionSlug}
+            onPatchGenerated={handlePatchGenerated}
+            currentPatchUrl={patchImagePath}
+          />
         </div>
       </div>
     </div>
