@@ -1,10 +1,16 @@
 import { useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { RectangleOverlay } from "./RectangleOverlay";
+import { PolygonOverlay } from "./PolygonOverlay";
 import { ViewOnlyCaptionBubble } from "./ViewOnlyCaptionBubble";
 import { EditableCaptionBubble } from "./EditableCaptionBubble";
 
-interface CaptionRectangleProps {
+interface Point {
+  x: number;
+  y: number;
+}
+
+interface UserCaptionHostProps {
   id: string;
   captionId?: number;
   captionSlug?: string;
@@ -13,6 +19,7 @@ interface CaptionRectangleProps {
   y: number;
   width: number;
   height: number;
+  polygonPoints?: Point[]; // Optional polygon points for polygon-shaped captions
   capturedImage: string;
   rawText?: string;
   translatedText?: string;
@@ -27,15 +34,16 @@ interface CaptionRectangleProps {
 }
 
 /**
- * CaptionRectangle Component
+ * UserCaptionHost Component
  *
- * Container component that composes caption UI elements
+ * Root container that hosts caption overlays (rectangle or polygon)
  * - Manages its own hover state
  * - Shows ViewOnlyCaptionBubble on hover in view mode
  * - Shows EditableCaptionBubble when active in edit mode
- * - Uses RectangleOverlay for visual region marking
+ * - Uses PolygonOverlay for polygon-shaped captions when polygonPoints are available
+ * - Uses RectangleOverlay for rectangular captions
  */
-export function CaptionRectangle({
+export function UserCaptionHost({
   id,
   captionId,
   captionSlug,
@@ -44,6 +52,7 @@ export function CaptionRectangle({
   y,
   width,
   height,
+  polygonPoints,
   capturedImage,
   rawText,
   translatedText,
@@ -55,7 +64,7 @@ export function CaptionRectangle({
   onDiscard,
   onUpdate,
   onClose,
-}: CaptionRectangleProps) {
+}: UserCaptionHostProps) {
   const [isHovered, setIsHovered] = useState(false);
 
   return (
@@ -87,30 +96,43 @@ export function CaptionRectangle({
             />
           </Popover.Anchor>
 
-          {/* Visual overlay: The clickable rectangle */}
-          <RectangleOverlay
-            x={x}
-            y={y}
-            width={width}
-            height={height}
-            editMode={editMode}
-            onClick={() => {
-              // Log rectangle information when clicked in edit mode
-              console.log("📍 Rectangle clicked:", {
-                rectangle: { x, y, width, height },
-                scroll: { x: window.scrollX, y: window.scrollY },
-                screen: {
-                  width: window.innerWidth,
-                  height: window.innerHeight,
-                },
-                viewport: {
-                  width: document.documentElement.clientWidth,
-                  height: document.documentElement.clientHeight,
-                },
-              });
-              onActivate();
-            }}
-          />
+          {/* Visual overlay: The clickable rectangle or polygon */}
+          {polygonPoints ? (
+            <PolygonOverlay
+              points={polygonPoints}
+              editMode={editMode}
+              onClick={() => {
+                console.log("📍 Polygon clicked:", {
+                  points: polygonPoints,
+                  scroll: { x: window.scrollX, y: window.scrollY },
+                });
+                onActivate();
+              }}
+            />
+          ) : (
+            <RectangleOverlay
+              x={x}
+              y={y}
+              width={width}
+              height={height}
+              editMode={editMode}
+              onClick={() => {
+                console.log("📍 Rectangle clicked:", {
+                  rectangle: { x, y, width, height },
+                  scroll: { x: window.scrollX, y: window.scrollY },
+                  screen: {
+                    width: window.innerWidth,
+                    height: window.innerHeight,
+                  },
+                  viewport: {
+                    width: document.documentElement.clientWidth,
+                    height: document.documentElement.clientHeight,
+                  },
+                });
+                onActivate();
+              }}
+            />
+          )}
 
           {/* Content: Auto-positioned editable bubble */}
           <Popover.Portal>
@@ -159,16 +181,25 @@ export function CaptionRectangle({
             />
           </Popover.Anchor>
 
-          {/* Visual overlay: The hoverable rectangle */}
-          <RectangleOverlay
-            x={x}
-            y={y}
-            width={width}
-            height={height}
-            editMode={editMode}
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-          />
+          {/* Visual overlay: The hoverable rectangle or polygon */}
+          {polygonPoints ? (
+            <PolygonOverlay
+              points={polygonPoints}
+              editMode={editMode}
+              onMouseEnter={() => setIsHovered(true)}
+              onMouseLeave={() => setIsHovered(false)}
+            />
+          ) : (
+            <RectangleOverlay
+              x={x}
+              y={y}
+              width={width}
+              height={height}
+              editMode={editMode}
+              onMouseEnter={() => setIsHovered(true)}
+              onMouseLeave={() => setIsHovered(false)}
+            />
+          )}
 
           {/* Content: Auto-positioned hover preview */}
           <Popover.Portal>

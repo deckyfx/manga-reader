@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { MangaPage } from "../../components/MangaPage";
 import { ChapterNavigation } from "../../components/ChapterNavigation";
@@ -17,6 +17,7 @@ export function ReaderPage() {
 
   const [pageData, setPageData] = useState<{
     id: number;
+    slug?: string | null;
     originalImage: string;
     createdAt: Date;
   } | null>(null);
@@ -25,6 +26,23 @@ export function ReaderPage() {
   const [totalPages, setTotalPages] = useState(0);
   const [chaptersCache, setChaptersCache] = useState<any[]>([]);
   const [editMode, setEditMode] = useState(false);
+  const [drawingTool, setDrawingTool] = useState<"rectangle" | "polygon">("rectangle");
+  const [showToolMenu, setShowToolMenu] = useState(false);
+  const toolMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close tool menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (toolMenuRef.current && !toolMenuRef.current.contains(event.target as Node)) {
+        setShowToolMenu(false);
+      }
+    };
+
+    if (showToolMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showToolMenu]);
   const [chapterTitle, setChapterTitle] = useState("");
   const [hasPatchesAvailable, setHasPatchesAvailable] = useState(false);
   const [showPatchConfirm, setShowPatchConfirm] = useState(false);
@@ -285,26 +303,60 @@ export function ReaderPage() {
               </button>
             )}
 
-            <button
-              onClick={() => setEditMode(!editMode)}
-              className={`px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2 ${
-                editMode
-                  ? "bg-green-500 hover:bg-green-600 text-white"
-                  : "bg-blue-500 hover:bg-blue-600 text-white"
-              }`}
-            >
-              {editMode ? (
-                <>
-                  <i className="fas fa-check"></i>
-                  <span>Done Edit</span>
-                </>
-              ) : (
-                <>
+            {editMode ? (
+              // Exit button (when in edit mode)
+              <button
+                onClick={() => setEditMode(false)}
+                className="px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white"
+              >
+                <i className="fas fa-times"></i>
+                <span>
+                  {drawingTool === "rectangle"
+                    ? "Exit Draw Rectangle"
+                    : "Exit Draw Polygon"}
+                </span>
+              </button>
+            ) : (
+              // Drawing tool selector (when not in edit mode)
+              <div className="relative" ref={toolMenuRef}>
+                <button
+                  onClick={() => setShowToolMenu(!showToolMenu)}
+                  className="px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white"
+                >
                   <i className="fas fa-edit"></i>
                   <span>Edit</span>
-                </>
-              )}
-            </button>
+                  <i className="fas fa-chevron-down text-xs"></i>
+                </button>
+
+                {/* Dropdown menu */}
+                {showToolMenu && (
+                  <div className="absolute top-full mt-2 right-0 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50 min-w-[200px]">
+                    <button
+                      onClick={() => {
+                        setDrawingTool("rectangle");
+                        setEditMode(true);
+                        setShowToolMenu(false);
+                      }}
+                      className="w-full px-4 py-2 text-left hover:bg-gray-100 flex items-center gap-3 transition-colors"
+                    >
+                      <i className="fas fa-square text-blue-500 w-5"></i>
+                      <span className="font-medium">Draw Rectangle</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDrawingTool("polygon");
+                        setEditMode(true);
+                        setShowToolMenu(false);
+                      }}
+                      className="w-full px-4 py-2 text-left hover:bg-gray-100 flex items-center gap-3 transition-colors"
+                    >
+                      <i className="fas fa-draw-polygon text-purple-500 w-5"></i>
+                      <span className="font-medium">Draw Polygon</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <span className="text-gray-700 font-semibold whitespace-nowrap">
               Page {currentPage} / {totalPages}
@@ -326,6 +378,7 @@ export function ReaderPage() {
               onPrevious={goToPreviousPage}
               onNext={goToNextPage}
               editMode={editMode}
+              drawingTool={drawingTool}
               onEditModeChange={setEditMode}
               onPatchPage={handlePatchPageCallback}
               onPatchesAvailable={handlePatchesAvailable}

@@ -3,7 +3,7 @@ name: manga-reader
 services:
   # Main Bun application
   app:
-    image: deckyfx/manga-reader-app:0.0.5
+    image: deckyfx/manga-reader-app:0.0.6
     container_name: manga-reader-app
     environment:
       # Container mode paths
@@ -34,7 +34,7 @@ services:
 
   # Manga OCR service (Python FastAPI server)
   manga-ocr:
-    image: deckyfx/manga-reader-manga-ocr:0.0.5
+    image: deckyfx/manga-reader-manga-ocr:0.0.6
     container_name: manga-ocr
     environment:
       # Hugging Face API token (optional)

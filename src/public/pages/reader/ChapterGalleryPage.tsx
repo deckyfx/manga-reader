@@ -36,6 +36,8 @@ export function ChapterGalleryPage() {
   const navigate = useNavigate();
   const { showSnackbar, SnackbarComponent } = useSnackbar();
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
+  const urlDialogRef = useRef<HTMLDialogElement>(null);
+  const addMenuRef = useRef<HTMLDivElement>(null);
   const [series, setSeries] = useState<Series | null>(null);
   const [chapter, setChapter] = useState<Chapter | null>(null);
   const [pages, setPages] = useState<Page[]>([]);
@@ -44,12 +46,31 @@ export function ChapterGalleryPage() {
   const [pageToDelete, setPageToDelete] = useState<Page | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
+  const [refererInput, setRefererInput] = useState("");
+  const [userAgentInput, setUserAgentInput] = useState("");
 
   useEffect(() => {
     if (seriesSlug && chapterSlug) {
       loadChapterData();
     }
   }, [seriesSlug, chapterSlug]);
+
+  // Close add menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(event.target as Node)) {
+        setShowAddMenu(false);
+      }
+    };
+
+    if (showAddMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showAddMenu]);
 
   const loadChapterData = async () => {
     setLoading(true);
@@ -229,6 +250,48 @@ export function ChapterGalleryPage() {
     setUploading(false);
   };
 
+  const handleUrlDialogCancel = () => {
+    urlDialogRef.current?.close();
+    setUrlInput("");
+    setRefererInput("");
+    setUserAgentInput("");
+  };
+
+  const handleUrlDownload = async () => {
+    if (!urlInput.trim() || !chapter) return;
+
+    setDownloading(true);
+
+    const [error, result] = await catchError(
+      api.api.pages.download.post({
+        chapterId: chapter.id.toString(),
+        url: urlInput.trim(),
+        referer: refererInput.trim() || undefined,
+        userAgent: userAgentInput.trim() || undefined,
+      })
+    );
+
+    if (error) {
+      console.error("Failed to download page:", error);
+      showSnackbar("Failed to download page", "error");
+      setDownloading(false);
+      return;
+    }
+
+    if (result.data?.success) {
+      showSnackbar("Page downloaded successfully!", "success");
+      urlDialogRef.current?.close();
+      setUrlInput("");
+      setRefererInput("");
+      setUserAgentInput("");
+      loadChapterData();
+    } else {
+      showSnackbar(result.data?.error || "Failed to download page", "error");
+    }
+
+    setDownloading(false);
+  };
+
   const handleDragStart = (page: Page, e: React.DragEvent) => {
     setDraggedPage(page);
     e.dataTransfer.effectAllowed = "move";
@@ -330,18 +393,52 @@ export function ChapterGalleryPage() {
               onChange={handleFileSelected}
               className="hidden"
             />
-            <button
-              onClick={handleAddPageClick}
-              disabled={uploading}
-              className={`px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2 ${
-                uploading
-                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  : "bg-blue-500 hover:bg-blue-600 text-white"
-              }`}
-            >
-              <i className="fas fa-plus"></i>
-              <span>{uploading ? "Uploading..." : "Add Page"}</span>
-            </button>
+            <div className="relative" ref={addMenuRef}>
+              <button
+                onClick={() => setShowAddMenu(!showAddMenu)}
+                disabled={uploading || downloading}
+                className={`px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2 ${
+                  uploading || downloading
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-blue-500 hover:bg-blue-600 text-white"
+                }`}
+              >
+                <i className="fas fa-plus"></i>
+                <span>
+                  {uploading
+                    ? "Uploading..."
+                    : downloading
+                      ? "Downloading..."
+                      : "Add Page"}
+                </span>
+                <i className="fas fa-chevron-down text-xs"></i>
+              </button>
+
+              {showAddMenu && (
+                <div className="absolute top-full mt-2 right-0 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50 min-w-[200px]">
+                  <button
+                    onClick={() => {
+                      handleAddPageClick();
+                      setShowAddMenu(false);
+                    }}
+                    className="w-full px-4 py-2 text-left hover:bg-gray-100 flex items-center gap-3 transition-colors"
+                  >
+                    <i className="fas fa-upload text-blue-500 w-5"></i>
+                    <span className="font-medium">By Upload</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      urlDialogRef.current?.showModal();
+                      setShowAddMenu(false);
+                    }}
+                    className="w-full px-4 py-2 text-left hover:bg-gray-100 flex items-center gap-3 transition-colors"
+                  >
+                    <i className="fas fa-link text-green-500 w-5"></i>
+                    <span className="font-medium">From URL</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </>
         }
       />
@@ -408,6 +505,89 @@ export function ChapterGalleryPage() {
             >
               <i className="fas fa-trash"></i>
               <span>{deleting ? "Deleting..." : "Delete"}</span>
+            </button>
+          </div>
+        </div>
+      </dialog>
+
+      {/* Download from URL Dialog */}
+      <dialog
+        ref={urlDialogRef}
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-lg shadow-2xl p-0 backdrop:bg-black backdrop:opacity-70 max-w-none"
+      >
+        <div className="bg-white rounded-lg p-6 min-w-[500px]">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">
+            Download from URL
+          </h2>
+
+          <div className="mb-4">
+            <label className="block text-sm font-semibold text-gray-700 mb-1">
+              Image URL <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="url"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              placeholder="https://example.com/image.jpg"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              disabled={downloading}
+            />
+          </div>
+
+          <details className="mb-4">
+            <summary className="cursor-pointer text-sm font-semibold text-gray-600 hover:text-gray-800">
+              Advanced Options (Optional Headers)
+            </summary>
+            <div className="mt-3 space-y-3 pl-2 border-l-2 border-gray-200">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">
+                  Referer
+                </label>
+                <input
+                  type="text"
+                  value={refererInput}
+                  onChange={(e) => setRefererInput(e.target.value)}
+                  placeholder="https://source-website.com"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
+                  disabled={downloading}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">
+                  User-Agent
+                </label>
+                <input
+                  type="text"
+                  value={userAgentInput}
+                  onChange={(e) => setUserAgentInput(e.target.value)}
+                  placeholder="Mozilla/5.0 ..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
+                  disabled={downloading}
+                />
+              </div>
+            </div>
+          </details>
+
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={handleUrlDialogCancel}
+              disabled={downloading}
+              className="px-4 py-2 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors flex items-center gap-2"
+            >
+              <i className="fas fa-times"></i>
+              <span>Cancel</span>
+            </button>
+            <button
+              onClick={handleUrlDownload}
+              disabled={downloading || !urlInput.trim()}
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2 ${
+                downloading || !urlInput.trim()
+                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  : "bg-green-500 hover:bg-green-600 text-white"
+              }`}
+            >
+              <i className="fas fa-download"></i>
+              <span>{downloading ? "Downloading..." : "Download"}</span>
             </button>
           </div>
         </div>

@@ -59,6 +59,12 @@ class HealthResponse(BaseModel):
     model_loaded: bool
 
 
+class Point(BaseModel):
+    """Point with x, y coordinates"""
+    x: float
+    y: float
+
+
 class PatchRequest(BaseModel):
     """Request model for patch generation"""
     capturedImage: str  # Base64 encoded image (dimensions auto-detected)
@@ -68,6 +74,7 @@ class PatchRequest(BaseModel):
     textColor: str = "#000000"  # Text color in hex (e.g., #000000 for black)
     strokeColor: str | None = None  # Stroke color in hex (None for no stroke)
     strokeWidth: int = 0  # Stroke width in pixels (0 for no stroke)
+    polygonPoints: list[Point] | None = None  # Polygon points for masking (relative coordinates)
 
 
 class PatchResponse(BaseModel):
@@ -140,7 +147,7 @@ meta = get_project_metadata()
 app = FastAPI(
     title=meta.get("name", "Manga OCR Server"),
     description=meta.get("description", "OCR server for Japanese manga"),
-    version=meta.get("version", "0.0.5"),
+    version=meta.get("version", "0.0.6"),
     lifespan=lifespan,
 )
 
@@ -285,28 +292,154 @@ async def generate_patch(request: PatchRequest):
         logger.info(f"🖼️  Generating patch: {width}x{height} pixels (auto-detected)")
         logger.info(f"   Font: {request.fontType} {request.fontSize}px, Color: {request.textColor}")
 
-        # Step 1: Clean text from region
-        logger.info("🧹 Cleaning text from region...")
-        cleaned_image = clean_text_region(image)
+        # Check if polygon masking is needed
+        use_polygon_mask = (
+            request.polygonPoints is not None
+            and len(request.polygonPoints) >= 3
+        )
+
+        if use_polygon_mask:
+            logger.info(f"🔺 Using polygon mask with {len(request.polygonPoints)} points")
+
+            # Step 1: Create polygon mask
+            mask = np.zeros((height, width), dtype=np.uint8)
+            pts = np.array(
+                [[int(round(p.x)), int(round(p.y))] for p in request.polygonPoints],
+                dtype=np.int32
+            )
+            cv2.fillPoly(mask, [pts], 255)
+
+            # Step 2: Clean text from region (only inside polygon)
+            logger.info("🧹 Cleaning text from region...")
+            cleaned_image = clean_text_region(image)
+
+            # Step 3: Convert to RGBA with alpha channel from mask
+            cleaned_rgba = cv2.cvtColor(cleaned_image, cv2.COLOR_BGR2BGRA)
+            cleaned_rgba[:, :, 3] = mask  # Set alpha channel
+
+            # Step 4: Fill inside polygon with white (RGB channels only)
+            for i in range(3):  # B, G, R channels
+                cleaned_rgba[:, :, i] = np.where(
+                    mask == 255,
+                    255,  # White inside polygon
+                    cleaned_rgba[:, :, i]  # Original outside
+                )
+
+            # Use RGBA image for text rendering
+            cleaned_image = cleaned_rgba
+        else:
+            # Step 1: Clean text from region (no masking)
+            logger.info("🧹 Cleaning text from region...")
+            cleaned_image = clean_text_region(image)
 
         # Step 2: Render translated text with manual settings
         # Join array of lines with newlines
         text_with_newlines = "\n".join(request.translatedText)
         logger.info(f"✍️  Rendering text: '{text_with_newlines[:50]}...'")
-        patch_image = render_text(
-            cleaned_image,
-            text_with_newlines,
-            width,  # Use auto-detected width
-            height,  # Use auto-detected height
-            font_size=request.fontSize,
-            font_type=request.fontType,
-            text_color=request.textColor,
-            stroke_color=request.strokeColor,
-            stroke_width=request.strokeWidth,
-        )
 
-        # Step 3: Encode as PNG
-        success, buffer = cv2.imencode(".png", patch_image)
+        if use_polygon_mask:
+            # For RGBA images, convert to PIL for text rendering
+            from PIL import ImageDraw, ImageFont
+            from .patch_generator.text_renderer import hex_to_rgb, get_font_path
+
+            # Convert BGRA (OpenCV) to RGBA (PIL)
+            cleaned_rgba_pil = cv2.cvtColor(cleaned_image, cv2.COLOR_BGRA2RGBA)
+
+            # Convert to PIL Image
+            pil_image = Image.fromarray(cleaned_rgba_pil, mode='RGBA')
+
+            # Use proper font loading from text_renderer
+            font_path = get_font_path(request.fontType)
+            try:
+                font = ImageFont.truetype(font_path, request.fontSize)
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to load font {font_path}: {e}, using default")
+                font = ImageFont.load_default()
+
+            # Parse colors using proper hex_to_rgb function
+            text_rgb = hex_to_rgb(request.textColor)
+            stroke_rgb = hex_to_rgb(request.strokeColor) if request.strokeColor else None
+
+            # Calculate polygon bounding box for text centering
+            poly_points = [(int(round(p.x)), int(round(p.y))) for p in request.polygonPoints]
+            poly_xs = [p[0] for p in poly_points]
+            poly_ys = [p[1] for p in poly_points]
+            poly_min_x = min(poly_xs)
+            poly_max_x = max(poly_xs)
+            poly_min_y = min(poly_ys)
+            poly_max_y = max(poly_ys)
+            poly_center_x = (poly_min_x + poly_max_x) // 2
+            poly_center_y = (poly_min_y + poly_max_y) // 2
+
+            # Use multiline_textbbox for proper alignment calculation
+            draw = ImageDraw.Draw(pil_image)
+            bbox = draw.multiline_textbbox(
+                (0, 0),
+                text_with_newlines,
+                font=font,
+                align='center'
+            )
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+
+            # Center text in polygon bounds, accounting for bbox offset
+            text_x = poly_center_x - text_width // 2 - bbox[0]
+            text_y = poly_center_y - text_height // 2 - bbox[1]
+
+            # Draw stroke first if specified (same method as text_renderer)
+            if stroke_rgb and request.strokeWidth > 0:
+                # Draw stroke by offsetting text in 8 directions
+                for dx in [-request.strokeWidth, 0, request.strokeWidth]:
+                    for dy in [-request.strokeWidth, 0, request.strokeWidth]:
+                        if dx == 0 and dy == 0:
+                            continue
+                        draw.multiline_text(
+                            (text_x + dx, text_y + dy),
+                            text_with_newlines,
+                            font=font,
+                            fill=stroke_rgb,
+                            align='center'
+                        )
+
+            # Draw main text on top
+            draw.multiline_text(
+                (text_x, text_y),
+                text_with_newlines,
+                font=font,
+                fill=text_rgb,
+                align='center'
+            )
+
+            # Convert back to numpy array
+            patch_image = np.array(pil_image)
+        else:
+            # Use existing render_text for non-polygon patches
+            patch_image = render_text(
+                cleaned_image,
+                text_with_newlines,
+                width,  # Use auto-detected width
+                height,  # Use auto-detected height
+                font_size=request.fontSize,
+                font_type=request.fontType,
+                text_color=request.textColor,
+                stroke_color=request.strokeColor,
+                stroke_width=request.strokeWidth,
+            )
+
+        # Step 3: Encode as PNG (with alpha channel if RGBA)
+        if use_polygon_mask:
+            # patch_image is already RGBA from PIL, no conversion needed
+            pil_img = Image.fromarray(patch_image, mode='RGBA')
+
+            # Encode as PNG with transparency
+            buffer_io = BytesIO()
+            pil_img.save(buffer_io, format='PNG')
+            buffer = buffer_io.getvalue()
+            success = True
+        else:
+            # Standard BGR encoding
+            success, buffer = cv2.imencode(".png", patch_image)
+
         if not success:
             raise ValueError("Failed to encode patch image as PNG")
 
@@ -368,17 +501,25 @@ async def merge_patches(request: MergePatchesRequest):
         # Overlay each patch
         for i, patch in enumerate(request.patches):
             try:
-                # Decode patch image
+                # Decode patch image (preserve alpha channel for polygon patches)
                 patch_bytes = base64.b64decode(patch.patchImageBase64)
                 patch_nparr = np.frombuffer(patch_bytes, np.uint8)
-                patch_cv = cv2.imdecode(patch_nparr, cv2.IMREAD_COLOR)
+                patch_cv = cv2.imdecode(patch_nparr, cv2.IMREAD_UNCHANGED)
 
                 if patch_cv is None:
                     logger.warning(f"⚠️  Skipping patch {i+1}: failed to decode")
                     continue
 
-                # Convert patch to PIL
-                patch_pil = Image.fromarray(cv2.cvtColor(patch_cv, cv2.COLOR_BGR2RGB))
+                # Check if patch has alpha channel (polygon patches)
+                has_alpha = patch_cv.shape[2] == 4 if len(patch_cv.shape) == 3 else False
+
+                # Convert patch to PIL with proper color space
+                if has_alpha:
+                    # BGRA -> RGBA for polygon patches with transparency
+                    patch_pil = Image.fromarray(cv2.cvtColor(patch_cv, cv2.COLOR_BGRA2RGBA), mode='RGBA')
+                else:
+                    # BGR -> RGB for regular rectangle patches
+                    patch_pil = Image.fromarray(cv2.cvtColor(patch_cv, cv2.COLOR_BGR2RGB))
 
                 # Resize patch to target dimensions (handles device pixel ratio scaling)
                 original_size = patch_pil.size
@@ -391,7 +532,11 @@ async def merge_patches(request: MergePatchesRequest):
                 y_pos = int(round(patch.y))
 
                 # Paste patch at specified position
-                page_pil.paste(patch_pil, (x_pos, y_pos))
+                # For RGBA patches, use alpha channel as mask to preserve transparency
+                if has_alpha:
+                    page_pil.paste(patch_pil, (x_pos, y_pos), patch_pil)
+                else:
+                    page_pil.paste(patch_pil, (x_pos, y_pos))
 
             except Exception as e:
                 logger.warning(f"⚠️  Skipping patch {i+1}: {e}")

@@ -1,8 +1,15 @@
 import React, { useState, useRef, useEffect } from "react";
 import html2canvas from "html2canvas";
-import { CaptionRectangle } from "./CaptionRectangle";
+import { UserCaptionHost } from "./UserCaptionHost";
+import { DrawingOverlay } from "./DrawingOverlay";
 import { api } from "../lib/api";
 import { catchError } from "../../lib/error-handler";
+import { useDrawingTool, type DrawingToolType } from "../hooks/useDrawingTool";
+
+interface Point {
+  x: number;
+  y: number;
+}
 
 interface Rectangle {
   id: string;
@@ -12,6 +19,7 @@ interface Rectangle {
   y: number;
   width: number;
   height: number;
+  polygonPoints?: Point[]; // Optional polygon points for polygon-shaped captions
   capturedImage?: string;
   rawText?: string;
   translatedText?: string;
@@ -21,6 +29,7 @@ interface Rectangle {
 
 interface PageData {
   id: number;
+  slug?: string | null;
   originalImage: string;
   createdAt: Date;
 }
@@ -30,6 +39,7 @@ interface MangaPageProps {
   onPrevious?: () => void;
   onNext?: () => void;
   editMode: boolean;
+  drawingTool: DrawingToolType;
   onEditModeChange: (editMode: boolean) => void;
   onPatchPage?: (handler: () => Promise<void>) => void;
   onPatchesAvailable?: (available: boolean) => void;
@@ -52,23 +62,21 @@ export function MangaPage({
   onPrevious,
   onNext,
   editMode,
+  drawingTool,
   onEditModeChange,
   onPatchPage,
   onPatchesAvailable,
   showNotification,
 }: MangaPageProps) {
   const [rectangles, setRectangles] = useState<Rectangle[]>([]);
-  const [currentDraw, setCurrentDraw] = useState<{
-    startX: number;
-    startY: number;
-    currentX: number;
-    currentY: number;
-  } | null>(null);
   const [activeRectId, setActiveRectId] = useState<string | null>(null);
   const [isPatching, setIsPatching] = useState(false);
   const [imageSrc, setImageSrc] = useState(`${page.originalImage}?t=${Date.now()}`);
   const [isCreatingCaption, setIsCreatingCaption] = useState(false);
   const [creatingCaptionPos, setCreatingCaptionPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Use drawing tool hook
+  const drawing = useDrawingTool(drawingTool);
 
   /**
    * Update image source when page prop changes
@@ -107,6 +115,7 @@ export function MangaPage({
           y: caption.y,
           width: caption.width,
           height: caption.height,
+          polygonPoints: caption.polygonPoints || undefined, // Polygon points (already parsed from JSON)
           capturedImage: caption.capturedImage,
           rawText: caption.rawText,
           translatedText: caption.translatedText || undefined,
@@ -143,8 +152,16 @@ export function MangaPage({
     if (!editMode) {
       loadCaptions();
       setActiveRectId(null);
+      drawing.reset(); // Clear any partial drawing
     }
   }, [editMode]);
+
+  /**
+   * Reset drawing state when switching between drawing tools
+   */
+  useEffect(() => {
+    drawing.reset();
+  }, [drawingTool]);
 
   /**
    * Handle image click for navigation (when not in edit mode)
@@ -166,40 +183,58 @@ export function MangaPage({
   };
 
   /**
-   * Handle mouse down - start drawing rectangle
+   * Handle mouse down - start drawing
    */
+  /**
+   * Convert DOM coordinates to image pixel coordinates
+   * GPT AI guidance: Scale from displayed size to actual image size
+   */
+  const domToImageCoords = (domX: number, domY: number) => {
+    if (!containerRef.current || !imageRef.current) return { x: domX, y: domY };
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const img = imageRef.current;
+
+    // Scale from DOM pixels to image pixels
+    const scaleX = img.naturalWidth / rect.width;
+    const scaleY = img.naturalHeight / rect.height;
+
+    return {
+      x: domX * scaleX,
+      y: domY * scaleY,
+    };
+  };
+
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     // Don't allow drawing when editing a caption or not in edit mode
     if (!editMode || !containerRef.current || activeRectId !== null) return;
 
     const rect = containerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const domX = e.clientX - rect.left;
+    const domY = e.clientY - rect.top;
+    const isDoubleClick = e.detail === 2;
 
-    setCurrentDraw({
-      startX: x,
-      startY: y,
-      currentX: x,
-      currentY: y,
-    });
+    // Convert DOM coordinates to image pixel coordinates
+    const { x, y } = domToImageCoords(domX, domY);
+
+    drawing.handleMouseDown(x, y, isDoubleClick);
   };
 
   /**
-   * Handle mouse move - update rectangle size
+   * Handle mouse move - update drawing
    */
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    // Don't update drawing when editing a caption
-    if (!currentDraw || !containerRef.current || activeRectId !== null) return;
+    // Don't update drawing when editing a caption or not drawing
+    if (!drawing.isDrawing || !containerRef.current || activeRectId !== null) return;
 
     const rect = containerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const domX = e.clientX - rect.left;
+    const domY = e.clientY - rect.top;
 
-    setCurrentDraw({
-      ...currentDraw,
-      currentX: x,
-      currentY: y,
-    });
+    // Convert DOM coordinates to image pixel coordinates
+    const { x, y } = domToImageCoords(domX, domY);
+
+    drawing.handleMouseMove(x, y);
   };
 
   /**
@@ -207,21 +242,17 @@ export function MangaPage({
    */
   const handleMouseUp = async () => {
     // Don't complete drawing when editing a caption
-    if (!currentDraw || !imageRef.current || activeRectId !== null) return;
+    if (!drawing.isDrawing || !imageRef.current || activeRectId !== null) return;
 
-    // Calculate rectangle dimensions
-    const x = Math.min(currentDraw.startX, currentDraw.currentX);
-    const y = Math.min(currentDraw.startY, currentDraw.currentY);
-    const width = Math.abs(currentDraw.currentX - currentDraw.startX);
-    const height = Math.abs(currentDraw.currentY - currentDraw.startY);
+    // Finish drawing and get result (bbox + points for polygon)
+    const drawResult = drawing.handleMouseUp();
 
-    // Ignore very small rectangles (accidental clicks)
-    if (width < 20 || height < 20) {
-      setCurrentDraw(null);
+    // Ignore if result is null (too small or incomplete)
+    if (!drawResult) {
       return;
     }
 
-    setCurrentDraw(null);
+    const { x, y, width, height, points } = drawResult;
 
     // Capture the region
     const capturedImage = await captureRegion(x, y, width, height);
@@ -235,7 +266,6 @@ export function MangaPage({
     setCreatingCaptionPos({ x: x + width / 2, y: y + height / 2 });
 
     // Create placeholder in database immediately to get real ID
-    console.log("🔄 Creating placeholder caption in database...");
     const [error, result] = await catchError(
       api.api.ocr.post({
         pageId: page.id,
@@ -245,6 +275,7 @@ export function MangaPage({
         width,
         height,
         capturedImage,
+        polygonPoints: points, // Include polygon points if available
       })
     );
 
@@ -304,16 +335,12 @@ export function MangaPage({
   ): Promise<string | null> => {
     if (!imageRef.current) return null;
 
-    // Get displayed and canvas dimensions
-    const imgRect = imageRef.current.getBoundingClientRect();
-    const displayedWidth = imgRect.width;
-    const displayedHeight = imgRect.height;
-
-    // Capture image
+    // Capture image (force scale=1 to ignore device pixel ratio)
     const [error, canvas] = await catchError(
       html2canvas(imageRef.current, {
         useCORS: true,
         allowTaint: true,
+        scale: 1, // Force 1x scale, ignore DPR to match image pixel coordinates
       })
     );
 
@@ -322,16 +349,22 @@ export function MangaPage({
       return null;
     }
 
-    // Calculate scale factors
-    const scaleX = canvas.width / displayedWidth;
-    const scaleY = canvas.height / displayedHeight;
+    // Coordinates are in image pixel space, scale to canvas space
+    // With scale=1, canvas should match natural image size (scaleX/Y ≈ 1.0)
+    const imgNaturalWidth = imageRef.current.naturalWidth;
+    const imgNaturalHeight = imageRef.current.naturalHeight;
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
 
-    // Scale coordinates
-    const naturalRect = {
-      x: x * scaleX,
-      y: y * scaleY,
-      width: width * scaleX,
-      height: height * scaleY,
+    // Scale from image pixels to canvas pixels (should be ~1.0 with scale=1)
+    const scaleX = canvasWidth / imgNaturalWidth;
+    const scaleY = canvasHeight / imgNaturalHeight;
+
+    const canvasRect = {
+      x: Math.round(x * scaleX),
+      y: Math.round(y * scaleY),
+      width: Math.round(width * scaleX),
+      height: Math.round(height * scaleY),
     };
 
     // Crop region
@@ -339,19 +372,19 @@ export function MangaPage({
     const ctx = croppedCanvas.getContext("2d");
     if (!ctx) return null;
 
-    croppedCanvas.width = naturalRect.width;
-    croppedCanvas.height = naturalRect.height;
+    croppedCanvas.width = canvasRect.width;
+    croppedCanvas.height = canvasRect.height;
 
     ctx.drawImage(
       canvas,
-      naturalRect.x,
-      naturalRect.y,
-      naturalRect.width,
-      naturalRect.height,
+      canvasRect.x,
+      canvasRect.y,
+      canvasRect.width,
+      canvasRect.height,
       0,
       0,
-      naturalRect.width,
-      naturalRect.height,
+      canvasRect.width,
+      canvasRect.height,
     );
 
     return croppedCanvas.toDataURL("image/png");
@@ -368,57 +401,135 @@ export function MangaPage({
   };
 
   /**
+   * Handle drawing completion (rectangle or polygon)
+   */
+  const handleDrawingComplete = async (drawResult: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    points?: Point[];
+  }) => {
+    const { x, y, width, height, points } = drawResult;
+
+    // Capture the region
+    const capturedImage = await captureRegion(x, y, width, height);
+    if (!capturedImage) return;
+
+    // Show loading popup
+    setIsCreatingCaption(true);
+    setCreatingCaptionPos({ x: x + width / 2, y: y + height / 2 });
+
+    // Create caption in DB
+    const [error, result] = await catchError(
+      api.api.ocr.post({
+        pageId: page.id,
+        imagePath: page.originalImage,
+        x,
+        y,
+        width,
+        height,
+        capturedImage,
+        polygonPoints: points,
+      })
+    );
+
+    setIsCreatingCaption(false);
+    setCreatingCaptionPos(null);
+
+    if (error) {
+      console.error("❌ Failed to create caption:", error);
+      showNotification?.("Failed to create caption", "error");
+      return;
+    }
+
+    if (!result.data?.success || !result.data.captionId) {
+      console.error("❌ No caption ID returned from API");
+      showNotification?.("Failed to create caption", "error");
+      return;
+    }
+
+    // Create rectangle with database ID
+    const captionId = result.data.captionId;
+    const captionSlug = result.data.captionSlug || undefined;
+    const rectId = `caption-${captionId}`;
+
+    const newRect: Rectangle = {
+      id: rectId,
+      captionId: captionId,
+      captionSlug: captionSlug,
+      x,
+      y,
+      width,
+      height,
+      polygonPoints: points,
+      capturedImage,
+      rawText: result.data.rawText,
+      translatedText: result.data.translatedText || undefined,
+    };
+
+    setRectangles([...rectangles, newRect]);
+    setActiveRectId(rectId);
+  };
+
+  /**
    * Handle patching the entire page - permanently merges all patches onto page image
    */
   const handlePatchPage = async () => {
+    if (!page.slug) {
+      showNotification?.("Page slug not found", "error");
+      return;
+    }
+
     setIsPatching(true);
 
-    try {
-      // Get displayed image dimensions
-      const displayedWidth = imageRef.current?.getBoundingClientRect().width || 0;
-      const displayedHeight = imageRef.current?.getBoundingClientRect().height || 0;
+    // Get displayed image dimensions
+    const displayedWidth = imageRef.current?.getBoundingClientRect().width || 0;
+    const displayedHeight = imageRef.current?.getBoundingClientRect().height || 0;
 
-      const response = await fetch(`/api/pages/${page.id}/patch-page`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          displayedWidth,
-          displayedHeight,
-        }),
-      });
+    // Use Eden Treaty for type-safe API call
+    const [error, response] = await catchError(
+      api.api.pages.page.patch({
+        pageSlug: page.slug,
+        displayedWidth,
+        displayedHeight,
+      })
+    );
 
-      const result = await response.json();
-
-      if (result.success) {
-        // Clear all rectangles and reload
-        setRectangles([]);
-        setActiveRectId(null);
-        // Force reload the page image with aggressive cache-busting
-        const baseUrl = page.originalImage.split('?')[0];
-        setImageSrc(`${baseUrl}?t=${Date.now()}`);
-        showNotification?.(
-          result.message || "Page patched successfully!",
-          "success"
-        );
-        // Exit edit mode after successful patching
-        onEditModeChange(false);
-      } else {
-        showNotification?.(
-          `Failed to patch page: ${result.error || "Unknown error"}`,
-          "error"
-        );
-      }
-    } catch (error) {
+    if (error) {
       console.error("[MangaPage] Patch page failed:", error);
       showNotification?.(
-        `Failed to patch page: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Failed to patch page: ${error.message}`,
         "error"
       );
-    } finally {
       setIsPatching(false);
+      return;
     }
+
+    // Type the response data
+    const result = response?.data as { success?: boolean; message?: string; error?: string } | undefined;
+
+    if (result?.success) {
+      // Clear all rectangles and reload
+      setRectangles([]);
+      setActiveRectId(null);
+      // Force reload the page image with aggressive cache-busting
+      const baseUrl = page.originalImage.split('?')[0];
+      setImageSrc(`${baseUrl}?t=${Date.now()}`);
+      showNotification?.(
+        result.message || "Page patched successfully!",
+        "success"
+      );
+      // Exit edit mode after successful patching
+      onEditModeChange(false);
+    } else {
+      showNotification?.(
+        `Failed to patch page: ${result?.error || "Unknown error"}`,
+        "error"
+      );
+    }
+
+    setIsPatching(false);
   };
 
   /**
@@ -428,20 +539,6 @@ export function MangaPage({
     onPatchPage?.(handlePatchPage);
   }, [onPatchPage]);
 
-  /**
-   * Get normalized rectangle coordinates for rendering
-   */
-  const getNormalizedRect = (draw: typeof currentDraw) => {
-    if (!draw) return null;
-    return {
-      x: Math.min(draw.startX, draw.currentX),
-      y: Math.min(draw.startY, draw.currentY),
-      width: Math.abs(draw.currentX - draw.startX),
-      height: Math.abs(draw.currentY - draw.startY),
-    };
-  };
-
-  const drawingRect = getNormalizedRect(currentDraw);
 
   return (
     <div className="space-y-4">
@@ -464,22 +561,17 @@ export function MangaPage({
           draggable={false}
         />
 
-        {/* Drawing rectangle (while dragging) */}
-        {editMode && drawingRect && (
-          <div
-            className="absolute border-2 border-blue-500 bg-blue-300 bg-opacity-30 pointer-events-none"
-            style={{
-              left: drawingRect.x,
-              top: drawingRect.y,
-              width: drawingRect.width,
-              height: drawingRect.height,
-            }}
-          />
-        )}
+        {/* Drawing preview overlay (rectangle or polygon) */}
+        <DrawingOverlay
+          drawingTool={drawingTool}
+          drawing={drawing}
+          editMode={editMode}
+          onComplete={handleDrawingComplete}
+        />
 
         {/* Caption rectangles */}
         {rectangles.map((rect) => (
-          <CaptionRectangle
+          <UserCaptionHost
             key={rect.id}
             id={rect.id}
             captionId={rect.captionId}
@@ -489,6 +581,7 @@ export function MangaPage({
             y={rect.y}
             width={rect.width}
             height={rect.height}
+            polygonPoints={rect.polygonPoints}
             capturedImage={rect.capturedImage || ""}
             rawText={rect.rawText}
             translatedText={rect.translatedText}

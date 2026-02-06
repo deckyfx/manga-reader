@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2026-02-06
+
+### Added
+- **Upload Image from URL**: Added ability to upload manga pages directly from URL
+- **Polygon Area Tool**: New polygon drawing tool for creating cleaner, irregular-shaped translation patches
+  - Supports arbitrary polygon shapes for better text bubble fitting
+  - Interactive polygon creation with visual feedback
+  - Full customization support (font, colors, stroke)
+
+### Fixed
+- **Caption Dialog Workflow**: Fixed caption dialog closing unexpectedly after creating caption, then clicking generate patch, then clicking update
+- **Patch Page Reliability**: Fixed issue where patch page feature would sometimes fail immediately after creating patches
+  - Changed API to use page slug instead of pageId for better reliability
+  - Improved error handling for patch merging operations
+- **Image Storage Optimization**: Reduced size of stored cropped images by removing 1.75 device pixel ratio scaling
+  - Smaller file sizes without quality loss
+  - More efficient storage usages
+
 ## [0.0.5] - 2026-02-06
 
 ### Added
@@ -107,6 +125,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Drag-and-drop page reordering in gallery view
 - Edit mode for caption management
 
+[0.0.6]: https://github.com/deckyfx/manga-reader/releases/tag/v0.0.6
 [0.0.5]: https://github.com/deckyfx/manga-reader/releases/tag/v0.0.5
 [0.0.4]: https://github.com/deckyfx/manga-reader/releases/tag/v0.0.4
 [0.0.3]: https://github.com/deckyfx/manga-reader/releases/tag/v0.0.3

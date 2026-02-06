@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Release script for version 0.0.5
+# Release script for version 0.0.6
 # Builds, tags, and pushes Docker images
 
-VERSION="0.0.5"
+VERSION="0.0.6"
 
 echo "🚀 Releasing version $VERSION"
 echo ""
@@ -60,7 +60,5 @@ else
 fi
 
 echo ""
-echo "🏷️  Don't forget to tag git repository:"
-echo "   git tag -a v$VERSION -m 'Release version $VERSION'"
-echo "   git push origin v$VERSION"
+echo "✅ DONE"
 echo ""

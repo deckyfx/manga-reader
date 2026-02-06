@@ -15,6 +15,13 @@
       "when": 1770328314516,
       "tag": "0001_black_guardian",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1770376383812,
+      "tag": "0002_dry_chronomancer",
+      "breakpoints": true
     }
   ]
 }

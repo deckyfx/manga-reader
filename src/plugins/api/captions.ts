@@ -39,6 +39,17 @@ async function generateAndSavePatch(
     throw new Error("Chapter not found");
   }
 
+  // Parse polygon points and convert to relative coordinates (if available)
+  let relativePolygonPoints: Array<{ x: number; y: number }> | undefined;
+  if (caption.polygonPoints) {
+    const absolutePoints = JSON.parse(caption.polygonPoints) as Array<{ x: number; y: number }>;
+    // Convert from page coordinates to relative coordinates within captured region
+    relativePolygonPoints = absolutePoints.map(point => ({
+      x: point.x - caption.x,
+      y: point.y - caption.y,
+    }));
+  }
+
   // Generate patch using PatchGeneratorService with manual parameters
   const patchService = PatchGeneratorService.getInstance();
   const base64Data = caption.capturedImage.replace(/^data:image\/\w+;base64,/, "");
@@ -50,7 +61,8 @@ async function generateAndSavePatch(
     fontType,
     textColor,
     strokeColor,
-    strokeWidth
+    strokeWidth,
+    relativePolygonPoints
   );
 
   // Create patches directory if it doesn't exist
@@ -99,9 +111,17 @@ export const captionsApi = new Elysia({ prefix: "/captions" })
         };
       }
 
+      // Parse polygonPoints from JSON string to array
+      const captionsWithParsedPolygons = captions.map((caption) => ({
+        ...caption,
+        polygonPoints: caption.polygonPoints
+          ? JSON.parse(caption.polygonPoints)
+          : null,
+      }));
+
       return {
         success: true,
-        captions,
+        captions: captionsWithParsedPolygons,
       };
     },
     {
@@ -283,7 +303,7 @@ export const captionsApi = new Elysia({ prefix: "/captions" })
 export const ocrApi = new Elysia({ prefix: "/ocr" }).post(
   "/",
   async ({ body }) => {
-    const { pageId, imagePath, x, y, width, height, capturedImage } = body;
+    const { pageId, imagePath, x, y, width, height, capturedImage, polygonPoints } = body;
 
     // Decode base64 image
     const base64Data = capturedImage.replace(/^data:image\/\w+;base64,/, "");
@@ -330,6 +350,7 @@ export const ocrApi = new Elysia({ prefix: "/ocr" }).post(
         capturedImage,
         rawText,
         translatedText: translatedText || null,
+        polygonPoints: polygonPoints ? JSON.stringify(polygonPoints) : null,
       }),
     );
 
@@ -360,6 +381,14 @@ export const ocrApi = new Elysia({ prefix: "/ocr" }).post(
       width: t.Number(),
       height: t.Number(),
       capturedImage: t.String(), // base64 data URL
+      polygonPoints: t.Optional(
+        t.Array(
+          t.Object({
+            x: t.Number(),
+            y: t.Number(),
+          })
+        )
+      ), // Optional polygon points for masking (not stored yet)
     }),
   },
 );

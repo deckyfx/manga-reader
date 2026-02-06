@@ -1,6 +1,6 @@
 {
   "name": "manga-reader",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "A modern manga/manga reader with real-time OCR text extraction and translation capabilities",
   "module": "src/index.ts",
   "type": "module",
@@ -22,7 +22,8 @@
     "build": "bun run build.ts",
     "migrate": "bun run src/db/migrate.ts",
     "db:generate": "drizzle-kit generate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "test:patch": "bun run test-polygon-patch.ts"
   },
   "dependencies": {
     "@elysiajs/eden": "^1.4.6",

@@ -31,7 +31,7 @@ export function PatchEditorPanel({
   onPatchGenerated,
   currentPatchUrl,
 }: PatchEditorPanelProps) {
-  const [fontSize, setFontSize] = useState(25);
+  const [fontSize, setFontSize] = useState(12);
   const [fontType, setFontType] = useState<"regular" | "bold" | "italic">("regular");
   const [textColor, setTextColor] = useState("#000000");
   const [strokeColor, setStrokeColor] = useState("#FFFFFF");
@@ -143,16 +143,16 @@ export function PatchEditorPanel({
               <div className="flex gap-2 items-center">
                 <input
                   type="range"
-                  min="10"
-                  max="100"
+                  min="5"
+                  max="30"
                   value={fontSize}
                   onChange={(e) => setFontSize(Number(e.target.value))}
                   className="flex-1"
                 />
                 <input
                   type="number"
-                  min="10"
-                  max="100"
+                  min="5"
+                  max="30"
                   value={fontSize}
                   onChange={(e) => setFontSize(Number(e.target.value))}
                   className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"

@@ -66,6 +66,9 @@ export const userCaptions = sqliteTable("user_captions", {
   width: integer("width").notNull(),
   height: integer("height").notNull(),
 
+  // Polygon points (JSON array of {x, y} coordinates) - for polygon-shaped captions
+  polygonPoints: text("polygon_points"), // Stored as JSON: [{"x": 10, "y": 20}, ...]
+
   // Image data (base64 encoded)
   capturedImage: text("captured_image").notNull(),
 

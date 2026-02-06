@@ -168,6 +168,199 @@ export const pagesApi = new Elysia({ prefix: "/pages" })
     },
   )
   .post(
+    "/download",
+    async ({ body }) => {
+      const { chapterId: chapterIdStr, url, referer, userAgent } = body;
+      const chapterId = parseInt(chapterIdStr);
+
+      // Content-Type to file extension mapping
+      const contentTypeToExt: Record<string, string> = {
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+        "image/gif": "gif",
+        "image/bmp": "bmp",
+        "image/tiff": "tiff",
+        "image/avif": "avif",
+      };
+
+      // Validate chapter exists
+      const [chapterError, chapter] = await catchError(
+        ChapterStore.findById(chapterId),
+      );
+
+      if (chapterError) {
+        console.error("Find chapter error:", chapterError);
+        return {
+          success: false,
+          error: chapterError.message,
+        };
+      }
+
+      if (!chapter) {
+        return {
+          success: false,
+          error: "Chapter not found",
+        };
+      }
+
+      // Build fetch headers (default User-Agent to avoid CDN rejections)
+      const headers: Record<string, string> = {
+        "User-Agent": userAgent || "Mozilla/5.0 (compatible; MangaReader/1.0)",
+      };
+      if (referer) headers["Referer"] = referer;
+
+      // Fetch image from URL
+      const [fetchError, response] = await catchError(
+        fetch(url, {
+          headers,
+          redirect: "follow",
+        }),
+      );
+
+      if (fetchError) {
+        console.error("Download error:", fetchError);
+        return {
+          success: false,
+          error: `Failed to download: ${fetchError.message}`,
+        };
+      }
+
+      if (!response.ok) {
+        return {
+          success: false,
+          error: `URL returned status ${response.status}`,
+        };
+      }
+
+      // Validate Content-Type before downloading body
+      const contentType = response.headers
+        .get("content-type")
+        ?.split(";")[0]
+        ?.trim()
+        .toLowerCase();
+
+      if (!contentType || !contentType.startsWith("image/")) {
+        return {
+          success: false,
+          error: `URL did not return an image. Content-Type: ${contentType || "unknown"}`,
+        };
+      }
+
+      // Determine file extension from Content-Type
+      const ext = contentTypeToExt[contentType] || "jpg";
+
+      // Read response body
+      const [bodyError, buffer] = await catchError(response.arrayBuffer());
+
+      if (bodyError) {
+        console.error("Read response body error:", bodyError);
+        return {
+          success: false,
+          error: `Failed to read response: ${bodyError.message}`,
+        };
+      }
+
+      if (buffer.byteLength === 0) {
+        return {
+          success: false,
+          error: "Downloaded file is empty",
+        };
+      }
+
+      // Create chapter directory
+      const chapterDir = join(
+        envConfig.MANGA_DIR,
+        chapter.seriesId.toString(),
+        "chapters",
+        chapter.id.toString(),
+      );
+
+      const [mkdirError] = await catchError(
+        mkdir(chapterDir, { recursive: true }),
+      );
+
+      if (mkdirError) {
+        console.error("Create directory error:", mkdirError);
+        return {
+          success: false,
+          error: mkdirError.message,
+        };
+      }
+
+      // Get current page count
+      const [pagesError, existingPages] = await catchError(
+        PageStore.findByChapterId(chapterId),
+      );
+
+      if (pagesError) {
+        console.error("Find pages error:", pagesError);
+        return {
+          success: false,
+          error: pagesError.message,
+        };
+      }
+
+      const nextOrderNum = existingPages.length + 1;
+
+      // Generate filename and write file
+      const filename = generateUniqueFilename(ext, nextOrderNum);
+      const filePath = join(chapterDir, filename);
+
+      const [writeError] = await catchError(
+        writeFile(filePath, new Uint8Array(buffer)),
+      );
+
+      if (writeError) {
+        console.error("Write file error:", writeError);
+        return {
+          success: false,
+          error: writeError.message,
+        };
+      }
+
+      // Create page record
+      const imagePath = `/uploads/${chapter.seriesId}/chapters/${chapter.id}/${filename}`;
+
+      const [createError, newPage] = await catchError(
+        PageStore.create({
+          chapterId,
+          originalImage: imagePath,
+          orderNum: nextOrderNum,
+        }),
+      );
+
+      if (createError) {
+        console.error("Create page error:", createError);
+        return {
+          success: false,
+          error: createError.message,
+        };
+      }
+
+      // Reindex pages
+      const [reindexError] = await catchError(reindexChapterPages(chapterId));
+
+      if (reindexError) {
+        console.error("Reindex pages error:", reindexError);
+      }
+
+      return {
+        success: true,
+        page: newPage,
+      };
+    },
+    {
+      body: t.Object({
+        chapterId: t.String(),
+        url: t.String(),
+        referer: t.Optional(t.String()),
+        userAgent: t.Optional(t.String()),
+      }),
+    },
+  )
+  .post(
     "/reorder",
     async ({ body }) => {
       const { updates } = body;
@@ -326,12 +519,11 @@ export const pagesApi = new Elysia({ prefix: "/pages" })
       page: t.String(),
     }),
   })
-  .post("/:pageId/patch-page", async ({ params, body }) => {
-    const pageId = parseInt(params.pageId);
-    const { displayedWidth, displayedHeight } = body;
+  .patch("/page", async ({ body }) => {
+    const { pageSlug, displayedWidth, displayedHeight } = body;
 
-    // Get page
-    const [pageError, page] = await catchError(PageStore.findById(pageId));
+    // Get page by slug
+    const [pageError, page] = await catchError(PageStore.findBySlug(pageSlug));
 
     if (pageError || !page) {
       return {
@@ -340,9 +532,9 @@ export const pagesApi = new Elysia({ prefix: "/pages" })
       };
     }
 
-    // Get all captions for the page
+    // Get all captions for the page using page ID
     const [captionsError, captions] = await catchError(
-      CaptionStore.findByPageId(pageId)
+      CaptionStore.findByPageId(page.id)
     );
 
     if (captionsError) {
@@ -494,6 +686,7 @@ export const pagesApi = new Elysia({ prefix: "/pages" })
     };
   }, {
     body: t.Object({
+      pageSlug: t.String(),
       displayedWidth: t.Number(),
       displayedHeight: t.Number(),
     }),

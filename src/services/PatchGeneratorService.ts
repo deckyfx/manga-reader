@@ -1,39 +1,15 @@
-import { envConfig } from "../env-config";
-import { catchError } from "../lib/error-handler";
+import { MangaOCRAPI } from "./MangaOCRAPI";
 
 /**
- * Patch Generator Service Response
- */
-interface PatchResponse {
-  status: "success";
-  patchImage: string; // base64 encoded PNG
-  size: [number, number];
-}
-
-/**
- * Error Response
- */
-interface ErrorResponse {
-  detail?: string;
-  error?: string;
-}
-
-/**
- * PatchGeneratorService - Image patch generation service
+ * PatchGeneratorService - Wrapper service for MangaOCRAPI patch operations
  *
- * Generates image patches with translated text overlaid on cleaned manga regions.
- * Uses OpenCV for text cleanup and PIL/Pillow for text rendering.
- * Communicates with the manga-ocr FastAPI server via Unix domain socket
- * (reuses same socket, different endpoint for separation of concerns).
+ * Provides instance-based interface for backward compatibility.
+ * Delegates all operations to the centralized MangaOCRAPI.
  */
 export class PatchGeneratorService {
   private static instance: PatchGeneratorService;
-  private socketPath: string;
 
-  private constructor() {
-    // Reuse manga-ocr socket, just different endpoint
-    this.socketPath = envConfig.MANGA_OCR_SOCKET;
-  }
+  private constructor() {}
 
   /**
    * Get singleton instance
@@ -55,6 +31,7 @@ export class PatchGeneratorService {
    * @param textColor - Text color in hex format (e.g., "#FFFFFF")
    * @param strokeColor - Stroke color in hex format or null for no stroke
    * @param strokeWidth - Stroke width in pixels (0 for no stroke)
+   * @param polygonPoints - Optional polygon points for masking (relative to captured image)
    * @returns Base64 encoded PNG patch image
    *
    * @example
@@ -67,7 +44,8 @@ export class PatchGeneratorService {
    *   "regular",
    *   "#FFFFFF",
    *   "#000000",
-   *   2
+   *   2,
+   *   [{ x: 10, y: 20 }, { x: 50, y: 30 }] // Optional polygon points
    * );
    * ```
    */
@@ -78,35 +56,19 @@ export class PatchGeneratorService {
     fontType: "regular" | "bold" | "italic",
     textColor: string,
     strokeColor: string | null,
-    strokeWidth: number
+    strokeWidth: number,
+    polygonPoints?: Array<{ x: number; y: number }>
   ): Promise<string> {
-    // Send to patch generator endpoint on same socket as manga-ocr
-    const response = await fetch("http://localhost/generate-patch", {
-      unix: this.socketPath,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        capturedImage,
-        translatedText: lines,
-        fontSize,
-        fontType,
-        textColor,
-        strokeColor,
-        strokeWidth,
-      }),
-    });
-
-    if (!response.ok) {
-      const error: ErrorResponse = await response.json();
-      throw new Error(
-        `Patch generation failed: ${error.detail || error.error || response.statusText}`
-      );
-    }
-
-    const result: PatchResponse = await response.json();
-    return result.patchImage;
+    return MangaOCRAPI.generatePatch(
+      capturedImage,
+      lines,
+      fontSize,
+      fontType,
+      textColor,
+      strokeColor,
+      strokeWidth,
+      polygonPoints
+    );
   }
 
   /**
@@ -114,15 +76,7 @@ export class PatchGeneratorService {
    * (checks if manga-ocr socket is available)
    */
   public async isAvailable(): Promise<boolean> {
-    try {
-      // Try to reach the socket
-      const response = await fetch("http://localhost/health", {
-        unix: this.socketPath,
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
+    return MangaOCRAPI.isAvailable();
   }
 
   /**
@@ -136,28 +90,6 @@ export class PatchGeneratorService {
     pageImageBase64: string,
     patches: Array<{ patchImageBase64: string; x: number; y: number }>
   ): Promise<string> {
-    const response = await fetch("http://localhost/merge-patches", {
-      unix: this.socketPath,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        pageImageBase64,
-        patches,
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      const errorDetail = error.detail || error.error || response.statusText;
-      const errorMessage = typeof errorDetail === 'string'
-        ? errorDetail
-        : JSON.stringify(errorDetail, null, 2);
-      throw new Error(`Patch merging failed: ${errorMessage}`);
-    }
-
-    const result = await response.json();
-    return result.mergedImage;
+    return MangaOCRAPI.mergePatches(pageImageBase64, patches);
   }
 }

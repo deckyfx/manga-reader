@@ -1,6 +1,6 @@
 [project]
 name = "manga-ocr"
-version = "0.0.5"
+version = "0.0.6"
 description = "Modernized manga OCR with patch generation support"
 readme = "README.md"
 requires-python = ">=3.11"

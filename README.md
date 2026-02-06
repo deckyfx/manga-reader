@@ -35,14 +35,26 @@ A manga reader with OCR text extraction and translation capabilities.
   </table>
 </div>
 
-## New Feature 0.0.5 Patch Page
+## New Feature 0.0.6 Polygon form to path image and download from URL
 
 <div align="center">
   <table>
     <tr>
-      <td width="33%"><img src="screenshoot/07.png" alt="Patch Page Feature 1" width="100%"/></td>
-      <td width="33%"><img src="screenshoot/08.png" alt="Patch Page Feature 2" width="100%"/></td>
-      <td width="33%"><img src="screenshoot/09.png" alt="Patch Page Feature 3" width="100%"/></td>
+      <td width="33%"><img src="screenshoot/10.png" alt="Add Page Dropdown" width="100%"/></td>
+      <td width="33%"><img src="screenshoot/11.png" alt="Download from URL Dialog" width="100%"/></td>
+      <td width="33%"><img src="screenshoot/12.png" alt="Download Result" width="100%"/></td>
+    </tr>
+  </table>
+</div>
+
+## New Feature 0.0.5 Patch Page and Image
+
+<div align="center">
+  <table>
+    <tr>
+      <td width="33%"><img src="screenshoot/07.png" alt="Patch Image" width="100%"/></td>
+      <td width="33%"><img src="screenshoot/08.png" alt="Patch Image Setup" width="100%"/></td>
+      <td width="33%"><img src="screenshoot/09.png" alt="Patch Page" width="100%"/></td>
     </tr>
   </table>
 </div>

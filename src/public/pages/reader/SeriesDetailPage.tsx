@@ -133,38 +133,37 @@ export function SeriesDetailPage() {
   };
 
   const handleDownloadChapterClick = async (chapter: any) => {
-    try {
-      showSnackbar("Preparing download...", "info");
+    showSnackbar("Preparing download...", "info");
 
-      // Call API to download chapter as tar.gz
-      const response = await fetch(
-        `/api/chapters/${chapter.slug}/download-zip`,
-        {
-          method: "POST",
-        }
-      );
+    // Use Eden Treaty for type-safe API call
+    const [error, response] = await catchError(
+      api.api.chapters({ slug: chapter.slug })["download-zip"].post()
+    );
 
-      if (!response.ok) {
-        showSnackbar("Failed to download chapter", "error");
-        return;
-      }
-
-      // Get the blob and create download link
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${series.title} - ${chapter.title}.tar.gz`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-
-      showSnackbar("Chapter downloaded successfully!", "success");
-    } catch (error) {
+    if (error) {
       console.error("Download error:", error);
       showSnackbar("Failed to download chapter", "error");
+      return;
     }
+
+    // Eden Treaty returns Response object for blob endpoints
+    if (!response.response || !response.response.ok) {
+      showSnackbar("Failed to download chapter", "error");
+      return;
+    }
+
+    // Get the blob and create download link
+    const blob = await response.response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${series.title} - ${chapter.title}.tar.gz`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+
+    showSnackbar("Chapter downloaded successfully!", "success");
   };
 
   if (loading) {
