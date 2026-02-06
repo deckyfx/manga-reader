@@ -73,6 +73,10 @@ export const userCaptions = sqliteTable("user_captions", {
   rawText: text("raw_text").notNull(),
   translatedText: text("translated_text"),
 
+  // Patch image data
+  patchImagePath: text("patch_image_path"), // /data/manga/{seriesId}/chapters/{chapterId}/patches/{slug}.png
+  patchGeneratedAt: integer("patch_generated_at", { mode: "timestamp" }),
+
   // Timestamps
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()

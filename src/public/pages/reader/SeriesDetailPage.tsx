@@ -22,13 +22,17 @@ export function SeriesDetailPage() {
   const [deletingChapter, setDeletingChapter] = useState(false);
   const [chapterToDelete, setChapterToDelete] = useState<any>(null);
 
+  console.log("[SeriesDetailPage] Component rendering, loading:", loading, "series:", series);
+
   useEffect(() => {
+    console.log("[SeriesDetailPage] useEffect triggered, seriesSlug:", seriesSlug);
     if (seriesSlug) {
       loadSeriesData();
     }
   }, [seriesSlug]);
 
   const loadSeriesData = async () => {
+    console.log("[SeriesDetailPage] Loading series data for:", seriesSlug);
     const [error, results] = await catchError(
       Promise.all([
         api.api.series({ slug: seriesSlug! }).get(),
@@ -37,12 +41,17 @@ export function SeriesDetailPage() {
     );
 
     if (error) {
-      console.error("Failed to load series data:", error);
+      console.error("[SeriesDetailPage] Failed to load series data:", error);
       setLoading(false);
       return;
     }
 
+    console.log("[SeriesDetailPage] API results:", results);
+
     const [seriesResult, chaptersResult] = results;
+
+    console.log("[SeriesDetailPage] Series result:", seriesResult.data);
+    console.log("[SeriesDetailPage] Chapters result:", chaptersResult.data);
 
     if (seriesResult.data?.success && seriesResult.data.series) {
       setSeries(seriesResult.data.series);
@@ -52,6 +61,7 @@ export function SeriesDetailPage() {
       setChapters(chaptersResult.data.chapters);
     }
 
+    console.log("[SeriesDetailPage] Setting loading to false");
     setLoading(false);
   };
 
@@ -132,6 +142,41 @@ export function SeriesDetailPage() {
     setChapterToDelete(null);
   };
 
+  const handleDownloadChapterClick = async (chapter: any) => {
+    try {
+      showSnackbar("Preparing download...", "info");
+
+      // Call API to download chapter as tar.gz
+      const response = await fetch(
+        `/api/chapters/${chapter.slug}/download-zip`,
+        {
+          method: "POST",
+        }
+      );
+
+      if (!response.ok) {
+        showSnackbar("Failed to download chapter", "error");
+        return;
+      }
+
+      // Get the blob and create download link
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${series.title} - ${chapter.title}.tar.gz`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      showSnackbar("Chapter downloaded successfully!", "success");
+    } catch (error) {
+      console.error("Download error:", error);
+      showSnackbar("Failed to download chapter", "error");
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100 flex items-center justify-center">
@@ -146,9 +191,10 @@ export function SeriesDetailPage() {
         <div className="container mx-auto px-4 py-8">
           <Link
             to="/r"
-            className="text-blue-600 hover:underline mb-4 inline-block"
+            className="text-blue-600 hover:underline mb-4 inline-block flex items-center gap-2"
           >
-            ← Back to Series List
+            <i className="fas fa-arrow-left"></i>
+            <span>Back to Series List</span>
           </Link>
           <div className="bg-white rounded-lg shadow-lg p-8 text-center">
             <p className="text-gray-600 text-lg">Series not found.</p>
@@ -168,15 +214,17 @@ export function SeriesDetailPage() {
           <>
             <Link
               to={`/a/series/${series.slug}/edit`}
-              className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold transition-colors whitespace-nowrap"
+              className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2"
             >
-              ✏️ Edit
+              <i className="fas fa-edit"></i>
+              <span>Edit</span>
             </Link>
             <button
               onClick={handleDeleteClick}
-              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition-colors whitespace-nowrap"
+              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2"
             >
-              🗑️ Delete
+              <i className="fas fa-trash"></i>
+              <span>Delete</span>
             </button>
           </>
         }
@@ -227,9 +275,10 @@ export function SeriesDetailPage() {
             <h2 className="text-2xl font-bold text-gray-800">Chapters</h2>
             <Link
               to={`/a/series/${series.slug}/chapter`}
-              className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold transition-colors"
+              className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold transition-colors flex items-center gap-2"
             >
-              📤 Upload Chapter
+              <i className="fas fa-upload"></i>
+              <span>Upload Chapter</span>
             </Link>
           </div>
           {chapters.length === 0 ? (
@@ -246,6 +295,7 @@ export function SeriesDetailPage() {
                   chapter={chapter}
                   seriesSlug={series.slug}
                   onDeleteClick={handleDeleteChapterClick}
+                  onDownloadClick={handleDownloadChapterClick}
                 />
               ))}
             </div>
@@ -271,20 +321,22 @@ export function SeriesDetailPage() {
             <button
               onClick={handleDeleteCancel}
               disabled={deleting}
-              className="px-4 py-2 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors"
+              className="px-4 py-2 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors flex items-center gap-2"
             >
-              Cancel
+              <i className="fas fa-times"></i>
+              <span>Cancel</span>
             </button>
             <button
               onClick={handleDeleteConfirm}
               disabled={deleting}
-              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2 ${
                 deleting
                   ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                   : "bg-red-500 hover:bg-red-600 text-white"
               }`}
             >
-              {deleting ? "Deleting..." : "Delete"}
+              <i className="fas fa-trash"></i>
+              <span>{deleting ? "Deleting..." : "Delete"}</span>
             </button>
           </div>
         </div>
@@ -308,20 +360,22 @@ export function SeriesDetailPage() {
             <button
               onClick={handleDeleteChapterCancel}
               disabled={deletingChapter}
-              className="px-4 py-2 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors"
+              className="px-4 py-2 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors flex items-center gap-2"
             >
-              Cancel
+              <i className="fas fa-times"></i>
+              <span>Cancel</span>
             </button>
             <button
               onClick={handleDeleteChapterConfirm}
               disabled={deletingChapter}
-              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2 ${
                 deletingChapter
                   ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                   : "bg-red-500 hover:bg-red-600 text-white"
               }`}
             >
-              {deletingChapter ? "Deleting..." : "Delete"}
+              <i className="fas fa-trash"></i>
+              <span>{deletingChapter ? "Deleting..." : "Delete"}</span>
             </button>
           </div>
         </div>

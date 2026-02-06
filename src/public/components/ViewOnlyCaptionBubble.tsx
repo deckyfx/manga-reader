@@ -31,15 +31,43 @@ export function ViewOnlyCaptionBubble({
   // If height > width, image is vertical/tall -> display horizontally (image on left)
   const isWideImage = width > height;
 
+  // Calculate if popup would overflow right edge
+  // Consider both rectangle position and its width
+  const popupWidth = 450;
+  const popupGap = 20;
+  const windowWidth = typeof window !== "undefined" ? window.innerWidth : 1920;
+  const windowHeight =
+    typeof window !== "undefined" ? window.innerHeight : 1080;
+  const rightEdgeOfRect = x + width;
+  const wouldOverflowRight =
+    rightEdgeOfRect + popupGap + popupWidth > windowWidth;
+
+  // Calculate if popup would overflow bottom edge
+  const estimatedPopupHeight = 400;
+  const wouldOverflowBottom = y + estimatedPopupHeight > windowHeight;
+
+  // Adjust Y position if would overflow bottom - move up by 300px
+  const adjustedY = wouldOverflowBottom ? y - 100 : y;
+
+  // Position popup: if would overflow right, position to the left of rectangle with gap
+  const popupStyle = wouldOverflowRight
+    ? {
+        left: x - popupWidth - popupGap,
+        top: adjustedY,
+        width: popupWidth,
+        maxWidth: "90vw",
+      }
+    : {
+        left: x,
+        top: adjustedY,
+        width: popupWidth,
+        maxWidth: "90vw",
+      };
+
   return (
     <div
       className="absolute bg-white rounded-lg shadow-2xl border-2 border-blue-500 p-3 z-10 pointer-events-none"
-      style={{
-        left: x,
-        top: y,
-        width: 450,
-        maxWidth: "90vw",
-      }}
+      style={popupStyle}
     >
       <div className={`flex gap-3 ${isWideImage ? "flex-col" : "flex-row"}`}>
         {/* Captured Image Preview */}

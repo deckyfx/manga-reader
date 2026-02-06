@@ -11,8 +11,9 @@ export const appPlugin = new Elysia()
   // Manual static file serving for /uploads/* using Bun.file()
   .get("/uploads/*", serveUploadedFiles)
   // React app routes - serve dev HTML with HMR
-  .get("/", index) 
+  .get("/", index)
   .get("/a/", index)
   .get("/a/*", index)
   .get("/r/", index)
-  .get("/r/*", index);
+  .get("/r/*", index)
+  .get("/font-test", index);

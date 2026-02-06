@@ -15,6 +15,8 @@ interface Rectangle {
   capturedImage?: string;
   rawText?: string;
   translatedText?: string;
+  patchImagePath?: string; // Path to generated patch image
+  patchGeneratedAt?: Date; // When patch was generated
 }
 
 interface PageData {
@@ -29,6 +31,9 @@ interface MangaPageProps {
   onNext?: () => void;
   editMode: boolean;
   onEditModeChange: (editMode: boolean) => void;
+  onPatchPage?: (handler: () => Promise<void>) => void;
+  onPatchesAvailable?: (available: boolean) => void;
+  showNotification?: (message: string, type: "success" | "error" | "info") => void;
 }
 
 /**
@@ -48,6 +53,9 @@ export function MangaPage({
   onNext,
   editMode,
   onEditModeChange,
+  onPatchPage,
+  onPatchesAvailable,
+  showNotification,
 }: MangaPageProps) {
   const [rectangles, setRectangles] = useState<Rectangle[]>([]);
   const [currentDraw, setCurrentDraw] = useState<{
@@ -57,6 +65,16 @@ export function MangaPage({
     currentY: number;
   } | null>(null);
   const [activeRectId, setActiveRectId] = useState<string | null>(null);
+  const [isPatching, setIsPatching] = useState(false);
+  const [imageSrc, setImageSrc] = useState(`${page.originalImage}?t=${Date.now()}`);
+
+  /**
+   * Update image source when page prop changes
+   */
+  useEffect(() => {
+    const baseUrl = page.originalImage.split('?')[0];
+    setImageSrc(`${baseUrl}?t=${Date.now()}`);
+  }, [page.originalImage]);
 
   const imageRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -90,6 +108,10 @@ export function MangaPage({
           capturedImage: caption.capturedImage,
           rawText: caption.rawText,
           translatedText: caption.translatedText || undefined,
+          patchImagePath: caption.patchImagePath || undefined,
+          patchGeneratedAt: caption.patchGeneratedAt
+            ? new Date(caption.patchGeneratedAt)
+            : undefined,
         }),
       );
 
@@ -103,6 +125,24 @@ export function MangaPage({
   useEffect(() => {
     loadCaptions();
   }, [page.id]);
+
+  /**
+   * Notify parent when patches are available
+   */
+  useEffect(() => {
+    const hasPatches = rectangles.some((r) => r.patchImagePath);
+    console.log("[MangaPage] Patches available check:", {
+      rectangleCount: rectangles.length,
+      hasPatches,
+      rectanglesWithPatches: rectangles.filter(r => r.patchImagePath).map(r => ({
+        id: r.id,
+        captionId: r.captionId,
+        captionSlug: r.captionSlug,
+        patchPath: r.patchImagePath
+      }))
+    });
+    onPatchesAvailable?.(hasPatches);
+  }, [rectangles, onPatchesAvailable]);
 
   /**
    * Reload captions and clear active popover when exiting edit mode
@@ -287,6 +327,67 @@ export function MangaPage({
   };
 
   /**
+   * Handle patching the entire page - permanently merges all patches onto page image
+   */
+  const handlePatchPage = async () => {
+    setIsPatching(true);
+
+    try {
+      // Get displayed image dimensions
+      const displayedWidth = imageRef.current?.getBoundingClientRect().width || 0;
+      const displayedHeight = imageRef.current?.getBoundingClientRect().height || 0;
+
+      const response = await fetch(`/api/pages/${page.id}/patch-page`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          displayedWidth,
+          displayedHeight,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Clear all rectangles and reload
+        setRectangles([]);
+        setActiveRectId(null);
+        // Force reload the page image with aggressive cache-busting
+        const baseUrl = page.originalImage.split('?')[0];
+        setImageSrc(`${baseUrl}?t=${Date.now()}`);
+        showNotification?.(
+          result.message || "Page patched successfully!",
+          "success"
+        );
+        // Exit edit mode after successful patching
+        onEditModeChange(false);
+      } else {
+        showNotification?.(
+          `Failed to patch page: ${result.error || "Unknown error"}`,
+          "error"
+        );
+      }
+    } catch (error) {
+      console.error("[MangaPage] Patch page failed:", error);
+      showNotification?.(
+        `Failed to patch page: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "error"
+      );
+    } finally {
+      setIsPatching(false);
+    }
+  };
+
+  /**
+   * Expose patch handler to parent
+   */
+  useEffect(() => {
+    onPatchPage?.(handlePatchPage);
+  }, [onPatchPage]);
+
+  /**
    * Get normalized rectangle coordinates for rendering
    */
   const getNormalizedRect = (draw: typeof currentDraw) => {
@@ -315,7 +416,7 @@ export function MangaPage({
       >
         <img
           ref={imageRef}
-          src={page.originalImage}
+          src={imageSrc}
           alt={`Manga page ${page.id}`}
           className="max-w-full h-auto rounded-lg shadow-lg"
           crossOrigin="anonymous"
@@ -350,6 +451,7 @@ export function MangaPage({
             capturedImage={rect.capturedImage || ""}
             rawText={rect.rawText}
             translatedText={rect.translatedText}
+            patchImagePath={rect.patchImagePath}
             imagePath={page.originalImage}
             editMode={editMode}
             isActive={activeRectId === rect.id}
@@ -360,7 +462,6 @@ export function MangaPage({
           />
         ))}
       </div>
-
     </div>
   );
 }

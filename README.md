@@ -35,6 +35,18 @@ A manga reader with OCR text extraction and translation capabilities.
   </table>
 </div>
 
+## New Feature 0.0.5 Patch Page
+
+<div align="center">
+  <table>
+    <tr>
+      <td width="33%"><img src="screenshoot/07.png" alt="Patch Page Feature 1" width="100%"/></td>
+      <td width="33%"><img src="screenshoot/08.png" alt="Patch Page Feature 2" width="100%"/></td>
+      <td width="33%"><img src="screenshoot/09.png" alt="Patch Page Feature 3" width="100%"/></td>
+    </tr>
+  </table>
+</div>
+
 ## Architecture
 
 ```

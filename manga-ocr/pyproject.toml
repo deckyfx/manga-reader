@@ -1,7 +1,7 @@
 [project]
 name = "manga-ocr"
-version = "0.0.4"
-description = "Modernized manga OCR with latest dependencies"
+version = "0.0.5"
+description = "Modernized manga OCR with patch generation support"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -12,6 +12,7 @@ dependencies = [
     "jaconv>=0.4.0",  # Japanese text conversion
     "loguru>=0.7.0",  # Modern logging
     "numpy>=1.26.0,<2.0",  # Pin to 1.x for PyTorch compatibility
+    "opencv-python-headless>=4.8.0",  # OpenCV for patch generation (headless for servers)
     "Pillow>=10.0.0",  # Image processing
     "protobuf>=3.20.0",  # Required by transformers (REQUIRED)
     "python-multipart>=0.0.6",  # For file uploads in FastAPI
@@ -37,8 +38,12 @@ requires = ["setuptools>=70.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["src"]
 package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+namespaces = false
 
 [tool.black]
 line-length = 100

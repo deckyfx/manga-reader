@@ -1,13 +1,75 @@
+@import url('./fonts/fontawesome/all.min.css');
 @import "tailwindcss";
 
-/* Custom styles */
+/* ========================================
+   Font Declarations
+   ======================================== */
+
+/* Anime Ace - Regular */
+@font-face {
+  font-family: 'Anime Ace';
+  src: url('./fonts/anime-ace/animeace.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Anime Ace - Bold */
+@font-face {
+  font-family: 'Anime Ace Bold';
+  src: url('./fonts/anime-ace/animeace_b.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Anime Ace - Italic */
+@font-face {
+  font-family: 'Anime Ace Italic';
+  src: url('./fonts/anime-ace/animeace_i.ttf') format('truetype');
+  font-weight: normal;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Nunito - Variable Font (supports weights 200-900) */
+@font-face {
+  font-family: 'Nunito';
+  src: url('./fonts/nunito/Nunito-VariableFont_wght.ttf') format('truetype-variations');
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Nunito - Italic Variable Font */
+@font-face {
+  font-family: 'Nunito';
+  src: url('./fonts/nunito/Nunito-Italic-VariableFont_wght.ttf') format('truetype-variations');
+  font-weight: 200 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ========================================
+   Custom styles
+   ======================================== */
 :root {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Nunito', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 body {
   margin: 0;
   padding: 0;
+}
+
+/* Make all buttons and links show pointer cursor */
+button,
+a {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
 }
 
 /* Snackbar animations */

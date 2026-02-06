@@ -370,4 +370,69 @@ export const chaptersApi = new Elysia({ prefix: "/chapters" })
     return {
       success: true,
     };
+  })
+  .post("/:slug/download-zip", async ({ params }) => {
+    // Find chapter by slug
+    const [chapterError, chapter] = await catchError(
+      ChapterStore.findBySlug(params.slug)
+    );
+
+    if (chapterError || !chapter) {
+      return new Response("Chapter not found", { status: 404 });
+    }
+
+    // Get all pages for the chapter
+    const [pagesError, pages] = await catchError(
+      PageStore.findByChapterId(chapter.id)
+    );
+
+    if (pagesError || !pages || pages.length === 0) {
+      return new Response("No pages found", { status: 404 });
+    }
+
+    // Create archive object with all page images
+    const archiveFiles: Record<string, Uint8Array> = {};
+
+    for (const page of pages) {
+      const imagePath = join(
+        envConfig.MANGA_DIR,
+        page.originalImage.replace("/uploads/", "")
+      );
+
+      // Read file as bytes
+      const [fileError, fileBuffer] = await catchError(
+        Bun.file(imagePath).arrayBuffer()
+      );
+
+      if (fileError) {
+        console.warn(`Failed to read page ${page.id}:`, fileError);
+        continue;
+      }
+
+      // Use page number and original extension for filename
+      const ext = extname(page.originalImage);
+      const filename = `${String(page.orderNum).padStart(3, "0")}${ext}`;
+      archiveFiles[filename] = new Uint8Array(fileBuffer);
+    }
+
+    if (Object.keys(archiveFiles).length === 0) {
+      return new Response("No pages could be read", { status: 500 });
+    }
+
+    // Create compressed tar.gz archive using Bun.Archive
+    const archive = new Bun.Archive(archiveFiles, {
+      compress: "gzip",
+      level: 6,
+    });
+
+    // Get archive as blob
+    const blob = await archive.blob();
+
+    // Return with proper headers for download
+    return new Response(blob, {
+      headers: {
+        "Content-Type": "application/gzip",
+        "Content-Disposition": `attachment; filename="${chapter.title}.tar.gz"`,
+      },
+    });
   });

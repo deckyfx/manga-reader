@@ -258,20 +258,22 @@ export function EditSeriesPage() {
                   <button
                     type="submit"
                     disabled={loading}
-                    className={`flex-1 py-3 rounded-lg font-semibold transition-colors ${
+                    className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
                       loading
                         ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                         : "bg-blue-500 hover:bg-blue-600 text-white"
                     }`}
                   >
-                    {loading ? "Updating..." : "Update Series"}
+                    <i className="fas fa-save"></i>
+                    <span>{loading ? "Updating..." : "Update Series"}</span>
                   </button>
 
                   <Link
                     to={`/r/${seriesSlug}`}
-                    className="flex-1 py-3 rounded-lg font-semibold text-center border-2 border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+                    className="flex-1 py-3 rounded-lg font-semibold text-center border-2 border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"
                   >
-                    Cancel
+                    <i className="fas fa-times"></i>
+                    <span>Cancel</span>
                   </Link>
                 </div>
               </div>

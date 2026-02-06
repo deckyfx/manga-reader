@@ -93,9 +93,10 @@ export function SeriesListPage() {
         actions={
           <Link
             to="/a/create"
-            className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold transition-colors whitespace-nowrap"
+            className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2"
           >
-            + Create Series
+            <i className="fas fa-plus"></i>
+            <span>Create Series</span>
           </Link>
         }
       />
@@ -117,9 +118,10 @@ export function SeriesListPage() {
             <p className="text-gray-600 text-lg">No series found.</p>
             <Link
               to="/a/create"
-              className="mt-4 inline-block px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg"
+              className="mt-4 inline-block px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold flex items-center gap-2 justify-center"
             >
-              Create First Series
+              <i className="fas fa-plus"></i>
+              <span>Create First Series</span>
             </Link>
           </div>
         ) : (

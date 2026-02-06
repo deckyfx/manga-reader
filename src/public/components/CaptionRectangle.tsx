@@ -15,6 +15,7 @@ interface CaptionRectangleProps {
   capturedImage: string;
   rawText?: string;
   translatedText?: string;
+  patchImagePath?: string;
   imagePath: string;
   editMode: boolean;
   isActive: boolean;
@@ -45,6 +46,7 @@ export function CaptionRectangle({
   capturedImage,
   rawText,
   translatedText,
+  patchImagePath,
   imagePath,
   editMode,
   isActive,
@@ -57,6 +59,22 @@ export function CaptionRectangle({
 
   return (
     <div key={id}>
+      {/* View mode: Patch image overlay (if available) */}
+      {!editMode && patchImagePath && (
+        <img
+          src={patchImagePath}
+          alt="Translation patch"
+          className="absolute pointer-events-none rounded"
+          style={{
+            left: x,
+            top: y,
+            width: width,
+            height: height,
+            objectFit: "cover",
+          }}
+        />
+      )}
+
       {/* Rectangle overlay - visible in both modes */}
       <RectangleOverlay
         x={x}
@@ -76,6 +94,7 @@ export function CaptionRectangle({
           existingCaptionSlug={captionSlug}
           existingRawText={rawText}
           existingTranslatedText={translatedText}
+          existingPatchImagePath={patchImagePath}
           pageId={pageId}
           capturedImage={capturedImage}
           imagePath={imagePath}

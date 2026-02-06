@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { MangaPage } from "../../components/MangaPage";
 import { ChapterNavigation } from "../../components/ChapterNavigation";
 import { StickyHeader } from "../../components/StickyHeader";
 import { api } from "../../lib/api";
 import { catchError } from "../../../lib/error-handler";
+import { useSnackbar } from "../../hooks/useSnackbar";
 
 /**
  * Reader page - displays a single manga page with navigation
@@ -12,6 +13,7 @@ import { catchError } from "../../../lib/error-handler";
 export function ReaderPage() {
   const { seriesSlug, chapterSlug, pageNum } = useParams();
   const navigate = useNavigate();
+  const { showSnackbar, SnackbarComponent } = useSnackbar();
 
   const [pageData, setPageData] = useState<{
     id: number;
@@ -24,16 +26,37 @@ export function ReaderPage() {
   const [chaptersCache, setChaptersCache] = useState<any[]>([]);
   const [editMode, setEditMode] = useState(false);
   const [chapterTitle, setChapterTitle] = useState("");
+  const [hasPatchesAvailable, setHasPatchesAvailable] = useState(false);
+  const [showPatchConfirm, setShowPatchConfirm] = useState(false);
+  const [patchPageHandler, setPatchPageHandler] = useState<
+    (() => Promise<void>) | null
+  >(null);
 
   const currentPage = parseInt(pageNum || "1");
 
+  console.log(
+    "[ReaderPage] Render - pageNum:",
+    pageNum,
+    "currentPage:",
+    currentPage,
+    "pagesCache length:",
+    pagesCache.length,
+  );
+
   // Load chapter data ONCE when chapter changes
   useEffect(() => {
+    console.log("[ReaderPage] Chapter changed, loading chapter:", chapterSlug);
     loadChapter();
   }, [seriesSlug, chapterSlug]);
 
   // Update current page when pageNum changes (no API call)
   useEffect(() => {
+    console.log(
+      "[ReaderPage] pageNum changed to:",
+      pageNum,
+      "pagesCache length:",
+      pagesCache.length,
+    );
     if (pagesCache.length > 0) {
       updateCurrentPage();
     }
@@ -48,7 +71,7 @@ export function ReaderPage() {
       Promise.all([
         api.api.chapters({ slug: chapterSlug! }).get(),
         api.api.series({ slug: seriesSlug! }).get(),
-      ])
+      ]),
     );
 
     if (error1) {
@@ -80,12 +103,14 @@ export function ReaderPage() {
     // Validate relationship: chapter must belong to series
     if (chapter.seriesId !== series.id) {
       console.warn(
-        `Chapter ${chapterSlug} does not belong to series ${seriesSlug}. Redirecting to correct series...`
+        `Chapter ${chapterSlug} does not belong to series ${seriesSlug}. Redirecting to correct series...`,
       );
 
       // Load the correct series for this chapter
       const [error2, correctSeriesResult] = await catchError(
-        api.api.series({ slug: `s${String(chapter.seriesId).padStart(5, "0")}` }).get()
+        api.api
+          .series({ slug: `s${String(chapter.seriesId).padStart(5, "0")}` })
+          .get(),
       );
 
       if (error2) {
@@ -94,7 +119,10 @@ export function ReaderPage() {
         return;
       }
 
-      if (correctSeriesResult.data?.success && correctSeriesResult.data.series) {
+      if (
+        correctSeriesResult.data?.success &&
+        correctSeriesResult.data.series
+      ) {
         const correctSeries = correctSeriesResult.data.series;
         // Redirect to correct URL
         navigate(`/r/${correctSeries.slug}/${chapterSlug}/${pageNum}`, {
@@ -107,7 +135,7 @@ export function ReaderPage() {
 
     // Fetch all pages for the chapter (ONCE)
     const [error3, pagesResult] = await catchError(
-      api.api.chapters({ slug: chapterSlug! }).pages.get()
+      api.api.chapters({ slug: chapterSlug! }).pages.get(),
     );
 
     if (error3) {
@@ -130,7 +158,7 @@ export function ReaderPage() {
 
     // Fetch all chapters for the series (for next/previous chapter navigation)
     const [error4, chaptersResult] = await catchError(
-      api.api.series({ slug: seriesSlug! }).chapters.get()
+      api.api.series({ slug: seriesSlug! }).chapters.get(),
     );
 
     if (error4) {
@@ -161,7 +189,7 @@ export function ReaderPage() {
     } else {
       // At first page - try to go to previous chapter's last page
       const currentChapterIndex = chaptersCache.findIndex(
-        (ch: any) => ch.slug === chapterSlug
+        (ch: any) => ch.slug === chapterSlug,
       );
 
       if (currentChapterIndex > 0) {
@@ -169,7 +197,7 @@ export function ReaderPage() {
 
         // Load previous chapter's pages to get last page
         const [error, pagesResult] = await catchError(
-          api.api.chapters({ slug: previousChapter.slug }).pages.get()
+          api.api.chapters({ slug: previousChapter.slug }).pages.get(),
         );
 
         if (error) {
@@ -196,15 +224,18 @@ export function ReaderPage() {
     } else {
       // At last page - try to go to next chapter's first page
       const currentChapterIndex = chaptersCache.findIndex(
-        (ch: any) => ch.slug === chapterSlug
+        (ch: any) => ch.slug === chapterSlug,
       );
 
-      if (currentChapterIndex !== -1 && currentChapterIndex < chaptersCache.length - 1) {
+      if (
+        currentChapterIndex !== -1 &&
+        currentChapterIndex < chaptersCache.length - 1
+      ) {
         const nextChapter = chaptersCache[currentChapterIndex + 1];
 
         // Load next chapter's pages to check if it has pages
         const [error, pagesResult] = await catchError(
-          api.api.chapters({ slug: nextChapter.slug }).pages.get()
+          api.api.chapters({ slug: nextChapter.slug }).pages.get(),
         );
 
         if (error) {
@@ -223,23 +254,72 @@ export function ReaderPage() {
     }
   };
 
+  /**
+   * Handle patch page callback from MangaPage
+   */
+  const handlePatchPageCallback = useCallback(
+    (handler: () => Promise<void>) => {
+      setPatchPageHandler(() => handler);
+    },
+    [],
+  );
+
+  /**
+   * Handle patches availability callback from MangaPage
+   */
+  const handlePatchesAvailable = useCallback((available: boolean) => {
+    setHasPatchesAvailable(available);
+  }, []);
+
+  /**
+   * Trigger patch page operation
+   */
+  const triggerPatchPage = async () => {
+    setShowPatchConfirm(false);
+    if (patchPageHandler) {
+      await patchPageHandler();
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
+      {SnackbarComponent}
       <StickyHeader
         backLink={`/r/${seriesSlug}`}
         backText="← Back to Chapters"
         title={chapterTitle}
         actions={
           <>
+            {!editMode && hasPatchesAvailable && (
+              <button
+                onClick={() => setShowPatchConfirm(true)}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2"
+                title="Permanently merge all patches onto page image"
+              >
+                <i className="fas fa-layer-group"></i>
+                <span>Patch Page</span>
+              </button>
+            )}
+
             <button
               onClick={() => setEditMode(!editMode)}
-              className={`px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap ${
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2 ${
                 editMode
                   ? "bg-green-500 hover:bg-green-600 text-white"
                   : "bg-blue-500 hover:bg-blue-600 text-white"
               }`}
             >
-              {editMode ? "✓ Done Edit" : "✏️ Edit"}
+              {editMode ? (
+                <>
+                  <i className="fas fa-check"></i>
+                  <span>Done Edit</span>
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-edit"></i>
+                  <span>Edit</span>
+                </>
+              )}
             </button>
 
             <span className="text-gray-700 font-semibold whitespace-nowrap">
@@ -250,7 +330,6 @@ export function ReaderPage() {
       />
 
       <div className="container mx-auto px-4 py-8">
-
         {/* Manga Page or Loading Spinner */}
         <div className="flex justify-center">
           {loading ? (
@@ -264,6 +343,9 @@ export function ReaderPage() {
               onNext={goToNextPage}
               editMode={editMode}
               onEditModeChange={setEditMode}
+              onPatchPage={handlePatchPageCallback}
+              onPatchesAvailable={handlePatchesAvailable}
+              showNotification={showSnackbar}
             />
           ) : (
             <div className="bg-white rounded-lg shadow-lg p-8 text-center">
@@ -277,14 +359,17 @@ export function ReaderPage() {
           {(() => {
             // Detect if at chapter boundaries
             const currentChapterIndex = chaptersCache.findIndex(
-              (ch: any) => ch.slug === chapterSlug
+              (ch: any) => ch.slug === chapterSlug,
             );
             const hasPreviousChapter = currentChapterIndex > 0;
             const hasNextChapter =
-              currentChapterIndex !== -1 && currentChapterIndex < chaptersCache.length - 1;
+              currentChapterIndex !== -1 &&
+              currentChapterIndex < chaptersCache.length - 1;
 
-            const isAtPreviousChapterBoundary = currentPage === 1 && hasPreviousChapter;
-            const isAtNextChapterBoundary = currentPage === totalPages && hasNextChapter;
+            const isAtPreviousChapterBoundary =
+              currentPage === 1 && hasPreviousChapter;
+            const isAtNextChapterBoundary =
+              currentPage === totalPages && hasNextChapter;
 
             const isPreviousDisabled =
               loading || (currentPage === 1 && !hasPreviousChapter);
@@ -296,7 +381,7 @@ export function ReaderPage() {
                 <button
                   onClick={goToPreviousPage}
                   disabled={isPreviousDisabled}
-                  className={`px-6 py-3 rounded-lg font-semibold transition-colors ${
+                  className={`px-6 py-3 rounded-lg font-semibold transition-colors flex items-center gap-2 ${
                     isPreviousDisabled
                       ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                       : isAtPreviousChapterBoundary
@@ -304,13 +389,18 @@ export function ReaderPage() {
                         : "bg-blue-500 hover:bg-blue-600 text-white"
                   }`}
                 >
-                  {isAtPreviousChapterBoundary ? "← Previous Chapter" : "← Previous Page"}
+                  <i className="fas fa-arrow-left"></i>
+                  <span>
+                    {isAtPreviousChapterBoundary
+                      ? "Previous Chapter"
+                      : "Previous Page"}
+                  </span>
                 </button>
 
                 <button
                   onClick={goToNextPage}
                   disabled={isNextDisabled}
-                  className={`px-6 py-3 rounded-lg font-semibold transition-colors ${
+                  className={`px-6 py-3 rounded-lg font-semibold transition-colors flex items-center gap-2 ${
                     isNextDisabled
                       ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                       : isAtNextChapterBoundary
@@ -318,7 +408,10 @@ export function ReaderPage() {
                         : "bg-blue-500 hover:bg-blue-600 text-white"
                   }`}
                 >
-                  {isAtNextChapterBoundary ? "Next Chapter →" : "Next Page →"}
+                  <span>
+                    {isAtNextChapterBoundary ? "Next Chapter" : "Next Page"}
+                  </span>
+                  <i className="fas fa-arrow-right"></i>
                 </button>
               </>
             );
@@ -334,6 +427,52 @@ export function ReaderPage() {
           currentPage={currentPage}
           totalPages={totalPages}
         />
+      )}
+
+      {/* Patch Page Confirmation Dialog */}
+      {showPatchConfirm && (
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.50)' }}
+        >
+          <div className="bg-white rounded-lg shadow-2xl p-6 max-w-md mx-4">
+            <div className="flex items-start gap-3 mb-4">
+              <i className="fas fa-exclamation-triangle text-yellow-500 text-2xl mt-1"></i>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">
+                  Permanently Patch Page?
+                </h3>
+                <p className="text-sm text-gray-700 mb-2">
+                  This will permanently alter the original page image by merging
+                  all patches.
+                </p>
+                <p className="text-sm text-red-600 font-semibold">
+                  ⚠️ This action cannot be undone!
+                </p>
+                <ul className="text-sm text-gray-600 mt-3 space-y-1">
+                  <li>• Original page image will be overwritten</li>
+                  <li>• All caption records will be deleted</li>
+                  <li>• All patch files will be removed</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowPatchConfirm(false)}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={triggerPatchPage}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded transition-colors"
+              >
+                Yes, Patch Page
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

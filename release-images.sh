@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Release script for version 0.0.4
+# Release script for version 0.0.5
 # Builds, tags, and pushes Docker images
 
-VERSION="0.0.4"
+VERSION="0.0.5"
 
 echo "🚀 Releasing version $VERSION"
 echo ""

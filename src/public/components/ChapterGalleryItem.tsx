@@ -68,12 +68,12 @@ export function ChapterGalleryItem({
       </Link>
       <button
         onClick={(e) => onDeleteClick(page, e)}
-        className={`absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold shadow-lg transition-all z-10 ${
+        className={`absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center shadow-lg transition-all z-10 cursor-pointer ${
           isHovered ? "opacity-100 scale-100" : "opacity-0 scale-90"
         }`}
         title="Delete page"
       >
-        ×
+        <i className="fas fa-trash"></i>
       </button>
     </div>
   );

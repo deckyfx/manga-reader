@@ -148,7 +148,11 @@ export function ChapterGalleryPage() {
     setDeleting(true);
 
     const [error, result] = await catchError(
-      api.api.pages({ slug: pageToDelete.slug }).delete()
+      api.api.pages.delete.delete(undefined, {
+        query: {
+          page: pageToDelete.slug,
+        },
+      })
     );
 
     if (error) {
@@ -298,9 +302,10 @@ export function ChapterGalleryPage() {
         <div className="container mx-auto px-4 py-8">
           <Link
             to={`/r/${series?.slug}`}
-            className="text-blue-600 hover:underline mb-4 inline-block"
+            className="text-blue-600 hover:underline mb-4 inline-block flex items-center gap-2"
           >
-            ← Back to Series
+            <i className="fas fa-arrow-left"></i>
+            <span>Back to Series</span>
           </Link>
           <div className="bg-white rounded-lg shadow-lg p-8 text-center">
             <p className="text-gray-600 text-lg">Chapter not found.</p>
@@ -328,13 +333,14 @@ export function ChapterGalleryPage() {
             <button
               onClick={handleAddPageClick}
               disabled={uploading}
-              className={`px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap ${
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2 ${
                 uploading
                   ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                   : "bg-blue-500 hover:bg-blue-600 text-white"
               }`}
             >
-              {uploading ? "Uploading..." : "+ Add Page"}
+              <i className="fas fa-plus"></i>
+              <span>{uploading ? "Uploading..." : "Add Page"}</span>
             </button>
           </>
         }
@@ -386,20 +392,22 @@ export function ChapterGalleryPage() {
             <button
               onClick={handleDeleteCancel}
               disabled={deleting}
-              className="px-4 py-2 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors"
+              className="px-4 py-2 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors flex items-center gap-2"
             >
-              Cancel
+              <i className="fas fa-times"></i>
+              <span>Cancel</span>
             </button>
             <button
               onClick={handleDeleteConfirm}
               disabled={deleting}
-              className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+              className={`px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2 ${
                 deleting
                   ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                   : "bg-red-500 hover:bg-red-600 text-white"
               }`}
             >
-              {deleting ? "Deleting..." : "Delete"}
+              <i className="fas fa-trash"></i>
+              <span>{deleting ? "Deleting..." : "Delete"}</span>
             </button>
           </div>
         </div>

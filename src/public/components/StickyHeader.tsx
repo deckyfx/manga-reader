@@ -17,9 +17,10 @@ export function StickyHeader({ backLink, backText, title, actions }: StickyHeade
         <div className="flex items-center justify-between gap-4">
           <Link
             to={backLink}
-            className="text-blue-600 hover:underline font-semibold whitespace-nowrap"
+            className="text-blue-600 hover:underline font-semibold whitespace-nowrap flex items-center gap-2 cursor-pointer"
           >
-            {backText}
+            <i className="fas fa-arrow-left"></i>
+            <span>{backText.replace(/^← /, '')}</span>
           </Link>
 
           {/* Title (centered) */}

@@ -1,6 +1,7 @@
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { HomePage } from "./pages/HomePage";
+import { FontTestPage } from "./pages/FontTestPage";
 import { SeriesListPage } from "./pages/reader/SeriesListPage";
 import { SeriesDetailPage } from "./pages/reader/SeriesDetailPage";
 import { ChapterGalleryPage } from "./pages/reader/ChapterGalleryPage";
@@ -20,6 +21,7 @@ function App() {
       <Routes>
         {/* Home */}
         <Route path="/" element={<HomePage />} />
+        <Route path="/font-test" element={<FontTestPage />} />
 
         {/* Reader Routes */}
         <Route path="/r" element={<SeriesListPage />} />

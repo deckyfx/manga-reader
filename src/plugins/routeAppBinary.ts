@@ -25,4 +25,5 @@ export const appPluginBinary = new Elysia()
   .get("/a/", index)
   .get("/a/*", index)
   .get("/r/", index)
-  .get("/r/*", index);
+  .get("/r/*", index)
+  .get("/font-test", index);

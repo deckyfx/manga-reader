@@ -134,4 +134,32 @@ export class CaptionStore {
 
     return result.length;
   }
+
+  /**
+   * Update patch image path for a caption
+   */
+  static async updatePatchPath(
+    slug: string,
+    patchImagePath: string
+  ): Promise<UserCaption | null> {
+    const result = await db
+      .update(userCaptions)
+      .set({
+        patchImagePath,
+        patchGeneratedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(userCaptions.slug, slug))
+      .returning();
+
+    return result[0] ?? null;
+  }
+
+  /**
+   * Get patch image path for a caption
+   */
+  static async getPatchPath(slug: string): Promise<string | null> {
+    const caption = await this.findBySlug(slug);
+    return caption?.patchImagePath ?? null;
+  }
 }

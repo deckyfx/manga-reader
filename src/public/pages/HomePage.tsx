@@ -8,8 +8,8 @@ export function HomePage() {
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
       <div className="container mx-auto px-4 py-8">
         <header className="text-center mb-12">
-          <h1 className="text-5xl font-bold text-gray-800 mb-4">
-            📚 Manga Reader
+          <h1 className="text-5xl font-bold text-gray-800 mb-4" style={{ fontFamily: "Anime Ace Bold, sans-serif" }}>
+            Manga Reader
           </h1>
           <p className="text-xl text-gray-600">
             Read and translate manga with OCR
@@ -23,7 +23,9 @@ export function HomePage() {
             className="bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition-shadow"
           >
             <div className="text-center">
-              <div className="text-6xl mb-4">📖</div>
+              <div className="text-6xl mb-4">
+                <i className="fas fa-book-open text-blue-500"></i>
+              </div>
               <h2 className="text-2xl font-bold text-gray-800 mb-2">
                 Browse Series
               </h2>
@@ -39,7 +41,9 @@ export function HomePage() {
             className="bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition-shadow"
           >
             <div className="text-center">
-              <div className="text-6xl mb-4">⚙️</div>
+              <div className="text-6xl mb-4">
+                <i className="fas fa-cog text-gray-600"></i>
+              </div>
               <h2 className="text-2xl font-bold text-gray-800 mb-2">
                 Admin Panel
               </h2>
@@ -48,6 +52,24 @@ export function HomePage() {
               </p>
             </div>
           </Link>
+
+          {/* Font Test Section - Hidden for production */}
+          {/* <Link
+            to="/font-test"
+            className="bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition-shadow"
+          >
+            <div className="text-center">
+              <div className="text-6xl mb-4">
+                <i className="fas fa-font text-purple-500"></i>
+              </div>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">
+                Font Test
+              </h2>
+              <p className="text-gray-600">
+                Test Anime Ace and Font Awesome fonts
+              </p>
+            </div>
+          </Link> */}
         </div>
       </div>
     </div>

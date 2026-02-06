@@ -30,7 +30,7 @@ RUN pip install --user --no-cache-dir \
 
 # Copy only dependency specification first (for caching)
 WORKDIR /build
-COPY pyproject.toml .
+COPY pyproject.toml README.md ./
 
 # Create minimal dummy package structure for dependency installation
 RUN mkdir -p src && \
@@ -38,14 +38,15 @@ RUN mkdir -p src && \
     echo 'from .ocr import MangaOcr' >> src/__init__.py && \
     echo '__all__ = ["MangaOcr"]' >> src/__init__.py
 
-# Install dependencies (this layer will be cached if pyproject.toml doesn't change)
-RUN pip install --user --no-cache-dir .
+# Install dependencies ONLY (this layer will be cached if pyproject.toml doesn't change)
+RUN pip install --user --no-cache-dir --no-build-isolation \
+    $(python -c "import tomllib; f=open('pyproject.toml','rb'); data=tomllib.load(f); f.close(); print(' '.join(data['project']['dependencies']))")
 
 # Now copy the actual source code (changes here won't invalidate pip cache)
 COPY src/ src/
 
-# Reinstall package with real source (fast, deps already installed)
-RUN pip install --user --no-cache-dir --force-reinstall --no-deps .
+# Install package with real source (deps already installed, just installs the package)
+RUN pip install --user --no-cache-dir --no-deps .
 
 # OPTIMIZATION 1: Strip debug symbols from .so files (saves ~20% on compiled libs)
 RUN find /install -name "*.so" -exec strip --strip-debug {} \; 2>/dev/null || true
@@ -88,13 +89,17 @@ RUN find /usr/local -name "*.so*" -type f -exec strip --strip-unneeded {} \; 2>/
 RUN python -m compileall -q /usr/local/lib/python3.11/site-packages 2>/dev/null || true
 
 # Verify installation works
-RUN python -c "from src import MangaOcr; print('✅ manga-ocr installed!')"
+RUN python -c "from src import MangaOcr; print('✅ manga-ocr installed!')" && \
+    python -c "from src.patch_generator import clean_text_region, render_text; print('✅ patch-generator installed!')"
 
 # Set working directory
 WORKDIR /app
 
 # Create required directories
-RUN mkdir -p /app/ocrinput /app/ocroutput /app/images /pip-cache
+RUN mkdir -p /app/ocrinput /app/ocroutput /app/images /pip-cache /app/fonts
+
+# Copy Anime Ace fonts for patch generation
+COPY fonts/*.ttf /app/fonts/
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh
