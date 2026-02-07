@@ -21,7 +21,10 @@ import { catchError } from "./src/lib/error-handler";
 import { envConfig } from "./src/env-config";
 import { db } from "./src/db";
 import { userCaptions } from "./src/db/schema";
-import { getRegionBounds, getRegionPolygonPoints } from "./src/lib/region-types";
+import {
+  getRegionBounds,
+  getRegionPolygonPoints,
+} from "./src/lib/region-types";
 
 interface Point {
   x: number;
@@ -41,7 +44,7 @@ async function main() {
   if (targetCaptionId) {
     console.log(`   Looking for caption ID: ${targetCaptionId}`);
     const [error, result] = await catchError(
-      CaptionStore.findById(targetCaptionId)
+      CaptionStore.findById(targetCaptionId),
     );
 
     if (error || !result) {
@@ -53,9 +56,7 @@ async function main() {
   } else {
     // Find first caption with polygon region
     console.log("   Looking for first caption with polygon region...");
-    const [error, captions] = await catchError(
-      db.select().from(userCaptions)
-    );
+    const [error, captions] = await catchError(db.select().from(userCaptions));
 
     if (error) {
       console.error("❌ Failed to fetch captions:", error.message);
@@ -88,7 +89,9 @@ async function main() {
 
   if (polygonPoints) {
     console.log(`   Polygon points: ${polygonPoints.length} points`);
-    console.log(`   First point: (${polygonPoints[0]!.x}, ${polygonPoints[0]!.y})`);
+    console.log(
+      `   First point: (${polygonPoints[0]!.x}, ${polygonPoints[0]!.y})`,
+    );
 
     // Convert to relative coordinates (within captured region)
     relativePolygonPoints = polygonPoints.map((point) => ({
@@ -96,7 +99,7 @@ async function main() {
       y: point.y - bounds.y,
     }));
     console.log(
-      `   Relative first point: (${relativePolygonPoints[0]!.x}, ${relativePolygonPoints[0]!.y})`
+      `   Relative first point: (${relativePolygonPoints[0]!.x}, ${relativePolygonPoints[0]!.y})`,
     );
   } else {
     console.log("   ⚠️  No polygon points (rectangle caption)");
@@ -106,7 +109,9 @@ async function main() {
   console.log("\n🔌 Step 2: Checking Python service...");
   console.log(`   Socket path: ${envConfig.MANGA_OCR_SOCKET}`);
 
-  const [healthError, isAvailable] = await catchError(MangaOCRAPI.isAvailable());
+  const [healthError, isAvailable] = await catchError(
+    MangaOCRAPI.isAvailable(),
+  );
 
   if (healthError || !isAvailable) {
     console.error("❌ Python service not available");
@@ -123,20 +128,24 @@ async function main() {
   // Remove data URL prefix if present
   const base64Data = caption.capturedImage.replace(
     /^data:image\/\w+;base64,/,
-    ""
+    "",
   );
 
   // Test parameters
-  const testLines = ["Test Line 1", "テスト 2"];
-  const fontSize = 40;
+  const testLines = ["!"];
+  const fontSize = 12;
   const fontType = "regular" as const;
   const textColor = "#000000";
   const strokeColor = "#FFFFFF";
   const strokeWidth = 2;
+  const cleanerThreshold = 200; // Adjust: 200=default, 100-150=aggressive, 220-240=conservative
 
   console.log(`   Text: ${testLines.join(", ")}`);
   console.log(`   Font: ${fontSize}px ${fontType}`);
   console.log(`   Colors: text=${textColor}, stroke=${strokeColor}`);
+  console.log(
+    `   Cleaner threshold: ${cleanerThreshold} (200=default, lower=more aggressive)`,
+  );
   console.log(`   Polygon: ${relativePolygonPoints ? "Yes" : "No"}`);
 
   const [patchError, patchImageBase64] = await catchError(
@@ -148,8 +157,9 @@ async function main() {
       textColor,
       strokeColor,
       strokeWidth,
-      relativePolygonPoints || undefined
-    )
+      relativePolygonPoints || undefined,
+      cleanerThreshold,
+    ),
   );
 
   if (patchError) {
@@ -205,17 +215,21 @@ async function main() {
     console.log(`\n🔍 Polygon Info:`);
     console.log(`   Absolute coordinates (page):`);
     polygonPoints.forEach((p, i) => {
-      console.log(`      Point ${i + 1}: (${p.x.toFixed(1)}, ${p.y.toFixed(1)})`);
+      console.log(
+        `      Point ${i + 1}: (${p.x.toFixed(1)}, ${p.y.toFixed(1)})`,
+      );
     });
 
     console.log(`\n   Relative coordinates (within captured region):`);
     relativePolygonPoints.forEach((p, i) => {
-      console.log(`      Point ${i + 1}: (${p.x.toFixed(1)}, ${p.y.toFixed(1)})`);
+      console.log(
+        `      Point ${i + 1}: (${p.x.toFixed(1)}, ${p.y.toFixed(1)})`,
+      );
     });
 
     // Calculate polygon bounds
-    const relXs = relativePolygonPoints.map(p => p.x);
-    const relYs = relativePolygonPoints.map(p => p.y);
+    const relXs = relativePolygonPoints.map((p) => p.x);
+    const relYs = relativePolygonPoints.map((p) => p.y);
     const polyMinX = Math.min(...relXs);
     const polyMaxX = Math.max(...relXs);
     const polyMinY = Math.min(...relYs);
@@ -224,10 +238,18 @@ async function main() {
     const polyHeight = polyMaxY - polyMinY;
 
     console.log(`\n   Polygon bounding box (relative):`);
-    console.log(`      X: ${polyMinX.toFixed(1)} to ${polyMaxX.toFixed(1)} (width: ${polyWidth.toFixed(1)})`);
-    console.log(`      Y: ${polyMinY.toFixed(1)} to ${polyMaxY.toFixed(1)} (height: ${polyHeight.toFixed(1)})`);
-    console.log(`\n   Captured region size: ${bounds.width} × ${bounds.height}`);
-    console.log(`   Polygon uses: ${((polyWidth / bounds.width) * 100).toFixed(1)}% width, ${((polyHeight / bounds.height) * 100).toFixed(1)}% height`);
+    console.log(
+      `      X: ${polyMinX.toFixed(1)} to ${polyMaxX.toFixed(1)} (width: ${polyWidth.toFixed(1)})`,
+    );
+    console.log(
+      `      Y: ${polyMinY.toFixed(1)} to ${polyMaxY.toFixed(1)} (height: ${polyHeight.toFixed(1)})`,
+    );
+    console.log(
+      `\n   Captured region size: ${bounds.width} × ${bounds.height}`,
+    );
+    console.log(
+      `   Polygon uses: ${((polyWidth / bounds.width) * 100).toFixed(1)}% width, ${((polyHeight / bounds.height) * 100).toFixed(1)}% height`,
+    );
   }
 
   console.log("\n");

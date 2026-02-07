@@ -42,6 +42,7 @@ interface StudioCanvasProps {
   onSelectCaption: (id: string | null) => void;
   onCaptionMoved: () => void;
   onNotification: (msg: string, type: "success" | "error" | "info") => void;
+  showOverlay: boolean;
 }
 
 /**
@@ -61,6 +62,7 @@ export function StudioCanvas({
   onSelectCaption,
   onCaptionMoved,
   onNotification,
+  showOverlay,
 }: StudioCanvasProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -170,6 +172,7 @@ export function StudioCanvas({
         patchImagesRef.current,
         drawing.ovalRenderData,
         transform.preview,
+        showOverlay,
       );
     };
 
@@ -183,6 +186,7 @@ export function StudioCanvas({
     drawing.rectangleRenderData,
     drawing.polygonRenderData,
     drawing.ovalRenderData,
+    showOverlay,
   ]);
 
   // ─── Drawing completion ───────────────────────

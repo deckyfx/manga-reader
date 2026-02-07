@@ -47,7 +47,9 @@ async function generateAndSavePatch(
   fontType: "regular" | "bold" | "italic",
   textColor: string,
   strokeColor: string | null,
-  strokeWidth: number
+  strokeWidth: number,
+  cleanerThreshold: number = 200,
+  alphaBackground: boolean = false
 ): Promise<string> {
   const caption = await CaptionStore.findBySlug(captionSlug);
   if (!caption) {
@@ -88,7 +90,9 @@ async function generateAndSavePatch(
     textColor,
     strokeColor,
     strokeWidth,
-    relativePolygonPoints
+    relativePolygonPoints,
+    cleanerThreshold,
+    alphaBackground
   );
 
   // Create patches directory if it doesn't exist
@@ -324,7 +328,9 @@ export const studioApi = new Elysia({ prefix: "/studio" })
           body.fontType,
           body.textColor,
           body.strokeColor,
-          body.strokeWidth
+          body.strokeWidth,
+          body.cleanerThreshold ?? 200,
+          body.alphaBackground ?? false
         )
       );
 
@@ -359,6 +365,8 @@ export const studioApi = new Elysia({ prefix: "/studio" })
         textColor: t.String(),
         strokeColor: t.Nullable(t.String()),
         strokeWidth: t.Number(),
+        cleanerThreshold: t.Optional(t.Number()),
+        alphaBackground: t.Optional(t.Boolean()),
       }),
     }
   )

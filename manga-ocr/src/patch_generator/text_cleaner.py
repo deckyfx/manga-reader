@@ -65,19 +65,13 @@ class LamaCleaner:
     Text cleaning using Er0mangaInpaint AI inpainting.
 
     Algorithm:
-    1. Detect text pixels via threshold + dilation (creates inpainting mask)
+    1. Detect text pixels via adaptive threshold + edge detection
     2. Convert BGR→RGB PIL for model input
-    3. Run Er0mangaInpaint inference — model sees unmasked pixels as context
-       and reconstructs masked (text) areas using surrounding background
+    3. Run Er0mangaInpaint inference
     4. Convert result back to BGR
-
-    The threshold mask is essential: the model's forward pass does
-    `masked_img = img * (1-mask)`, so unmasked pixels provide the context
-    the neural network uses to reconstruct the background pattern.
-    A full white mask would give the model zero context (all zeros input).
     """
 
-    def __init__(self, model: SimpleLama, threshold: int = 80, dilate_iters: int = 2):
+    def __init__(self, model: SimpleLama, threshold: int = 200, dilate_iters: int = 2):
         self.model = model
         self.threshold = threshold
         self.dilate_iters = dilate_iters
@@ -87,10 +81,29 @@ class LamaCleaner:
         orig_h, orig_w = image.shape[:2]
         logger.info(f"🤖 LamaCleaner.clean() — {orig_w}x{orig_h} region")
 
-        # Create text mask: detect dark text on lighter background
+        # Create text mask
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        _, mask = cv2.threshold(gray, self.threshold, 255, cv2.THRESH_BINARY_INV)
+        
+        # Adaptive threshold
+        adaptive_mask = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY_INV, 11, 2
+        )
+        
+        # Global threshold
+        _, global_mask = cv2.threshold(gray, self.threshold, 255, cv2.THRESH_BINARY_INV)
+        
+        # Edge detection
+        edges = cv2.Canny(gray, 50, 150)
+        
+        # Combine
+        mask = cv2.bitwise_or(adaptive_mask, global_mask)
+        mask = cv2.bitwise_or(mask, edges)
+        
+        # Clean up
         kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
         mask = cv2.dilate(mask, kernel, iterations=self.dilate_iters)
 
         mask_coverage = (mask > 0).sum() / mask.size * 100

@@ -75,6 +75,7 @@ export function StudioPage() {
   // Tools
   const [drawingTool, setDrawingTool] = useState<DrawingToolType>("none");
   const [isPatching, setIsPatching] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(true);
 
   // Zoom
   const { zoom, zoomIn, zoomOut, fitToContainer } = useCanvasZoom();
@@ -351,6 +352,8 @@ export function StudioPage() {
           onDeleteCaption={handleDeleteCaption}
           onCaptionUpdated={handleCaptionUpdated}
           onNotification={handleNotification}
+          showOverlay={showOverlay}
+          onToggleOverlay={setShowOverlay}
         />
 
         {/* Center: Canvas */}
@@ -366,6 +369,7 @@ export function StudioPage() {
             onSelectCaption={handleSelectCaption}
             onCaptionMoved={handleCaptionMoved}
             onNotification={handleNotification}
+            showOverlay={showOverlay}
           />
         </div>
 

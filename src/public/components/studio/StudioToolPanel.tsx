@@ -40,6 +40,8 @@ interface StudioToolPanelProps {
   onDeleteCaption: (id: string) => void;
   onCaptionUpdated: () => void;
   onNotification: (msg: string, type: "success" | "error" | "info") => void;
+  showOverlay: boolean;
+  onToggleOverlay: (show: boolean) => void;
 }
 
 /**
@@ -62,6 +64,8 @@ export function StudioToolPanel({
   onDeleteCaption,
   onCaptionUpdated,
   onNotification,
+  showOverlay,
+  onToggleOverlay,
 }: StudioToolPanelProps) {
   return (
     <div className="w-64 bg-gray-50 border-r border-gray-200 flex flex-col overflow-y-auto">
@@ -89,6 +93,17 @@ export function StudioToolPanel({
             </>
           )}
         </button>
+
+        {/* Show Overlay Toggle */}
+        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showOverlay}
+            onChange={(e) => onToggleOverlay(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <span>Show Overlay</span>
+        </label>
 
         {/* Drawing Tool Selector */}
         <DrawingToolSelector
@@ -292,6 +307,8 @@ function RegionEditor({
   const [strokeWidth, setStrokeWidth] = useState(0);
   const [useStroke, setUseStroke] = useState(false);
   const [showPatchConfig, setShowPatchConfig] = useState(false);
+  const [cleanerThreshold, setCleanerThreshold] = useState(200);
+  const [alphaBackground, setAlphaBackground] = useState(false);
 
   const [isRetranslating, setIsRetranslating] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
@@ -385,6 +402,8 @@ function RegionEditor({
         textColor,
         strokeColor: useStroke ? strokeColor : null,
         strokeWidth: useStroke ? strokeWidth : 0,
+        cleanerThreshold,
+        alphaBackground,
       }),
     );
     setIsGenerating(false);
@@ -577,6 +596,42 @@ function RegionEditor({
                 <span className="w-8 text-center font-mono">{strokeWidth}</span>
               </div>
             )}
+
+            {/* Cleaner Threshold */}
+            <div className="flex items-center gap-2">
+              <label className="w-14 font-semibold text-gray-600" title="Lower = more aggressive text removal">
+                Clean:
+              </label>
+              <input
+                type="range"
+                min="50"
+                max="240"
+                value={cleanerThreshold}
+                onChange={(e) => setCleanerThreshold(Number(e.target.value))}
+                disabled={alphaBackground}
+                className="flex-1 disabled:opacity-50"
+              />
+              <span className="w-10 text-center font-mono text-xs">{cleanerThreshold}</span>
+            </div>
+            <p className="text-xs text-gray-500 italic">
+              200=default, lower=aggressive, higher=conservative
+            </p>
+
+            {/* Alpha Background */}
+            <div className="flex items-center gap-2 pt-2 border-t border-gray-200">
+              <label className="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={alphaBackground}
+                  onChange={(e) => setAlphaBackground(e.target.checked)}
+                  className="w-4 h-4"
+                />
+                <span>Alpha Background</span>
+              </label>
+            </div>
+            <p className="text-xs text-gray-500 italic">
+              Transparent background, text only (skip cleaning)
+            </p>
           </div>
         )}
       </div>

@@ -340,22 +340,25 @@ export class CanvasRenderer {
     patchImages?: Map<string, HTMLImageElement>,
     ovalData: OvalRenderData | null = null,
     transformPreview: TransformPreview | null = null,
+    showOverlay: boolean = true,
   ): void {
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     CanvasRenderer.drawImage(ctx, image);
     if (patchImages && patchImages.size > 0) {
       CanvasRenderer.drawPatchOverlays(ctx, captions, patchImages);
     }
-    CanvasRenderer.drawCaptionRegions(ctx, captions, activeCaptionId);
+    if (showOverlay) {
+      CanvasRenderer.drawCaptionRegions(ctx, captions, activeCaptionId);
+    }
     CanvasRenderer.drawDrawingPreview(ctx, toolType, rectData, polyData, ovalData);
 
     // Draw transform preview (dashed outline during drag/resize)
-    if (transformPreview) {
+    if (transformPreview && showOverlay) {
       CanvasRenderer.drawTransformPreview(ctx, transformPreview);
     }
 
     // Draw resize handles on selected caption when no drawing tool active
-    if (toolType === "none" && activeCaptionId) {
+    if (showOverlay && toolType === "none" && activeCaptionId) {
       const activeCaption = captions.find((c) => c.id === activeCaptionId);
       if (activeCaption) {
         CanvasRenderer.drawResizeHandles(ctx, activeCaption);

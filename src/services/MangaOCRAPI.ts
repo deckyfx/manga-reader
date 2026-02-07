@@ -199,6 +199,8 @@ export class MangaOCRAPI {
    * @param strokeColor - Stroke color in hex format or null for no stroke
    * @param strokeWidth - Stroke width in pixels (0 for no stroke)
    * @param polygonPoints - Optional polygon points for masking (relative to captured image)
+   * @param cleanerThreshold - Threshold for text detection (0-255, default 200, lower = more aggressive)
+   * @param alphaBackground - Transparent background (skip cleaning, text only)
    * @returns Base64 encoded PNG patch image
    */
   static async generatePatch(
@@ -209,7 +211,9 @@ export class MangaOCRAPI {
     textColor: string,
     strokeColor: string | null,
     strokeWidth: number,
-    polygonPoints?: Array<{ x: number; y: number }>
+    polygonPoints?: Array<{ x: number; y: number }>,
+    cleanerThreshold: number = 200,
+    alphaBackground: boolean = false
   ): Promise<string> {
     const result = await this.fetchAPI<PatchResponse>(
       "/generate-patch",
@@ -225,6 +229,8 @@ export class MangaOCRAPI {
           strokeColor,
           strokeWidth,
           polygonPoints,
+          cleanerThreshold,
+          alphaBackground,
         }),
       },
       "Patch generation"

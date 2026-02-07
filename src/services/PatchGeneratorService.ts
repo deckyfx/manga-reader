@@ -32,6 +32,7 @@ export class PatchGeneratorService {
    * @param strokeColor - Stroke color in hex format or null for no stroke
    * @param strokeWidth - Stroke width in pixels (0 for no stroke)
    * @param polygonPoints - Optional polygon points for masking (relative to captured image)
+   * @param cleanerThreshold - Threshold for text detection (0-255, default 200, lower = more aggressive)
    * @returns Base64 encoded PNG patch image
    *
    * @example
@@ -45,7 +46,8 @@ export class PatchGeneratorService {
    *   "#FFFFFF",
    *   "#000000",
    *   2,
-   *   [{ x: 10, y: 20 }, { x: 50, y: 30 }] // Optional polygon points
+   *   [{ x: 10, y: 20 }, { x: 50, y: 30 }], // Optional polygon points
+   *   200 // Optional cleaner threshold
    * );
    * ```
    */
@@ -57,7 +59,9 @@ export class PatchGeneratorService {
     textColor: string,
     strokeColor: string | null,
     strokeWidth: number,
-    polygonPoints?: Array<{ x: number; y: number }>
+    polygonPoints?: Array<{ x: number; y: number }>,
+    cleanerThreshold: number = 200,
+    alphaBackground: boolean = false
   ): Promise<string> {
     return MangaOCRAPI.generatePatch(
       capturedImage,
@@ -67,7 +71,9 @@ export class PatchGeneratorService {
       textColor,
       strokeColor,
       strokeWidth,
-      polygonPoints
+      polygonPoints,
+      cleanerThreshold,
+      alphaBackground
     );
   }
 
