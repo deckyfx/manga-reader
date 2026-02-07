@@ -90,7 +90,7 @@ RUN python -m compileall -q /usr/local/lib/python3.11/site-packages 2>/dev/null 
 
 # Verify installation works
 RUN python -c "from src import MangaOcr; print('✅ manga-ocr installed!')" && \
-    python -c "from src.patch_generator import clean_text_region, render_text; print('✅ patch-generator installed!')"
+    python -c "from src.patch_generator import clean_text_region, render_text, SimpleLama, create_cleaner; print('✅ patch-generator + LaMa installed!')"
 
 # Set working directory
 WORKDIR /app

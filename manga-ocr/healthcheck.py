@@ -23,9 +23,9 @@ try:
     response = sock.recv(1024)
     sock.close()
 
-    # Check if response contains 200 OK
-    if b"200" in response and b"healthy" in response:
-        sys.exit(0)  # Success
+    # Check if response contains 200 OK (server is up, models may still be loading)
+    if b"200" in response:
+        sys.exit(0)  # Success — server is accepting connections
     else:
         print("Health check failed: unexpected response", file=sys.stderr)
         sys.exit(1)

@@ -194,8 +194,7 @@ export function StudioCanvas({
     points?: Point[];
   }) => {
     const { x, y, width, height, points } = drawResult;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!imageElement) return;
 
     // Build Region based on active drawing tool
     let region: Region;
@@ -210,8 +209,9 @@ export function StudioCanvas({
     // Derive polygon points for capture clipping
     const clipPoints = getRegionPolygonPoints(region);
 
+    // Capture from source image (not canvas) to avoid overlay contamination
     const capturedImage = CanvasRenderer.captureRegion(
-      canvas,
+      imageElement,
       x,
       y,
       width,
@@ -268,8 +268,7 @@ export function StudioCanvas({
 
   // ─── Persist region update after move/resize ──
   const persistRegionUpdate = async (result: TransformResult) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !result.captionSlug) return;
+    if (!imageElement || !result.captionSlug) return;
 
     // Build Region from transform result
     let region: Region;
@@ -281,10 +280,10 @@ export function StudioCanvas({
       region = { shape: "rectangle", data: { x: result.x, y: result.y, width: result.width, height: result.height } };
     }
 
-    // Re-capture image from the base canvas (need to draw without overlays first)
+    // Capture from source image (not canvas) to avoid overlay contamination
     const clipPoints = getRegionPolygonPoints(region);
     const capturedImage = CanvasRenderer.captureRegion(
-      canvas,
+      imageElement,
       result.x,
       result.y,
       result.width,

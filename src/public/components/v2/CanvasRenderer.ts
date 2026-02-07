@@ -395,11 +395,12 @@ export class CanvasRenderer {
   }
 
   /**
-   * Capture a rectangular region from the canvas as a data URL.
+   * Capture a rectangular region from an image source as a data URL.
+   * Uses the source image directly to avoid capturing canvas overlays.
    * Optionally clips to a polygon shape within that rectangle.
    */
   static captureRegion(
-    canvas: HTMLCanvasElement,
+    source: HTMLCanvasElement | HTMLImageElement,
     x: number,
     y: number,
     w: number,
@@ -434,7 +435,7 @@ export class CanvasRenderer {
     }
 
     ctx.drawImage(
-      canvas,
+      source,
       roundedX,
       roundedY,
       roundedW,

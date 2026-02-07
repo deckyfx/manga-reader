@@ -7,10 +7,12 @@ Endpoints:
 """
 
 # Build identifier - update this timestamp before building to verify new image
-BUILD_ID = "2026-02-06_07:30:00_merge_patches"
+BUILD_ID = "2026-02-07_lama_er0manga"
 
+import asyncio
 import base64
 import os
+import threading
 import tomllib
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -25,8 +27,11 @@ from pydantic import BaseModel
 from PIL import Image
 from loguru import logger
 
+import torch
+
 from .ocr import MangaOcr
-from .patch_generator import clean_text_region
+from .patch_generator import clean_text_region, create_cleaner, SimpleLama
+from .patch_generator.text_cleaner import TextCleaner
 from .patch_generator.text_renderer import render_text
 
 # Locate the pyproject.toml relative to this file
@@ -53,10 +58,23 @@ class ScanResponse(BaseModel):
     image_size: tuple[int, int]
 
 
+class ModelStatus(BaseModel):
+    """Status of a single model"""
+    name: str
+    ready: bool
+
+
+class StatusResponse(BaseModel):
+    """Response model for /status endpoint"""
+    models: dict[str, ModelStatus]
+
+
 class HealthResponse(BaseModel):
     """Response model for health check"""
     status: str
     model_loaded: bool
+    cleaner_mode: str = "opencv"
+    build_id: str = BUILD_ID
 
 
 class Point(BaseModel):
@@ -105,39 +123,84 @@ class MergePatchesResponse(BaseModel):
     mergedImage: str  # Base64 encoded merged image
 
 
-# Global OCR instance (initialized on startup)
+# ── Model names ──────────────────────────────────────────
+OCR_MODEL_NAME = "kha-white/manga-ocr-base"
+CLEANER_MODEL_NAME_LAMA = "df1412/er0manga-inpaint"
+CLEANER_MODEL_NAME_OPENCV = "opencv-inpaint"
+
+# ── Global instances (loaded in background) ──────────────
 ocr_instance: Optional[MangaOcr] = None
+text_cleaner: Optional[TextCleaner] = None
+cleaner_mode: str = "opencv"
+ocr_ready: bool = False
+cleaner_ready: bool = False
+
+
+def _load_ocr_model() -> None:
+    """Load OCR model in background thread."""
+    global ocr_instance, ocr_ready
+    logger.info(f"📦 Loading OCR model ({OCR_MODEL_NAME})...")
+    try:
+        ocr_instance = MangaOcr(force_cpu=True)
+        ocr_ready = True
+        logger.success("✅ OCR model loaded!")
+    except Exception as e:
+        logger.error(f"❌ Failed to load OCR model: {e}")
+
+
+def _load_cleaner_model() -> None:
+    """Load text cleaner model in background thread."""
+    global text_cleaner, cleaner_ready, cleaner_mode
+    cleaner_mode = os.environ.get("CLEANER_MODE", "lama")
+    logger.info(f"🧹 Cleaner mode: {cleaner_mode}")
+
+    if cleaner_mode == "lama":
+        logger.info(f"📦 Loading Er0mangaInpaint model ({CLEANER_MODEL_NAME_LAMA})...")
+        try:
+            lama_model = SimpleLama(device=torch.device("cpu"))
+            text_cleaner = create_cleaner("lama", lama_model=lama_model)
+            cleaner_ready = True
+            logger.success("✅ Er0mangaInpaint model loaded!")
+        except Exception as e:
+            logger.error(f"❌ Failed to load LaMa model: {e}")
+            logger.warning("⚠️ Falling back to OpenCV cleaner")
+            cleaner_mode = "opencv"
+            text_cleaner = create_cleaner("opencv")
+            cleaner_ready = True
+    else:
+        logger.info("📦 Using OpenCV inpainting (fast mode)")
+        text_cleaner = create_cleaner("opencv")
+        cleaner_ready = True
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Lifespan context manager for FastAPI app
-    Handles startup and shutdown events
+    Lifespan context manager for FastAPI app.
+    Server starts immediately — models load in background threads.
     """
-    # Startup: Initialize OCR model
-    global ocr_instance
     logger.info("🚀 Starting Manga OCR server...")
     logger.info(f"🏷️  Build ID: {BUILD_ID}")
-    logger.info("📦 Loading OCR model into memory (please wait)...")
 
-    try:
-        ocr_instance = MangaOcr(force_cpu=True)
-        logger.success("✅ Server ready! Model loaded and accepting requests.")
-        logger.info("")
-        logger.info("📡 Available endpoints:")
-        logger.info("   GET  /health           - Health check")
-        logger.info("   POST /scan             - Scan image (base64 JSON)")
-        logger.info("   POST /scan-upload      - Scan image (file upload)")
-        logger.info("   POST /generate-patch   - Generate translation patch")
-        logger.info("   POST /merge-patches    - Merge patches onto page")
-    except Exception as e:
-        logger.error(f"❌ Failed to load OCR model: {e}")
-        raise
+    # Start model loading in background threads
+    ocr_thread = threading.Thread(target=_load_ocr_model, daemon=True)
+    cleaner_thread = threading.Thread(target=_load_cleaner_model, daemon=True)
+    ocr_thread.start()
+    cleaner_thread.start()
+
+    logger.info("⏳ Models loading in background...")
+    logger.info("")
+    logger.info("📡 Available endpoints:")
+    logger.info("   GET  /health           - Health check (Docker)")
+    logger.info("   GET  /status           - Model readiness status")
+    logger.info("   POST /scan             - Scan image (base64 JSON)")
+    logger.info("   POST /scan-upload      - Scan image (file upload)")
+    logger.info("   POST /generate-patch   - Generate translation patch")
+    logger.info("   POST /merge-patches    - Merge patches onto page")
 
     yield
 
-    # Shutdown: Cleanup (if needed in future)
+    # Shutdown: Cleanup
     logger.info("👋 Shutting down Manga OCR server...")
 
 
@@ -155,14 +218,29 @@ app = FastAPI(
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """
-    Health check endpoint
-
-    Returns:
-        HealthResponse with server status and model state
+    Health check endpoint (for Docker healthcheck).
+    Returns healthy as soon as server is accepting connections.
     """
     return HealthResponse(
-        status="healthy" if ocr_instance is not None else "unhealthy",
-        model_loaded=ocr_instance is not None,
+        status="healthy",
+        model_loaded=ocr_ready and cleaner_ready,
+        cleaner_mode=cleaner_mode,
+        build_id=BUILD_ID,
+    )
+
+
+@app.get("/status", response_model=StatusResponse)
+async def status():
+    """
+    Model readiness status endpoint.
+    Reports loading state of each model independently.
+    """
+    cleaner_name = CLEANER_MODEL_NAME_LAMA if cleaner_mode == "lama" else CLEANER_MODEL_NAME_OPENCV
+    return StatusResponse(
+        models={
+            "ocr": ModelStatus(name=OCR_MODEL_NAME, ready=ocr_ready),
+            "cleaner": ModelStatus(name=cleaner_name, ready=cleaner_ready),
+        }
     )
 
 
@@ -311,26 +389,18 @@ async def generate_patch(request: PatchRequest):
 
             # Step 2: Clean text from region (only inside polygon)
             logger.info("🧹 Cleaning text from region...")
-            cleaned_image = clean_text_region(image)
+            cleaned_image = clean_text_region(image, cleaner=text_cleaner)
 
             # Step 3: Convert to RGBA with alpha channel from mask
             cleaned_rgba = cv2.cvtColor(cleaned_image, cv2.COLOR_BGR2BGRA)
             cleaned_rgba[:, :, 3] = mask  # Set alpha channel
 
-            # Step 4: Fill inside polygon with white (RGB channels only)
-            for i in range(3):  # B, G, R channels
-                cleaned_rgba[:, :, i] = np.where(
-                    mask == 255,
-                    255,  # White inside polygon
-                    cleaned_rgba[:, :, i]  # Original outside
-                )
-
-            # Use RGBA image for text rendering
+            # Use RGBA image for text rendering (LaMa reconstructs background, no white fill)
             cleaned_image = cleaned_rgba
         else:
             # Step 1: Clean text from region (no masking)
             logger.info("🧹 Cleaning text from region...")
-            cleaned_image = clean_text_region(image)
+            cleaned_image = clean_text_region(image, cleaner=text_cleaner)
 
         # Step 2: Render translated text with manual settings
         # Join array of lines with newlines
@@ -593,7 +663,6 @@ def start_server(socket_path: str = "/app/sock/manga-ocr.sock", log_level: str =
         os.remove(socket_path)
 
     logger.info(f"🌐 Binding to Unix socket: {socket_path}")
-    logger.info("⏳ Waiting for model to load before accepting requests...")
 
     try:
         # Start uvicorn with Unix domain socket
