@@ -3,6 +3,8 @@ interface Point {
   y: number;
 }
 
+export type HandleType = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+
 interface CaptionData {
   id: string;
   x: number;
@@ -11,6 +13,14 @@ interface CaptionData {
   height: number;
   polygonPoints?: Point[];
   patchImagePath?: string;
+}
+
+export interface TransformPreview {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  polygonPoints?: Point[];
 }
 
 interface RectRenderData {
@@ -179,6 +189,113 @@ export class CanvasRenderer {
     }
   }
 
+  /** Get the 8 resize handle positions for a caption's bounding box */
+  static getHandlePositions(
+    caption: CaptionData,
+  ): Record<HandleType, Point> {
+    const { x, y, width, height } = caption;
+    const mx = x + width / 2;
+    const my = y + height / 2;
+    return {
+      nw: { x, y },
+      n: { x: mx, y },
+      ne: { x: x + width, y },
+      e: { x: x + width, y: my },
+      se: { x: x + width, y: y + height },
+      s: { x: mx, y: y + height },
+      sw: { x, y: y + height },
+      w: { x, y: my },
+    };
+  }
+
+  /** Hit-test against resize handles. Returns handle type or null. */
+  static hitTestHandle(
+    mx: number,
+    my: number,
+    caption: CaptionData,
+    tolerance = 10,
+  ): HandleType | null {
+    const handles = CanvasRenderer.getHandlePositions(caption);
+    const entries = Object.entries(handles) as [HandleType, Point][];
+    for (const [type, pos] of entries) {
+      const dx = mx - pos.x;
+      const dy = my - pos.y;
+      if (dx * dx + dy * dy <= tolerance * tolerance) {
+        return type;
+      }
+    }
+    return null;
+  }
+
+  /** Draw 8 resize handles on the selected caption */
+  static drawResizeHandles(
+    ctx: CanvasRenderingContext2D,
+    caption: CaptionData,
+  ): void {
+    const handles = CanvasRenderer.getHandlePositions(caption);
+    const size = 6;
+    const half = size / 2;
+
+    ctx.save();
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#374151"; // gray-700
+    ctx.lineWidth = 1.5;
+
+    for (const pos of Object.values(handles)) {
+      ctx.fillRect(pos.x - half, pos.y - half, size, size);
+      ctx.strokeRect(pos.x - half, pos.y - half, size, size);
+    }
+
+    ctx.restore();
+  }
+
+  /** Map a handle type to a CSS cursor string */
+  static getCursorForHandle(handle: HandleType | null): string {
+    if (handle === null) return "move";
+    const map: Record<HandleType, string> = {
+      nw: "nwse-resize",
+      se: "nwse-resize",
+      ne: "nesw-resize",
+      sw: "nesw-resize",
+      n: "ns-resize",
+      s: "ns-resize",
+      e: "ew-resize",
+      w: "ew-resize",
+    };
+    return map[handle];
+  }
+
+  /** Draw a dashed-outline preview of a region being transformed */
+  static drawTransformPreview(
+    ctx: CanvasRenderingContext2D,
+    preview: TransformPreview,
+  ): void {
+    ctx.save();
+    ctx.strokeStyle = "#f59e0b"; // amber-500
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+
+    if (preview.polygonPoints && preview.polygonPoints.length >= 3) {
+      const pts = preview.polygonPoints;
+      ctx.beginPath();
+      ctx.moveTo(pts[0]!.x, pts[0]!.y);
+      for (let i = 1; i < pts.length; i++) {
+        ctx.lineTo(pts[i]!.x, pts[i]!.y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = "rgba(245, 158, 11, 0.1)";
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = "rgba(245, 158, 11, 0.1)";
+      ctx.fillRect(preview.x, preview.y, preview.width, preview.height);
+      ctx.strokeRect(preview.x, preview.y, preview.width, preview.height);
+    }
+
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   /** Draw loaded patch images on top of their caption regions */
   static drawPatchOverlays(
     ctx: CanvasRenderingContext2D,
@@ -209,7 +326,8 @@ export class CanvasRenderer {
   }
 
   /**
-   * Full-frame redraw: clear, draw image, draw patch overlays, draw caption highlights, draw drawing preview.
+   * Full-frame redraw: clear, draw image, draw patch overlays, draw caption highlights,
+   * draw drawing preview, draw transform preview + resize handles.
    */
   static redraw(
     ctx: CanvasRenderingContext2D,
@@ -221,6 +339,7 @@ export class CanvasRenderer {
     polyData: PolyRenderData | null,
     patchImages?: Map<string, HTMLImageElement>,
     ovalData: OvalRenderData | null = null,
+    transformPreview: TransformPreview | null = null,
   ): void {
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     CanvasRenderer.drawImage(ctx, image);
@@ -229,6 +348,19 @@ export class CanvasRenderer {
     }
     CanvasRenderer.drawCaptionRegions(ctx, captions, activeCaptionId);
     CanvasRenderer.drawDrawingPreview(ctx, toolType, rectData, polyData, ovalData);
+
+    // Draw transform preview (dashed outline during drag/resize)
+    if (transformPreview) {
+      CanvasRenderer.drawTransformPreview(ctx, transformPreview);
+    }
+
+    // Draw resize handles on selected caption when no drawing tool active
+    if (toolType === "none" && activeCaptionId) {
+      const activeCaption = captions.find((c) => c.id === activeCaptionId);
+      if (activeCaption) {
+        CanvasRenderer.drawResizeHandles(ctx, activeCaption);
+      }
+    }
   }
 
   /**

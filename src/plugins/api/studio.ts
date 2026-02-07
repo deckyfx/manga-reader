@@ -122,12 +122,13 @@ async function generateAndSavePatch(
  * /api/studio/captions?pageId=        GET    — list captions for a page
  * /api/studio/captions/:slug          PUT    — update caption text
  * /api/studio/captions/:slug          DELETE — delete caption
+ * /api/studio/captions/:slug/region   PATCH  — update region after move/resize
  * /api/studio/captions/:slug/translate POST  — retry translation
  * /api/studio/captions/:slug/patch    POST   — generate patch
+ * /api/studio/captions/:slug/patch    DELETE — delete patch
  * /api/studio/ocr                     POST   — create caption via OCR
  * /api/studio/merge                   PATCH  — merge patches onto page
  * /api/studio/extract                 POST   — re-extract OCR
- * /api/studio/patch/:captionSlug      DELETE — delete patch
  */
 export const studioApi = new Elysia({ prefix: "/studio" })
   // ─── Caption endpoints ─────────────────────────────
@@ -219,6 +220,47 @@ export const studioApi = new Elysia({ prefix: "/studio" })
       success: true,
     };
   })
+  .patch(
+    "/captions/:slug/region",
+    async ({ params: { slug }, body }) => {
+      const { region, capturedImage } = body;
+
+      const [error, caption] = await catchError(
+        CaptionStore.updateBySlug(slug, {
+          region: region as Region,
+          capturedImage,
+          patchImagePath: null,
+          patchGeneratedAt: null,
+        }),
+      );
+
+      if (error) {
+        console.error("Update region error:", error);
+        return {
+          success: false,
+          error: error.message,
+        };
+      }
+
+      if (!caption) {
+        return {
+          success: false,
+          error: "Caption not found",
+        };
+      }
+
+      return {
+        success: true,
+        caption,
+      };
+    },
+    {
+      body: t.Object({
+        region: tRegion,
+        capturedImage: t.String(),
+      }),
+    },
+  )
   .post("/captions/:slug/translate", async ({ params: { slug } }) => {
     const [captionError, caption] = await catchError(CaptionStore.findBySlug(slug));
 
@@ -581,9 +623,9 @@ export const studioApi = new Elysia({ prefix: "/studio" })
   )
 
   // ─── Delete patch endpoint ─────────────────────────
-  .delete("/patch/:captionSlug", async ({ params: { captionSlug } }) => {
+  .delete("/captions/:slug/patch", async ({ params: { slug } }) => {
     const [captionError, caption] = await catchError(
-      CaptionStore.findBySlug(captionSlug),
+      CaptionStore.findBySlug(slug),
     );
     if (captionError || !caption) {
       return { success: false, error: "Caption not found" };
@@ -607,7 +649,7 @@ export const studioApi = new Elysia({ prefix: "/studio" })
 
     // Clear patch fields in DB
     const [updateError] = await catchError(
-      CaptionStore.updateBySlug(captionSlug, {
+      CaptionStore.updateBySlug(slug, {
         patchImagePath: null,
         patchGeneratedAt: null,
       } as any),

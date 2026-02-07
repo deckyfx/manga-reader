@@ -1,7 +1,8 @@
-import React, { useRef, useEffect, useCallback } from "react";
+import React, { useRef, useEffect, useCallback, useState } from "react";
 import { useCanvasCoords } from "../../hooks/useCanvasCoords";
 import { useCanvasImage } from "../../hooks/useCanvasImage";
 import { useDrawingTool, type DrawingToolType } from "../../hooks/useDrawingTool";
+import { useRegionTransform, type TransformResult } from "../../hooks/useRegionTransform";
 import { CanvasRenderer } from "../v2/CanvasRenderer";
 import { api } from "../../lib/api";
 import { catchError } from "../../../lib/error-handler";
@@ -39,6 +40,7 @@ interface StudioCanvasProps {
   zoom: number;
   onCaptionCreated: (caption: CaptionRect) => void;
   onSelectCaption: (id: string | null) => void;
+  onCaptionMoved: () => void;
   onNotification: (msg: string, type: "success" | "error" | "info") => void;
 }
 
@@ -57,6 +59,7 @@ export function StudioCanvas({
   zoom,
   onCaptionCreated,
   onSelectCaption,
+  onCaptionMoved,
   onNotification,
 }: StudioCanvasProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -74,6 +77,8 @@ export function StudioCanvas({
     imageSrc,
   );
   const drawing = useDrawingTool(drawingTool);
+  const transform = useRegionTransform();
+  const [canvasCursor, setCanvasCursor] = useState("default");
 
   // Reset drawing on tool change
   useEffect(() => {
@@ -164,6 +169,7 @@ export function StudioCanvas({
         drawing.polygonRenderData,
         patchImagesRef.current,
         drawing.ovalRenderData,
+        transform.preview,
       );
     };
 
@@ -260,11 +266,63 @@ export function StudioCanvas({
     scheduleRedraw();
   };
 
+  // ─── Persist region update after move/resize ──
+  const persistRegionUpdate = async (result: TransformResult) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !result.captionSlug) return;
+
+    // Build Region from transform result
+    let region: Region;
+    if (result.shape === "polygon" && result.polygonPoints) {
+      region = { shape: "polygon", data: { x: result.x, y: result.y, width: result.width, height: result.height, points: result.polygonPoints } };
+    } else if (result.shape === "oval") {
+      region = { shape: "oval", data: { x: result.x, y: result.y, width: result.width, height: result.height } };
+    } else {
+      region = { shape: "rectangle", data: { x: result.x, y: result.y, width: result.width, height: result.height } };
+    }
+
+    // Re-capture image from the base canvas (need to draw without overlays first)
+    const clipPoints = getRegionPolygonPoints(region);
+    const capturedImage = CanvasRenderer.captureRegion(
+      canvas,
+      result.x,
+      result.y,
+      result.width,
+      result.height,
+      clipPoints,
+    );
+    if (!capturedImage) {
+      onNotification("Failed to capture region image", "error");
+      return;
+    }
+
+    const [error] = await catchError(
+      api.api.studio.captions({ slug: result.captionSlug }).region.patch({
+        region,
+        capturedImage,
+      }),
+    );
+
+    if (error) {
+      onNotification("Failed to update region", "error");
+      return;
+    }
+
+    onCaptionMoved();
+  };
+
   // ─── Mouse handlers ───────────────────────────
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { x, y } = toImageCoords(e);
+
+    // When tool="none", try transform first on the selected caption
+    if (drawingTool === "none" && !drawing.isDrawing) {
+      const consumed = transform.handleMouseDown(x, y, captions, selectedCaptionId);
+      if (consumed) return;
+    }
+
+    // Hit test for caption selection
     if (selectedCaptionId !== null && !drawing.isDrawing) {
-      // If a caption is selected, clicking canvas deselects
-      const { x, y } = toImageCoords(e);
       const hitId = CanvasRenderer.hitTestCaption(x, y, captions);
       if (hitId) {
         onSelectCaption(hitId);
@@ -273,7 +331,6 @@ export function StudioCanvas({
       onSelectCaption(null);
     }
 
-    const { x, y } = toImageCoords(e);
     const isDoubleClick = e.detail === 2;
 
     if (!drawing.isDrawing && !isDoubleClick) {
@@ -290,13 +347,40 @@ export function StudioCanvas({
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!drawing.isDrawing) return;
     const { x, y } = toImageCoords(e);
-    drawing.handleMouseMove(x, y);
-    scheduleRedraw();
+
+    // Transform in progress — update preview
+    if (transform.isActive()) {
+      transform.handleMouseMove(x, y);
+      scheduleRedraw();
+      return;
+    }
+
+    // Update cursor when tool="none" (lightweight, no redraw)
+    if (drawingTool === "none" && !drawing.isDrawing) {
+      const cursor = transform.getCursor(x, y, captions, selectedCaptionId);
+      setCanvasCursor(cursor ?? "default");
+    }
+
+    // Drawing in progress
+    if (drawing.isDrawing) {
+      drawing.handleMouseMove(x, y);
+      scheduleRedraw();
+    }
   };
 
   const handleMouseUp = async () => {
+    // Transform in progress — finish and persist
+    if (transform.isActive()) {
+      const result = transform.handleMouseUp();
+      scheduleRedraw();
+      if (result) {
+        await persistRegionUpdate(result);
+      }
+      return;
+    }
+
+    // Drawing in progress
     if (!drawing.isDrawing) return;
     const drawResult = drawing.handleMouseUp();
     scheduleRedraw();
@@ -340,7 +424,15 @@ export function StudioCanvas({
           style={{
             width: "100%",
             height: "100%",
-            cursor: isCreating ? "wait" : drawingTool === "none" ? "default" : "crosshair",
+            cursor: isCreating
+              ? "wait"
+              : transform.isActive()
+                ? (transform.mode === "resizing" && transform.activeHandle
+                  ? CanvasRenderer.getCursorForHandle(transform.activeHandle)
+                  : "move")
+                : drawingTool !== "none"
+                  ? "crosshair"
+                  : canvasCursor,
           }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}

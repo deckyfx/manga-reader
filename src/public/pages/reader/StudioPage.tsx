@@ -203,6 +203,13 @@ export function StudioPage() {
     }
   }, [currentPage]);
 
+  const handleCaptionMoved = useCallback(() => {
+    // Reload captions after move/resize to reflect new coordinates
+    if (currentPage) {
+      loadCaptions(currentPage.id, true);
+    }
+  }, [currentPage]);
+
   // ─── Merge Down ────────────────────────────────────
   const hasPatchesAvailable = captions.some((c) => c.patchImagePath);
 
@@ -351,6 +358,7 @@ export function StudioPage() {
             zoom={zoom}
             onCaptionCreated={handleCaptionCreated}
             onSelectCaption={handleSelectCaption}
+            onCaptionMoved={handleCaptionMoved}
             onNotification={handleNotification}
           />
         </div>

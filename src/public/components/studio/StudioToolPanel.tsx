@@ -403,7 +403,7 @@ function RegionEditor({
     if (!slug) return;
     setIsDeletingPatch(true);
     const [error, result] = await catchError(
-      api.api.studio.patch({ captionSlug: slug }).delete(),
+      api.api.studio.captions({ slug }).patch.delete(),
     );
     setIsDeletingPatch(false);
     if (error || !result.data?.success) {
