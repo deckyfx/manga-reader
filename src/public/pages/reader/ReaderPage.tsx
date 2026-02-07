@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { Link, useParams, useNavigate } from "react-router-dom";
-import { MangaPage } from "../../components/MangaPage";
+import { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { MangaPageV2 } from "../../components/v2/MangaPageV2";
 import { ChapterNavigation } from "../../components/ChapterNavigation";
 import { StickyHeader } from "../../components/StickyHeader";
 import { api } from "../../lib/api";
@@ -25,30 +25,7 @@ export function ReaderPage() {
   const [pagesCache, setPagesCache] = useState<any[]>([]);
   const [totalPages, setTotalPages] = useState(0);
   const [chaptersCache, setChaptersCache] = useState<any[]>([]);
-  const [editMode, setEditMode] = useState(false);
-  const [drawingTool, setDrawingTool] = useState<"rectangle" | "polygon">("rectangle");
-  const [showToolMenu, setShowToolMenu] = useState(false);
-  const toolMenuRef = useRef<HTMLDivElement>(null);
-
-  // Close tool menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (toolMenuRef.current && !toolMenuRef.current.contains(event.target as Node)) {
-        setShowToolMenu(false);
-      }
-    };
-
-    if (showToolMenu) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [showToolMenu]);
   const [chapterTitle, setChapterTitle] = useState("");
-  const [hasPatchesAvailable, setHasPatchesAvailable] = useState(false);
-  const [showPatchConfirm, setShowPatchConfirm] = useState(false);
-  const [patchPageHandler, setPatchPageHandler] = useState<
-    (() => Promise<void>) | null
-  >(null);
 
   const currentPage = parseInt(pageNum || "1");
 
@@ -256,107 +233,27 @@ export function ReaderPage() {
     }
   };
 
-  /**
-   * Handle patch page callback from MangaPage
-   */
-  const handlePatchPageCallback = useCallback(
-    (handler: () => Promise<void>) => {
-      setPatchPageHandler(() => handler);
-    },
-    [],
-  );
-
-  /**
-   * Handle patches availability callback from MangaPage
-   */
-  const handlePatchesAvailable = useCallback((available: boolean) => {
-    setHasPatchesAvailable(available);
-  }, []);
-
-  /**
-   * Trigger patch page operation
-   */
-  const triggerPatchPage = async () => {
-    setShowPatchConfirm(false);
-    if (patchPageHandler) {
-      await patchPageHandler();
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100">
       {SnackbarComponent}
       <StickyHeader
         backLink={`/r/${seriesSlug}`}
-        backText="← Back to Chapters"
+        backText="&larr; Back to Chapters"
         title={chapterTitle}
         actions={
           <>
-            {!editMode && hasPatchesAvailable && (
-              <button
-                onClick={() => setShowPatchConfirm(true)}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2"
-                title="Permanently merge all patches onto page image"
-              >
-                <i className="fas fa-layer-group"></i>
-                <span>Patch Page</span>
-              </button>
-            )}
-
-            {editMode ? (
-              // Exit button (when in edit mode)
-              <button
-                onClick={() => setEditMode(false)}
-                className="px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white"
-              >
-                <i className="fas fa-times"></i>
-                <span>
-                  {drawingTool === "rectangle"
-                    ? "Exit Draw Rectangle"
-                    : "Exit Draw Polygon"}
-                </span>
-              </button>
-            ) : (
-              // Drawing tool selector (when not in edit mode)
-              <div className="relative" ref={toolMenuRef}>
-                <button
-                  onClick={() => setShowToolMenu(!showToolMenu)}
-                  className="px-4 py-2 rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white"
-                >
-                  <i className="fas fa-edit"></i>
-                  <span>Edit</span>
-                  <i className="fas fa-chevron-down text-xs"></i>
-                </button>
-
-                {/* Dropdown menu */}
-                {showToolMenu && (
-                  <div className="absolute top-full mt-2 right-0 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50 min-w-[200px]">
-                    <button
-                      onClick={() => {
-                        setDrawingTool("rectangle");
-                        setEditMode(true);
-                        setShowToolMenu(false);
-                      }}
-                      className="w-full px-4 py-2 text-left hover:bg-gray-100 flex items-center gap-3 transition-colors"
-                    >
-                      <i className="fas fa-square text-blue-500 w-5"></i>
-                      <span className="font-medium">Draw Rectangle</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        setDrawingTool("polygon");
-                        setEditMode(true);
-                        setShowToolMenu(false);
-                      }}
-                      className="w-full px-4 py-2 text-left hover:bg-gray-100 flex items-center gap-3 transition-colors"
-                    >
-                      <i className="fas fa-draw-polygon text-purple-500 w-5"></i>
-                      <span className="font-medium">Draw Polygon</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+            <button
+              onClick={() =>
+                navigate(
+                  `/studio/${chapterSlug}#${pageData?.slug || ""}`,
+                )
+              }
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2"
+              title="Open Studio editor"
+            >
+              <i className="fas fa-palette"></i>
+              <span>Studio</span>
+            </button>
 
             <span className="text-gray-700 font-semibold whitespace-nowrap">
               Page {currentPage} / {totalPages}
@@ -373,15 +270,10 @@ export function ReaderPage() {
               <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
             </div>
           ) : pageData ? (
-            <MangaPage
+            <MangaPageV2
               page={pageData}
               onPrevious={goToPreviousPage}
               onNext={goToNextPage}
-              editMode={editMode}
-              drawingTool={drawingTool}
-              onEditModeChange={setEditMode}
-              onPatchPage={handlePatchPageCallback}
-              onPatchesAvailable={handlePatchesAvailable}
               showNotification={showSnackbar}
             />
           ) : (
@@ -464,52 +356,6 @@ export function ReaderPage() {
           currentPage={currentPage}
           totalPages={totalPages}
         />
-      )}
-
-      {/* Patch Page Confirmation Dialog */}
-      {showPatchConfirm && (
-        <div
-          className="fixed inset-0 flex items-center justify-center z-50"
-          style={{ backgroundColor: "rgba(0, 0, 0, 0.50)" }}
-        >
-          <div className="bg-white rounded-lg shadow-2xl p-6 max-w-md mx-4">
-            <div className="flex items-start gap-3 mb-4">
-              <i className="fas fa-exclamation-triangle text-yellow-500 text-2xl mt-1"></i>
-              <div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">
-                  Permanently Patch Page?
-                </h3>
-                <p className="text-sm text-gray-700 mb-2">
-                  This will permanently alter the original page image by merging
-                  all patches.
-                </p>
-                <p className="text-sm text-red-600 font-semibold">
-                  ⚠️ This action cannot be undone!
-                </p>
-                <ul className="text-sm text-gray-600 mt-3 space-y-1">
-                  <li>• Original page image will be overwritten</li>
-                  <li>• All caption records will be deleted</li>
-                  <li>• All patch files will be removed</li>
-                </ul>
-              </div>
-            </div>
-
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setShowPatchConfirm(false)}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold rounded transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={triggerPatchPage}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded transition-colors"
-              >
-                Yes, Patch Page
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

@@ -1,7 +1,8 @@
 import { useRectangleTool } from "./useRectangleTool";
 import { usePolygonTool } from "./usePolygonTool";
+import { useOvalTool } from "./useOvalTool";
 
-export type DrawingToolType = "rectangle" | "polygon";
+export type DrawingToolType = "none" | "rectangle" | "polygon" | "oval";
 
 interface Point {
   x: number;
@@ -27,6 +28,7 @@ interface UseDrawingToolResult {
   // Render data
   rectangleRenderData: { x: number; y: number; width: number; height: number } | null;
   polygonRenderData: { points: Point[]; cursorPos: Point | null } | null;
+  ovalRenderData: { cx: number; cy: number; rx: number; ry: number } | null;
 
   // Current tool info
   isDrawing: boolean;
@@ -56,16 +58,22 @@ interface UseDrawingToolResult {
 export function useDrawingTool(toolType: DrawingToolType): UseDrawingToolResult {
   const rectangleTool = useRectangleTool();
   const polygonTool = usePolygonTool();
+  const ovalTool = useOvalTool();
 
+  const isNone = toolType === "none";
   const isRectangle = toolType === "rectangle";
-  const currentTool = isRectangle ? rectangleTool : polygonTool;
+  const isOval = toolType === "oval";
+  const isPolygon = toolType === "polygon";
 
   /**
    * Handle mouse down - start drawing or add point
    */
   const handleMouseDown = (x: number, y: number, isDoubleClick = false) => {
+    if (isNone) return;
     if (isRectangle) {
       rectangleTool.handleMouseDown(x, y);
+    } else if (isOval) {
+      ovalTool.handleMouseDown(x, y);
     } else {
       polygonTool.handleMouseDown(x, y, isDoubleClick);
     }
@@ -75,23 +83,34 @@ export function useDrawingTool(toolType: DrawingToolType): UseDrawingToolResult 
    * Handle mouse move - update drawing
    */
   const handleMouseMove = (x: number, y: number) => {
-    currentTool.handleMouseMove(x, y);
+    if (isRectangle) {
+      rectangleTool.handleMouseMove(x, y);
+    } else if (isOval) {
+      ovalTool.handleMouseMove(x, y);
+    } else {
+      polygonTool.handleMouseMove(x, y);
+    }
   };
 
   /**
    * Handle mouse up - finish drawing
-   * Returns bounding box and points (for polygon)
+   * Returns bounding box and points (for polygon/oval)
    */
   const handleMouseUp = (): DrawingResult | null => {
-    const result = currentTool.handleMouseUp();
-    return result;
+    if (isRectangle) {
+      return rectangleTool.handleMouseUp();
+    } else if (isOval) {
+      return ovalTool.handleMouseUp();
+    } else {
+      return polygonTool.handleMouseUp();
+    }
   };
 
   /**
    * Manually finish polygon drawing (for DONE button)
    */
   const finishPolygon = (): DrawingResult | null => {
-    if (isRectangle) {
+    if (!isPolygon) {
       return null; // Only works for polygon
     }
     return polygonTool.finish();
@@ -103,14 +122,19 @@ export function useDrawingTool(toolType: DrawingToolType): UseDrawingToolResult 
   const reset = () => {
     rectangleTool.reset();
     polygonTool.reset();
+    ovalTool.reset();
   };
 
   /**
    * Check if currently drawing
    */
-  const isDrawing = isRectangle
-    ? rectangleTool.currentDraw !== null
-    : polygonTool.points.length > 0;
+  const isDrawing = isNone
+    ? false
+    : isRectangle
+      ? rectangleTool.currentDraw !== null
+      : isOval
+        ? ovalTool.currentDraw !== null
+        : polygonTool.points.length > 0;
 
   return {
     handleMouseDown,
@@ -119,7 +143,8 @@ export function useDrawingTool(toolType: DrawingToolType): UseDrawingToolResult 
     finishPolygon,
     reset,
     rectangleRenderData: isRectangle ? rectangleTool.getRenderData() : null,
-    polygonRenderData: !isRectangle ? polygonTool.getRenderData() : null,
+    polygonRenderData: isPolygon ? polygonTool.getRenderData() : null,
+    ovalRenderData: isOval ? ovalTool.getRenderData() : null,
     isDrawing,
   };
 }

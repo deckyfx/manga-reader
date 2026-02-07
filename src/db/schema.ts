@@ -1,5 +1,6 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import type { Region } from "../lib/region-types";
 
 /**
  * Series table - stores manga series information
@@ -51,6 +52,7 @@ export const pages = sqliteTable("pages", {
 /**
  * User Captions table - stores OCR and translation results for manga bubbles
  */
+
 export const userCaptions = sqliteTable("user_captions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   slug: text("slug").unique(), // Auto-generated: u00001, u00002, etc.
@@ -58,16 +60,9 @@ export const userCaptions = sqliteTable("user_captions", {
     .notNull()
     .references(() => pages.id, { onDelete: "cascade" }),
 
-  // Position coordinates
-  x: integer("x").notNull(),
-  y: integer("y").notNull(),
-
-  // Dimensions
-  width: integer("width").notNull(),
-  height: integer("height").notNull(),
-
-  // Polygon points (JSON array of {x, y} coordinates) - for polygon-shaped captions
-  polygonPoints: text("polygon_points"), // Stored as JSON: [{"x": 10, "y": 20}, ...]
+  // Region data (JSON): { shape, data } discriminated union
+  // See src/lib/region-types.ts for Region type
+  region: text("region", { mode: "json" }).$type<Region>().notNull(),
 
   // Image data (base64 encoded)
   capturedImage: text("captured_image").notNull(),

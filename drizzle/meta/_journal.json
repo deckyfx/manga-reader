@@ -22,6 +22,13 @@
       "when": 1770376383812,
       "tag": "0002_dry_chronomancer",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1770500000000,
+      "tag": "0003_region_refactor",
+      "breakpoints": true
     }
   ]
 }

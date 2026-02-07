@@ -1,0 +1,30 @@
+name: manga-reader
+
+services:
+  # Manga OCR service (Python FastAPI server)
+  manga-ocr:
+    build:
+      context: ./manga-ocr
+      dockerfile: Dockerfile
+    container_name: manga-ocr
+    environment:
+      # Hugging Face API token (optional)
+      - HF_TOKEN=${HF_TOKEN}
+    volumes:
+      # Persist Hugging Face model cache (~850MB)
+      - ${DATA_DIR:-./data}/models:/root/.cache/huggingface/hub
+      # Shared sockets directory (for IPC with main app)
+      - ${DATA_DIR:-./data}/sock:/app/sock
+    networks:
+      - manga-reader-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "/usr/local/bin/healthcheck.py"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+networks:
+  manga-reader-network:
+    driver: bridge

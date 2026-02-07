@@ -3,7 +3,7 @@
  * Test Polygon Patch Generation
  *
  * Standalone script to test polygon masking:
- * 1. Fetch a caption with polygonPoints from database
+ * 1. Fetch a caption with polygon region from database
  * 2. Send request to Python service via socket
  * 3. Save the result as PNG image
  *
@@ -21,6 +21,7 @@ import { catchError } from "./src/lib/error-handler";
 import { envConfig } from "./src/env-config";
 import { db } from "./src/db";
 import { userCaptions } from "./src/db/schema";
+import { getRegionBounds, getRegionPolygonPoints } from "./src/lib/region-types";
 
 interface Point {
   x: number;
@@ -50,8 +51,8 @@ async function main() {
 
     caption = result;
   } else {
-    // Find first caption with polygonPoints
-    console.log("   Looking for first caption with polygonPoints...");
+    // Find first caption with polygon region
+    console.log("   Looking for first caption with polygon region...");
     const [error, captions] = await catchError(
       db.select().from(userCaptions)
     );
@@ -61,10 +62,12 @@ async function main() {
       process.exit(1);
     }
 
-    const polygonCaption = captions.find((c) => c.polygonPoints !== null);
+    const polygonCaption = captions.find((c) => {
+      return c.region.shape === "polygon";
+    });
 
     if (!polygonCaption) {
-      console.error("❌ No captions with polygonPoints found in database");
+      console.error("❌ No captions with polygon region found in database");
       console.log("💡 Try creating a polygon caption in the UI first");
       process.exit(1);
     }
@@ -72,22 +75,25 @@ async function main() {
     caption = polygonCaption;
   }
 
-  console.log(`✅ Found caption: ID ${caption.id}, Slug: ${caption.slug}`);
-  console.log(`   Size: ${caption.width}x${caption.height}`);
+  const region = caption.region;
+  const bounds = getRegionBounds(region);
+  const polygonPoints = getRegionPolygonPoints(region);
 
-  // Parse and display polygon points
-  let polygonPoints: Point[] | null = null;
+  console.log(`✅ Found caption: ID ${caption.id}, Slug: ${caption.slug}`);
+  console.log(`   Shape: ${region.shape}`);
+  console.log(`   Size: ${bounds.width}x${bounds.height}`);
+
+  // Display polygon points
   let relativePolygonPoints: Point[] | null = null;
 
-  if (caption.polygonPoints) {
-    polygonPoints = JSON.parse(caption.polygonPoints) as Point[];
+  if (polygonPoints) {
     console.log(`   Polygon points: ${polygonPoints.length} points`);
     console.log(`   First point: (${polygonPoints[0]!.x}, ${polygonPoints[0]!.y})`);
 
     // Convert to relative coordinates (within captured region)
     relativePolygonPoints = polygonPoints.map((point) => ({
-      x: point.x - caption.x,
-      y: point.y - caption.y,
+      x: point.x - bounds.x,
+      y: point.y - bounds.y,
     }));
     console.log(
       `   Relative first point: (${relativePolygonPoints[0]!.x}, ${relativePolygonPoints[0]!.y})`
@@ -182,6 +188,7 @@ async function main() {
   console.log(`\n📊 Results:`);
   console.log(`   Caption ID: ${caption.id}`);
   console.log(`   Caption Slug: ${caption.slug}`);
+  console.log(`   Shape: ${region.shape}`);
   console.log(`   Has Polygon: ${polygonPoints ? "Yes" : "No"}`);
   if (polygonPoints) {
     console.log(`   Polygon Points: ${polygonPoints.length} points`);
@@ -194,7 +201,7 @@ async function main() {
   console.log(`   2. Verify patch has transparency outside polygon`);
   console.log(`   3. Check if text is properly rendered`);
 
-  if (polygonPoints) {
+  if (polygonPoints && relativePolygonPoints) {
     console.log(`\n🔍 Polygon Info:`);
     console.log(`   Absolute coordinates (page):`);
     polygonPoints.forEach((p, i) => {
@@ -202,13 +209,13 @@ async function main() {
     });
 
     console.log(`\n   Relative coordinates (within captured region):`);
-    relativePolygonPoints!.forEach((p, i) => {
+    relativePolygonPoints.forEach((p, i) => {
       console.log(`      Point ${i + 1}: (${p.x.toFixed(1)}, ${p.y.toFixed(1)})`);
     });
 
     // Calculate polygon bounds
-    const relXs = relativePolygonPoints!.map(p => p.x);
-    const relYs = relativePolygonPoints!.map(p => p.y);
+    const relXs = relativePolygonPoints.map(p => p.x);
+    const relYs = relativePolygonPoints.map(p => p.y);
     const polyMinX = Math.min(...relXs);
     const polyMaxX = Math.max(...relXs);
     const polyMinY = Math.min(...relYs);
@@ -219,8 +226,8 @@ async function main() {
     console.log(`\n   Polygon bounding box (relative):`);
     console.log(`      X: ${polyMinX.toFixed(1)} to ${polyMaxX.toFixed(1)} (width: ${polyWidth.toFixed(1)})`);
     console.log(`      Y: ${polyMinY.toFixed(1)} to ${polyMaxY.toFixed(1)} (height: ${polyHeight.toFixed(1)})`);
-    console.log(`\n   Captured region size: ${caption.width} × ${caption.height}`);
-    console.log(`   Polygon uses: ${((polyWidth / caption.width) * 100).toFixed(1)}% width, ${((polyHeight / caption.height) * 100).toFixed(1)}% height`);
+    console.log(`\n   Captured region size: ${bounds.width} × ${bounds.height}`);
+    console.log(`   Polygon uses: ${((polyWidth / bounds.width) * 100).toFixed(1)}% width, ${((polyHeight / bounds.height) * 100).toFixed(1)}% height`);
   }
 
   console.log("\n");

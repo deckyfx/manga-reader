@@ -16,4 +16,6 @@ export const appPlugin = new Elysia()
   .get("/a/*", index)
   .get("/r/", index)
   .get("/r/*", index)
+  .get("/studio/", index)
+  .get("/studio/*", index)
   .get("/font-test", index);
