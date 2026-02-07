@@ -107,8 +107,8 @@ class PatchOverlay(BaseModel):
     patchImageBase64: str  # Base64 encoded patch image
     x: float  # X position on page
     y: float  # Y position on page
-    width: int  # Target width (will resize patch to this)
-    height: int  # Target height (will resize patch to this)
+    width: Optional[int] = None  # Target width (will resize patch to this)
+    height: Optional[int] = None  # Target height (will resize patch to this)
 
 
 class MergePatchesRequest(BaseModel):
@@ -593,9 +593,10 @@ async def merge_patches(request: MergePatchesRequest):
 
                 # Resize patch to target dimensions (handles device pixel ratio scaling)
                 original_size = patch_pil.size
-                target_size = (patch.width, patch.height)
-                if original_size != target_size:
-                    patch_pil = patch_pil.resize(target_size, Image.Resampling.LANCZOS)
+                if patch.width is not None and patch.height is not None:
+                    target_size = (patch.width, patch.height)
+                    if original_size != target_size:
+                        patch_pil = patch_pil.resize(target_size, Image.Resampling.LANCZOS)
 
                 # Convert float coordinates to integers for PIL paste()
                 x_pos = int(round(patch.x))

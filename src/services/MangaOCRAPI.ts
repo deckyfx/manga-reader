@@ -88,7 +88,10 @@ export class MangaOCRAPI {
     );
 
     if (fetchError) {
-      throw new Error(`${errorPrefix} failed: ${fetchError.message}`);
+      const msg = fetchError instanceof Error
+        ? fetchError.message
+        : JSON.stringify(fetchError);
+      throw new Error(`${errorPrefix} failed: ${msg}`);
     }
 
     if (!response.ok) {
@@ -100,8 +103,11 @@ export class MangaOCRAPI {
         throw new Error(`${errorPrefix} failed: ${response.statusText}`);
       }
 
+      const detail = Array.isArray(error.detail)
+        ? error.detail.map((d: any) => d.msg ?? JSON.stringify(d)).join("; ")
+        : error.detail;
       throw new Error(
-        `${errorPrefix} failed: ${error.detail || error.error || response.statusText}`
+        `${errorPrefix} failed: ${detail || error.error || response.statusText}`
       );
     }
 

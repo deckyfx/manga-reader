@@ -502,8 +502,8 @@ export const studioApi = new Elysia({ prefix: "/studio" })
           patchImageBase64: Buffer.from(patchFile).toString("base64"),
           x: bounds.x,
           y: bounds.y,
-          width: bounds.width,
-          height: bounds.height,
+          width: Math.round(bounds.width),
+          height: Math.round(bounds.height),
         });
       }
 

@@ -212,8 +212,14 @@ export function StudioPage() {
 
   // ─── Merge Down ────────────────────────────────────
   const hasPatchesAvailable = captions.some((c) => c.patchImagePath);
+  const [showMergeConfirm, setShowMergeConfirm] = useState(false);
 
-  const handleMerge = async () => {
+  const handleMerge = () => {
+    setShowMergeConfirm(true);
+  };
+
+  const confirmMerge = async () => {
+    setShowMergeConfirm(false);
     if (!currentPage?.slug) return;
     setIsPatching(true);
 
@@ -373,6 +379,51 @@ export function StudioPage() {
           onPageJump={handlePageJump}
         />
       </div>
+
+      {/* Merge confirmation modal */}
+      {showMergeConfirm && (
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50"
+          style={{ backgroundColor: "rgba(0, 0, 0, 0.50)" }}
+        >
+          <div className="bg-white rounded-lg shadow-2xl p-6 max-w-md mx-4">
+            <div className="flex items-start gap-3 mb-4">
+              <i className="fas fa-exclamation-triangle text-yellow-500 text-2xl mt-1"></i>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">
+                  Permanently Patch Page?
+                </h3>
+                <p className="text-sm text-gray-700 mb-2">
+                  This will permanently alter the original page image by merging
+                  all patches.
+                </p>
+                <p className="text-sm text-red-600 font-semibold">
+                  This action cannot be undone!
+                </p>
+                <ul className="text-sm text-gray-600 mt-3 space-y-1">
+                  <li>Original page image will be overwritten</li>
+                  <li>All caption records will be deleted</li>
+                  <li>All patch files will be removed</li>
+                </ul>
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowMergeConfirm(false)}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmMerge}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded transition-colors"
+              >
+                Yes, Patch Page
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
