@@ -2,8 +2,10 @@ import { useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useStudioStore } from "../../stores/studioFabricStore";
 import { StudioHeader } from "./StudioHeader";
-import { StudioToolPanel } from "./StudioToolPanel";
+import { StudioLeftPanel } from "./StudioLeftPanel";
 import { StudioCanvas } from "./StudioCanvas";
+import { StudioRightPanel } from "./StudioRightPanel";
+import { TextObjectPopover } from "./TextObjectPopover";
 import {
   UnsavedChangesConfirmation,
   useUnsavedChangesConfirmation,
@@ -25,7 +27,9 @@ export function FabricStudioPage() {
 
   // Zustand store
   const loadChapterData = useStudioStore((state) => state.loadChapterData);
-  const hasUnsavedChanges = useStudioStore((state) => state.hasUnsavedChanges());
+  const hasUnsavedChanges = useStudioStore((state) =>
+    state.hasUnsavedChanges(),
+  );
   const reset = useStudioStore((state) => state.reset);
 
   // Track previous page to detect changes (initialized to empty for first load)
@@ -95,12 +99,16 @@ export function FabricStudioPage() {
 
       {/* Main content area */}
       <div className="flex-1 flex overflow-hidden">
-        <StudioToolPanel />
+        <StudioLeftPanel />
         <StudioCanvas />
+        <StudioRightPanel />
       </div>
 
       {/* Unsaved changes confirmation dialog */}
       <UnsavedChangesConfirmation {...confirmation.props} />
+
+      {/* Text object popover (renders as portal) */}
+      <TextObjectPopover />
     </div>
   );
 }

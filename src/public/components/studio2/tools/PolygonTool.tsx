@@ -8,6 +8,7 @@ import type {
 } from "fabric";
 import { Polygon as FabricPolygon, Circle as FabricCircle } from "fabric";
 import { Polyline } from "fabric";
+import type { ExtendedPolygon, MaskData } from "../../../types/fabric-extensions";
 import { StudioToolType } from "../types";
 import type { StudioTool } from "../types";
 import { MaskingToolHandlerBase } from "./MaskingToolHandlerBase";
@@ -174,15 +175,25 @@ export class PolygonToolHandler extends MaskingToolHandlerBase<Polygon> {
       strokeWidth: 2,
       stroke: "rgba(236, 72, 153, 0.8)",
       fill: "rgba(236, 72, 153, 0.1)",
-      selectable: false,
-      evented: false,
-      hasControls: false,
-      hasBorders: false,
-    });
+      selectable: true,    // Make clickable
+      evented: true,       // Enable events
+      hasControls: false,  // No resize handles
+      hasBorders: false,   // No border
+    }) as ExtendedPolygon;
+
+    // Assign unique ID
+    polygon.id = `polygon-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    // Assign mask data
+    const maskData: MaskData = { type: "mask" };
+    polygon.data = maskData;
 
     // Add to canvas and save
     this.canvas.add(polygon);
     this.onSaveHistory(polygon);
+
+    // Automatically select the newly created polygon to make it clickable
+    this.canvas.setActiveObject(polygon);
 
     // Remove temporary visuals
     if (this.polyline) {
@@ -246,15 +257,25 @@ export function PolygonFinishButton() {
       strokeWidth: 2,
       stroke: "rgba(236, 72, 153, 0.8)",
       fill: "rgba(236, 72, 153, 0.1)",
-      selectable: false,
-      evented: false,
-      hasControls: false,
-      hasBorders: false,
-    });
+      selectable: true,    // Make clickable
+      evented: true,       // Enable events
+      hasControls: false,  // No resize handles
+      hasBorders: false,   // No border
+    }) as ExtendedPolygon;
+
+    // Assign unique ID
+    polygon.id = `polygon-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    // Assign mask data
+    const maskData: MaskData = { type: "mask" };
+    polygon.data = maskData;
 
     // Add to canvas and save
     fabricCanvas.add(polygon);
     saveHistory(polygon);
+
+    // Automatically select the newly created polygon to make it clickable
+    fabricCanvas.setActiveObject(polygon);
 
     // Remove temporary visuals
     const objects = fabricCanvas.getObjects();
@@ -262,7 +283,7 @@ export function PolygonFinishButton() {
       // Remove dots and polylines (temporary visual helpers)
       if (
         obj.type === "circle" ||
-        (obj.type === "polyline" && (obj as any).fill === "")
+        (obj.type === "polyline" && obj.fill === "")
       ) {
         fabricCanvas.remove(obj);
       }

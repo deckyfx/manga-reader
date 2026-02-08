@@ -11,12 +11,13 @@ import {
   InpaintButton,
 } from "./tools";
 import { PageNavigation } from "./tools/PageNavigation";
+import { OCRButton } from "./tools/OCRButton";
 
 /**
- * StudioToolPanel - Left sidebar with masking tool controls
+ * StudioLeftPanel - Left sidebar with masking tool controls
  * Uses modular tool button components
  */
-export function StudioToolPanel() {
+export function StudioLeftPanel() {
   const tool = useStudioStore((state) => state.tool);
   const setTool = useStudioStore((state) => state.setTool);
 
@@ -35,6 +36,7 @@ export function StudioToolPanel() {
 
         <div className="mt-4 flex flex-col gap-2">
           <InpaintButton />
+          <OCRButton />
         </div>
 
         <div className="mt-4">

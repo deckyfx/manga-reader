@@ -1,13 +1,30 @@
 import { create } from "zustand";
-import type { Canvas, FabricObject } from "fabric";
+import {
+  FabricImage,
+  Path,
+  Textbox,
+  type Canvas,
+  type FabricObject,
+} from "fabric";
 import { api } from "../lib/api";
 import type { Chapter, Page, Series, PageData } from "../../db/schema";
 import type { StudioTool } from "../components/studio2/types";
+import { ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "../components/studio2/types";
+import type {
+  ExtendedEllipse,
+  ExtendedPolygon,
+  ExtendedRect,
+  ExtendedTextbox,
+  FontStyle,
+  FontWeight,
+  TextPatchData,
+} from "../types/fabric-extensions";
 import {
-  ZOOM_MIN,
-  ZOOM_MAX,
-  ZOOM_DEFAULT,
-} from "../components/studio2/types";
+  type Region,
+  type BoundingBox,
+  getRegionBounds,
+  getRegionPolygonPoints,
+} from "../../lib/region-types";
 
 /**
  * Studio state interface
@@ -51,6 +68,15 @@ interface StudioState {
   // Inpaint state
   isInpainting: boolean;
 
+  // OCR state
+  isProcessingOCR: boolean;
+
+  // Text Object Popover state
+  selectedTextbox: ExtendedTextbox | null;
+  setSelectedTextbox: (textbox: ExtendedTextbox | null) => void;
+  popoverAnchor: { x: number; y: number } | null;
+  setPopoverAnchor: (anchor: { x: number; y: number } | null) => void;
+
   // Tool actions
   setTool: (tool: StudioTool) => void;
   setBrushSize: (size: number) => void;
@@ -79,7 +105,10 @@ interface StudioState {
   hasMaskData: () => boolean;
 
   // Chapter data actions
-  loadChapterData: (chapterSlug: string, initialPageSlug?: string) => Promise<void>;
+  loadChapterData: (
+    chapterSlug: string,
+    initialPageSlug?: string,
+  ) => Promise<void>;
   loadPageData: (chapterSlug: string, pageSlug: string) => Promise<void>;
   setCurrentPageIndex: (index: number) => void;
   nextPage: () => void;
@@ -89,6 +118,23 @@ interface StudioState {
   // Inpaint actions
   exportMask: () => Promise<Blob>;
   inpaintPage: () => Promise<void>;
+
+  // OCR + Text Patch actions
+  cropRegion: (region: Region) => Promise<string | null>;
+  createTextPatch: (config: {
+    text: string;
+    bounds: BoundingBox;
+    captionSlug?: string;
+    fontFamily?: string;
+    fontWeight?: FontWeight;
+    fontStyle?: FontStyle;
+    fill?: string;
+    stroke?: string;
+    strokeWidth?: number;
+  }) => void;
+  exportTextPatch: (textbox: ExtendedTextbox) => string | null;
+  savePatch: (captionSlug: string, textbox: ExtendedTextbox) => Promise<void>;
+  syncTextOverlays: () => void;
 
   // Utility
   reset: () => void;
@@ -118,6 +164,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   pageDataId: undefined,
   currentPageData: null,
   isInpainting: false,
+  isProcessingOCR: false,
+  selectedTextbox: null,
+  popoverAnchor: null,
 
   // Tool actions
   setTool: (tool) => set({ tool }),
@@ -387,35 +436,35 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
     const objects = canvas.getObjects();
     for (const obj of objects) {
-      if (obj.type === "path") {
-        const path = obj as any; // Fabric.Path type
-        const pathData = path.path;
-
-        // Use brush size from object or default
-        ctx.lineWidth = (path.strokeWidth || get().brushSize) * Math.max(scaleX, scaleY);
-
-        ctx.beginPath();
-        for (const cmd of pathData) {
-          const [type, ...coords] = cmd;
-          const scaledCoords = coords.map((c: number, i: number) =>
-            i % 2 === 0 ? c * scaleX : c * scaleY
-          );
-
-          if (type === "M") {
-            ctx.moveTo(scaledCoords[0], scaledCoords[1]);
-          } else if (type === "Q") {
-            ctx.quadraticCurveTo(
-              scaledCoords[0],
-              scaledCoords[1],
-              scaledCoords[2],
-              scaledCoords[3]
-            );
-          } else if (type === "L") {
-            ctx.lineTo(scaledCoords[0], scaledCoords[1]);
-          }
-        }
-        ctx.stroke();
+      if (!(obj instanceof Path)) {
+        continue;
       }
+      const path = obj;
+      const pathData = path.path;
+
+      // Use brush size from object or default
+      ctx.lineWidth =
+        (path.strokeWidth || get().brushSize) * Math.max(scaleX, scaleY);
+
+      ctx.beginPath();
+      for (const cmd of pathData) {
+        const [type, ...coords] = cmd;
+        const scaledCoords = coords.map((c: number, i: number) =>
+          i % 2 === 0 ? c * scaleX : c * scaleY,
+        );
+
+        const [cpx, cpy, x, y] = scaledCoords;
+        if (!cpx || !cpy || !x || !y) continue;
+
+        if (type === "M") {
+          ctx.moveTo(cpx, cpy);
+        } else if (type === "Q") {
+          ctx.quadraticCurveTo(cpx, cpy, x, y);
+        } else if (type === "L") {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.stroke();
     }
 
     // Convert to blob
@@ -491,10 +540,356 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       }, 100);
     } catch (error) {
       console.error("❌ Inpaint error:", error);
-      alert(`Inpainting failed: ${error instanceof Error ? error.message : String(error)}`);
+      alert(
+        `Inpainting failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     } finally {
       set({ isInpainting: false });
     }
+  },
+
+  // OCR + Text Patch actions
+  cropRegion: async (region) => {
+    const canvas = get().fabricCanvas;
+    if (!canvas) return null;
+
+    const bounds = getRegionBounds(region);
+
+    // Get background image from canvas objects (not backgroundImage property)
+    const objects = canvas.getObjects();
+    const bgImage = objects.find((o) => o.type === "image");
+    if (!bgImage || !(bgImage instanceof FabricImage)) return null;
+
+    const img = bgImage;
+    if (!img._element) return null;
+
+    // Create off-screen canvas at region size
+    const offCanvas = document.createElement("canvas");
+    offCanvas.width = bounds.width;
+    offCanvas.height = bounds.height;
+    const ctx = offCanvas.getContext("2d");
+    if (!ctx) return null;
+
+    // Handle different region shapes
+    if (region.shape === "rectangle") {
+      // Simple crop
+      ctx.drawImage(
+        img._element,
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+        0,
+        0,
+        bounds.width,
+        bounds.height,
+      );
+    } else if (region.shape === "oval") {
+      // Elliptical clipping
+      ctx.save();
+      ctx.beginPath();
+      ctx.ellipse(
+        bounds.width / 2,
+        bounds.height / 2,
+        bounds.width / 2,
+        bounds.height / 2,
+        0,
+        0,
+        2 * Math.PI,
+      );
+      ctx.clip();
+      ctx.drawImage(
+        img._element,
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+        0,
+        0,
+        bounds.width,
+        bounds.height,
+      );
+      ctx.restore();
+    } else if (region.shape === "polygon") {
+      // Polygon clipping
+      const points = getRegionPolygonPoints(region);
+      if (!points) return null;
+
+      const localPoints = points.map((p) => ({
+        x: p.x - bounds.x,
+        y: p.y - bounds.y,
+      }));
+
+      ctx.save();
+      ctx.beginPath();
+      if (localPoints.length > 0) {
+        const first = localPoints[0];
+        if (first) {
+          ctx.moveTo(first.x, first.y);
+          for (let i = 1; i < localPoints.length; i++) {
+            const pt = localPoints[i];
+            if (pt) {
+              ctx.lineTo(pt.x, pt.y);
+            }
+          }
+          ctx.closePath();
+        }
+      }
+      ctx.clip();
+      ctx.drawImage(
+        img._element,
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+        0,
+        0,
+        bounds.width,
+        bounds.height,
+      );
+      ctx.restore();
+    }
+
+    return offCanvas.toDataURL("image/png");
+  },
+
+  createTextPatch: (config) => {
+    const canvas = get().fabricCanvas;
+    if (!canvas) return;
+
+    const {
+      text,
+      bounds,
+      captionSlug,
+      fontFamily = "Anime Ace",
+      fontWeight = "normal",
+      fontStyle = "normal",
+      fill = "#000000",
+      stroke = "#FFFFFF",
+      strokeWidth = 0,
+    } = config;
+
+    const canvasWidth = canvas.getWidth();
+    const canvasHeight = canvas.getHeight();
+
+    const fontSize = bounds.height * 0.8;
+    const fontSizeRatio = fontSize / canvasWidth;
+
+    const textbox = new Textbox(text, {
+      left: bounds.x,
+      top: bounds.y,
+      width: bounds.width,
+      fontSize,
+      fontFamily,
+      fontWeight,
+      fontStyle,
+      fill,
+      stroke,
+      strokeWidth,
+      textAlign: "center",
+      selectable: true,
+      evented: true,
+    }) as ExtendedTextbox;
+
+    // Assign unique ID
+    textbox.id = `textbox-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    // Store caption slug and ratio-based positioning data
+    const patchData: TextPatchData = {
+      type: "text-patch",
+      captionSlug,
+      leftRatio: bounds.x / canvasWidth,
+      topRatio: bounds.y / canvasHeight,
+      widthRatio: bounds.width / canvasWidth,
+      fontSizeRatio,
+    };
+    textbox.data = patchData;
+
+    canvas.add(textbox);
+    canvas.setActiveObject(textbox);
+    canvas.renderAll();
+
+    // Save to history
+    get().saveHistory(textbox);
+  },
+
+  exportTextPatch: (textbox) => {
+    const canvas = get().fabricCanvas;
+    if (!canvas) return null;
+
+    const bounds = textbox.getBoundingRect();
+
+    const offCanvas = document.createElement("canvas");
+    offCanvas.width = bounds.width;
+    offCanvas.height = bounds.height;
+    const ctx = offCanvas.getContext("2d");
+    if (!ctx) return null;
+
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, offCanvas.width, offCanvas.height);
+
+    const originalLeft = textbox.left || 0;
+    const originalTop = textbox.top || 0;
+
+    textbox.set({ left: 0, top: 0 });
+    textbox.render(ctx);
+    textbox.set({ left: originalLeft, top: originalTop });
+
+    return offCanvas.toDataURL("image/png");
+  },
+
+  savePatch: async (captionSlug, textbox) => {
+    const canvas = get().fabricCanvas;
+    if (!canvas) return;
+
+    const patchImage = get().exportTextPatch(textbox);
+    if (!patchImage) return;
+
+    const canvasWidth = canvas.getWidth();
+    const canvasHeight = canvas.getHeight();
+    const data = textbox.data;
+
+    const patchData = {
+      text: textbox.text || "",
+      leftRatio: data?.leftRatio ?? (textbox.left || 0) / canvasWidth,
+      topRatio: data?.topRatio ?? (textbox.top || 0) / canvasHeight,
+      widthRatio: data?.widthRatio ?? (textbox.width || 100) / canvasWidth,
+      fontSizeRatio:
+        data?.fontSizeRatio ?? (textbox.fontSize || 16) / canvasWidth,
+      fontFamily: textbox.fontFamily || "Arial",
+      fontWeight: String(textbox.fontWeight || "normal"),
+      fontStyle: String(textbox.fontStyle || "normal"),
+      fill: (textbox.fill as string) || "#000000",
+      stroke: textbox.stroke as string | undefined,
+      strokeWidth: textbox.strokeWidth,
+    };
+
+    const response = await api.api.studio.patches.save.post({
+      captionSlug,
+      patchImage,
+      patchData,
+    });
+
+    if (!response.data || !response.data.success) {
+      throw new Error(response.data?.error || "Failed to save patch");
+    }
+  },
+
+  /**
+   * Sync text overlays for all mask regions with translatedText
+   *
+   * Creates Textbox objects on top of mask regions that have translated text.
+   * Uses PanelPachi's approach: smart font sizing and text wrapping.
+   */
+  // Text Object Popover actions
+  setSelectedTextbox: (textbox) => set({ selectedTextbox: textbox }),
+  setPopoverAnchor: (anchor) => set({ popoverAnchor: anchor }),
+
+  syncTextOverlays: () => {
+    const canvas = get().fabricCanvas;
+    if (!canvas) return;
+
+    const objects = canvas.getObjects();
+
+    // Find all existing textboxes with mask IDs to avoid duplicates
+    const existingTextboxes = new Set<string>();
+    for (const obj of objects) {
+      if (obj.type !== "textbox") {
+        continue;
+      }
+      const textbox = obj as ExtendedTextbox;
+      const maskId = textbox.data?.maskId;
+      if (maskId) {
+        existingTextboxes.add(maskId);
+      }
+    }
+
+    // Find all mask objects with translated text
+    for (const obj of objects) {
+      if (
+        obj.type !== "rect" &&
+        obj.type !== "ellipse" &&
+        obj.type !== "polygon"
+      ) {
+        continue;
+      }
+      const mask = obj as ExtendedRect | ExtendedEllipse | ExtendedPolygon;
+      const maskId = mask.id;
+      const translatedText = mask.data?.translatedText;
+
+      // Skip if no translated text or textbox already exists
+      if (!translatedText || !maskId || existingTextboxes.has(maskId)) {
+        continue;
+      }
+
+      // Get mask bounds
+      const bounds = obj.getBoundingRect();
+
+      // Use custom font size if provided, otherwise calculate using PanelPachi's algorithm
+      let fontSize: number;
+      if (mask.data?.customFontSize) {
+        fontSize = mask.data.customFontSize;
+      } else {
+        // fontSize = min(max(10, width * 0.05), min(width * 0.2, height * 0.2))
+        const minSize = 10;
+        const basedOnWidth = bounds.width * 0.05;
+        const maxByWidth = bounds.width * 0.2;
+        const maxByHeight = bounds.height * 0.2;
+        fontSize = Math.min(
+          Math.max(minSize, basedOnWidth),
+          Math.min(maxByWidth, maxByHeight),
+        );
+      }
+
+      // Create textbox with proper defaults
+      const textbox = new Textbox(translatedText, {
+        left: bounds.left,
+        top: bounds.top,
+        width: bounds.width,
+        fontSize,
+        fontFamily: "Anime Ace",
+        fontWeight: "normal",
+        fontStyle: "normal",
+        fill: "#000000",
+        stroke: "#FFFFFF", // White stroke (when enabled)
+        strokeWidth: 0, // No stroke by default
+        textAlign: "center",
+        originX: "left",
+        originY: "top",
+        selectable: true,
+        hasControls: true,
+        evented: true,
+        splitByGrapheme: true, // Better text wrapping
+        lockScalingY: false, // Allow vertical scaling
+        lockScalingFlip: false, // Allow flipping
+      }) as ExtendedTextbox;
+
+      // Assign unique ID
+      textbox.id = `textbox-${maskId}`;
+
+      // Store mask ID reference and ratio-based positioning
+      const canvasWidth = canvas.getWidth();
+      const canvasHeight = canvas.getHeight();
+      const patchData: TextPatchData = {
+        type: "text-patch",
+        captionSlug: mask.data?.captionSlug,
+        maskId, // Link to parent mask
+        originalText: mask.data?.originalText, // Preserve original text even after mask removed
+        leftRatio: bounds.left / canvasWidth,
+        topRatio: bounds.top / canvasHeight,
+        widthRatio: bounds.width / canvasWidth,
+        fontSizeRatio: fontSize / canvasWidth,
+      };
+      textbox.data = patchData;
+
+      // Add to canvas
+      canvas.add(textbox);
+
+      // Add to existing textboxes set
+      existingTextboxes.add(maskId);
+    }
+
+    canvas.renderAll();
   },
 
   // Utility
@@ -514,5 +909,6 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       currentPageIndex: 0,
       isLoadingChapter: false,
       polygonPoints: [],
+      isProcessingOCR: false,
     }),
 }));

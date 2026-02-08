@@ -9,6 +9,7 @@ import {
   usePolygonTool,
   PolygonFinishButton,
 } from "./tools";
+import type { ExtendedTextbox } from "../../types/fabric-extensions";
 
 /**
  * StudioCanvas - Main canvas area with Fabric.js (PanelPachi approach)
@@ -31,6 +32,9 @@ export function StudioCanvas() {
   const redo = useStudioStore((state) => state.redo);
   const clearHistory = useStudioStore((state) => state.clearHistory);
   const currentPageData = useStudioStore((state) => state.currentPageData);
+  const syncTextOverlays = useStudioStore((state) => state.syncTextOverlays);
+  const setSelectedTextbox = useStudioStore((state) => state.setSelectedTextbox);
+  const setPopoverAnchor = useStudioStore((state) => state.setPopoverAnchor);
 
   // Initialize Fabric canvas once on mount
   useEffect(() => {
@@ -39,6 +43,24 @@ export function StudioCanvas() {
     const container = containerRef.current;
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
+
+    // Preload fonts before creating canvas
+    const preloadFonts = async () => {
+      try {
+        await document.fonts.ready;
+        // Force load specific fonts
+        await Promise.all([
+          document.fonts.load('16px "Anime Ace"'),
+          document.fonts.load('16px "Nunito"'),
+          document.fonts.load('16px "ToonTime"'),
+        ]);
+        console.log("✅ Fonts loaded");
+      } catch (error) {
+        console.warn("⚠️ Font loading error (non-critical):", error);
+      }
+    };
+
+    preloadFonts();
 
     // Create canvas element imperatively (let Fabric.js fully own it)
     const canvasEl = document.createElement("canvas");
@@ -49,12 +71,68 @@ export function StudioCanvas() {
       width: containerWidth,
       height: containerHeight,
       isDrawingMode: false,
-      selection: false,
+      selection: true, // Enable click selection of objects
       backgroundColor: "#1f2937", // gray-800
       enableRetinaScaling: false, // Disable retina scaling to prevent coordinate issues
     });
 
     setFabricCanvas(canvas);
+
+    // Handle selection color changes
+    canvas.on("selection:created", (e) => {
+      const obj = e.selected?.[0];
+      if (obj && (obj.type === "rect" || obj.type === "ellipse" || obj.type === "polygon")) {
+        obj.set({ fill: "rgba(59, 130, 246, 0.3)" }); // Blue color when selected
+        canvas.renderAll();
+      }
+    });
+
+    canvas.on("selection:updated", (e) => {
+      // Deselect previous object - restore original color
+      const deselected = e.deselected?.[0];
+      if (deselected && (deselected.type === "rect" || deselected.type === "ellipse" || deselected.type === "polygon")) {
+        deselected.set({ fill: "rgba(236, 72, 153, 0.1)" }); // Original pink color
+      }
+
+      // Select new object - change to blue
+      const selected = e.selected?.[0];
+      if (selected && (selected.type === "rect" || selected.type === "ellipse" || selected.type === "polygon")) {
+        selected.set({ fill: "rgba(59, 130, 246, 0.3)" }); // Blue color
+      }
+
+      canvas.renderAll();
+    });
+
+    canvas.on("selection:cleared", (e) => {
+      const deselected = e.deselected?.[0];
+      if (deselected && (deselected.type === "rect" || deselected.type === "ellipse" || deselected.type === "polygon")) {
+        deselected.set({ fill: "rgba(236, 72, 153, 0.1)" }); // Original pink color
+        canvas.renderAll();
+      }
+    });
+
+    // Handle textbox clicks to open popover
+    canvas.on("mouse:down", (e) => {
+      const target = e.target;
+      if (!target || target.type !== "textbox") return;
+
+      const textbox = target as ExtendedTextbox;
+
+      // Only open popover for text-patch type textboxes
+      if (textbox.data?.type !== "text-patch") return;
+
+      // Calculate popover anchor position (top-right of textbox)
+      const bounds = textbox.getBoundingRect();
+      const canvasEl = canvas.getElement();
+      const rect = canvasEl.getBoundingClientRect();
+
+      const anchorX = rect.left + bounds.left + bounds.width;
+      const anchorY = rect.top + bounds.top;
+
+      // Set selected textbox and popover anchor
+      setSelectedTextbox(textbox);
+      setPopoverAnchor({ x: anchorX, y: anchorY });
+    });
 
     return () => {
       try {
@@ -111,6 +189,9 @@ export function StudioCanvas() {
 
           // Ensure background image stays at the back
           fabricCanvas.sendObjectToBack(fabricImg);
+
+          // Create text overlays for regions with translated text
+          syncTextOverlays();
 
           console.log("Mask data loaded after image");
         } catch (error) {

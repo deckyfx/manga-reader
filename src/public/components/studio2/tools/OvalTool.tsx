@@ -4,6 +4,7 @@ import { Ellipse as FabricEllipse } from "fabric";
 import { StudioToolType } from "../types";
 import type { StudioTool } from "../types";
 import { MaskingToolHandlerBase } from "./MaskingToolHandlerBase";
+import type { ExtendedEllipse, MaskData } from "../../../types/fabric-extensions";
 
 /**
  * Oval tool button component
@@ -37,7 +38,7 @@ export function OvalToolButton({ tool, onToggle }: OvalToolButtonProps) {
  * Oval tool handler class
  */
 export class OvalToolHandler extends MaskingToolHandlerBase<Ellipse> {
-  private currentEllipse: Ellipse | null = null;
+  private currentEllipse: ExtendedEllipse | null = null;
   private startPoint: { x: number; y: number } | null = null;
 
   /**
@@ -88,7 +89,17 @@ export class OvalToolHandler extends MaskingToolHandlerBase<Ellipse> {
       hasBorders: false,
       originX: "center",
       originY: "center",
-    });
+    }) as ExtendedEllipse;
+
+    // Assign unique ID
+    ellipse.id = `oval-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    // Assign mask data
+    const maskData: MaskData = { type: "mask" };
+    ellipse.data = maskData;
+
+    // Mark as drawing in progress (temporary property)
+    ellipse._isDrawing = true;
 
     this.canvas.add(ellipse);
     this.currentEllipse = ellipse;
@@ -121,16 +132,25 @@ export class OvalToolHandler extends MaskingToolHandlerBase<Ellipse> {
     if (!this.currentEllipse || !this.startPoint) return;
 
     const ellipse = this.currentEllipse;
+
+    // Remove drawing flag
+    delete ellipse._isDrawing;
+
     ellipse.set({
-      selectable: false,
-      evented: false,
-      hasControls: false,
-      hasBorders: false,
+      selectable: true,    // Make clickable
+      evented: true,       // Enable events
+      hasControls: false,  // No resize handles
+      hasBorders: false,   // No border
     });
 
     // Only save if ellipse is large enough
     if (ellipse.rx! > 5 && ellipse.ry! > 5) {
       this.onSaveHistory(ellipse);
+      // Manually trigger object:modified event to update region list
+      this.canvas.fire("object:modified", { target: ellipse });
+
+      // Automatically select the newly created ellipse to make it clickable
+      this.canvas.setActiveObject(ellipse);
     } else {
       this.canvas.remove(ellipse);
     }

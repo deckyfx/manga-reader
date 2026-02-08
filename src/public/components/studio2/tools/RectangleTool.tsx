@@ -4,6 +4,7 @@ import { Rect as FabricRect } from "fabric";
 import { StudioToolType } from "../types";
 import type { StudioTool } from "../types";
 import { MaskingToolHandlerBase } from "./MaskingToolHandlerBase";
+import type { ExtendedRect, MaskData } from "../../../types/fabric-extensions";
 
 /**
  * Rectangle tool button component
@@ -40,7 +41,7 @@ export function RectangleToolButton({
  * Rectangle tool handler class
  */
 export class RectangleToolHandler extends MaskingToolHandlerBase<Rect> {
-  private currentRect: Rect | null = null;
+  private currentRect: ExtendedRect | null = null;
   private startPoint: { x: number; y: number } | null = null;
 
   /**
@@ -91,12 +92,22 @@ export class RectangleToolHandler extends MaskingToolHandlerBase<Rect> {
       hasBorders: false,
       originX: "left",
       originY: "top",
-    });
+    }) as ExtendedRect;
+
+    // Assign unique ID
+    rect.id = `rect-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    // Assign mask data
+    const maskData: MaskData = { type: "mask" };
+    rect.data = maskData;
+
+    // Mark as drawing in progress (temporary property)
+    rect._isDrawing = true;
 
     this.canvas.add(rect);
     this.currentRect = rect;
     this.canvas.renderAll();
-  }
+  };
 
   /**
    * Handle mouse move - update rectangle size
@@ -115,7 +126,7 @@ export class RectangleToolHandler extends MaskingToolHandlerBase<Rect> {
 
     this.currentRect.set({ left, top, width, height });
     this.canvas.renderAll();
-  }
+  };
 
   /**
    * Handle mouse up - finalize rectangle
@@ -124,16 +135,25 @@ export class RectangleToolHandler extends MaskingToolHandlerBase<Rect> {
     if (!this.currentRect || !this.startPoint) return;
 
     const rect = this.currentRect;
+
+    // Remove drawing flag
+    delete rect._isDrawing;
+
     rect.set({
-      selectable: false,
-      evented: false,
-      hasControls: false,
-      hasBorders: false,
+      selectable: true,    // Make clickable
+      evented: true,       // Enable events
+      hasControls: false,  // No resize handles
+      hasBorders: false,   // No border
     });
 
     // Only save if rectangle is large enough
     if (rect.width! > 5 && rect.height! > 5) {
       this.onSaveHistory(rect);
+      // Manually trigger object:modified event to update region list
+      this.canvas.fire("object:modified", { target: rect });
+
+      // Automatically select the newly created rectangle to make it clickable
+      this.canvas.setActiveObject(rect);
     } else {
       this.canvas.remove(rect);
     }
@@ -141,7 +161,7 @@ export class RectangleToolHandler extends MaskingToolHandlerBase<Rect> {
     this.currentRect = null;
     this.startPoint = null;
     this.canvas.renderAll();
-  }
+  };
 
   /**
    * Attach event handlers to canvas

@@ -96,6 +96,14 @@ export const userCaptions = sqliteTable("user_captions", {
   patchImagePath: text("patch_image_path"), // /data/manga/{seriesId}/chapters/{chapterId}/patches/{slug}.png
   patchGeneratedAt: integer("patch_generated_at", { mode: "timestamp" }),
 
+  // NEW: Client-side patch data (Fabric.js Textbox configuration)
+  clientPatchData: text("client_patch_data"), // JSON string of Fabric.js Textbox config
+
+  // NEW: Distinguish client vs server patch generation
+  patchGeneratedBy: text("patch_generated_by", {
+    enum: ["client", "server"],
+  }),
+
   // Timestamps
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()

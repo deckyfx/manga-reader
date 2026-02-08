@@ -46,7 +46,7 @@ interface InpaintMaskResponse {
  * Error Response
  */
 interface ErrorResponse {
-  detail?: string;
+  detail?: string | { msg?: string }[];
   error?: string;
 }
 
@@ -86,25 +86,26 @@ export class MangaOCRAPI {
   private static async fetchAPI<T>(
     endpoint: string,
     options: RequestInit = {},
-    errorPrefix: string = "API request"
+    errorPrefix: string = "API request",
   ): Promise<T> {
     const [fetchError, response] = await catchError(
       fetch(`${this.basePath}${endpoint}`, {
         unix: this.socketPath,
         ...options,
-      })
+      }),
     );
 
     if (fetchError) {
-      const msg = fetchError instanceof Error
-        ? fetchError.message
-        : JSON.stringify(fetchError);
+      const msg =
+        fetchError instanceof Error
+          ? fetchError.message
+          : JSON.stringify(fetchError);
       throw new Error(`${errorPrefix} failed: ${msg}`);
     }
 
     if (!response.ok) {
       const [jsonError, error] = await catchError<ErrorResponse>(
-        response.json()
+        response.json(),
       );
 
       if (jsonError) {
@@ -112,10 +113,10 @@ export class MangaOCRAPI {
       }
 
       const detail = Array.isArray(error.detail)
-        ? error.detail.map((d: any) => d.msg ?? JSON.stringify(d)).join("; ")
+        ? error.detail.map((d) => d.msg ?? JSON.stringify(d)).join("; ")
         : error.detail;
       throw new Error(
-        `${errorPrefix} failed: ${detail || error.error || response.statusText}`
+        `${errorPrefix} failed: ${detail || error.error || response.statusText}`,
       );
     }
 
@@ -151,7 +152,7 @@ export class MangaOCRAPI {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image: imageBase64 }),
       },
-      "OCR scan"
+      "OCR scan",
     );
     return result.text;
   }
@@ -173,7 +174,7 @@ export class MangaOCRAPI {
         method: "POST",
         body: formData,
       },
-      "OCR scan upload"
+      "OCR scan upload",
     );
     return result.text;
   }
@@ -192,7 +193,7 @@ export class MangaOCRAPI {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image: imageBase64 }),
       },
-      "OCR scan"
+      "OCR scan",
     );
   }
 
@@ -221,7 +222,7 @@ export class MangaOCRAPI {
     strokeWidth: number,
     polygonPoints?: Array<{ x: number; y: number }>,
     cleanerThreshold: number = 200,
-    alphaBackground: boolean = false
+    alphaBackground: boolean = false,
   ): Promise<string> {
     const result = await this.fetchAPI<PatchResponse>(
       "/generate-patch",
@@ -241,7 +242,7 @@ export class MangaOCRAPI {
           alphaBackground,
         }),
       },
-      "Patch generation"
+      "Patch generation",
     );
     return result.patchImage;
   }
@@ -261,7 +262,7 @@ export class MangaOCRAPI {
       y: number;
       width?: number;
       height?: number;
-    }>
+    }>,
   ): Promise<string> {
     const result = await this.fetchAPI<MergePatchesResponse>(
       "/merge-patches",
@@ -273,7 +274,7 @@ export class MangaOCRAPI {
           patches,
         }),
       },
-      "Patch merging"
+      "Patch merging",
     );
     return result.mergedImage;
   }
@@ -296,7 +297,7 @@ export class MangaOCRAPI {
         method: "POST",
         body: formData,
       },
-      "Inpaint mask"
+      "Inpaint mask",
     );
     return result.cleanedImage;
   }
