@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from PIL import Image
 from loguru import logger
 
-from ..models import ImageRequest, ScanResponse
+from ..response_models import ImageRequest, ScanResponse
 from .. import state
 
 

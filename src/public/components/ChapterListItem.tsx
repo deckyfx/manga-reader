@@ -1,22 +1,14 @@
 import { Link } from "react-router-dom";
-
-/**
- * Chapter data interface
- */
-interface ChapterData {
-  slug: string;
-  title: string;
-  chapterNumber: string;
-}
+import type { Chapter } from "../../db/schema";
 
 /**
  * ChapterListItem props
  */
 interface ChapterListItemProps {
-  chapter: ChapterData;
+  chapter: Chapter;
   seriesSlug: string;
-  onDeleteClick: (chapter: ChapterData) => void;
-  onDownloadClick: (chapter: ChapterData) => void;
+  onDeleteClick: (chapter: Chapter) => void;
+  onDownloadClick: (chapter: Chapter) => void;
 }
 
 /**

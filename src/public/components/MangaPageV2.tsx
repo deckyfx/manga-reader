@@ -12,7 +12,10 @@ interface MangaPageV2Props {
   page: PageData;
   onPrevious?: () => void;
   onNext?: () => void;
-  showNotification?: (message: string, type: "success" | "error" | "info") => void;
+  showNotification?: (
+    message: string,
+    type: "success" | "error" | "info",
+  ) => void;
 }
 
 /**
@@ -21,12 +24,10 @@ interface MangaPageV2Props {
  * Renders the manga page image with click-to-navigate behavior.
  * Edit functionality has been moved to Studio (StudioPage).
  */
-export function MangaPageV2({
-  page,
-  onPrevious,
-  onNext,
-}: MangaPageV2Props) {
-  const [imageSrc, setImageSrc] = useState(`${page.originalImage}?t=${Date.now()}`);
+export function MangaPageV2({ page, onPrevious, onNext }: MangaPageV2Props) {
+  const [imageSrc, setImageSrc] = useState(
+    `${page.originalImage}?t=${Date.now()}`,
+  );
 
   /** Update image source when page prop changes */
   useEffect(() => {

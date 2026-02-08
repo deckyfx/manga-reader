@@ -8,7 +8,7 @@ from fastapi import HTTPException, UploadFile
 from PIL import Image
 from loguru import logger
 
-from ..models import ScanResponse
+from ..response_models import ScanResponse
 from .. import state
 
 

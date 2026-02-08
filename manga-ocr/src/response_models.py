@@ -40,7 +40,6 @@ class HealthResponse(BaseModel):
     """Response model for health check"""
     status: str
     model_loaded: bool
-    cleaner_mode: str = "opencv"
     build_id: str
 
 
@@ -84,3 +83,9 @@ class MergePatchesResponse(BaseModel):
     """Response model for merge patches"""
     status: str
     mergedImage: str  # Base64 encoded merged image
+
+
+class InpaintMaskResponse(BaseModel):
+    """Response model for /inpaint-mask endpoint."""
+    status: str
+    cleanedImage: str  # Base64 encoded PNG

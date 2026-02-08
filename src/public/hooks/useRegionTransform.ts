@@ -1,5 +1,9 @@
 import { useRef, useCallback } from "react";
-import { CanvasRenderer, type HandleType, type TransformPreview } from "../components/v2/CanvasRenderer";
+import {
+  CanvasRenderer,
+  type HandleType,
+  type TransformPreview,
+} from "../components/studio/CanvasRenderer";
 
 interface Point {
   x: number;
@@ -51,15 +55,72 @@ function getResizeConfig(handle: HandleType, snap: TransformSnapshot) {
   const right = x + width;
   const bottom = y + height;
 
-  const configs: Record<HandleType, { anchor: Point; moveX: boolean; moveY: boolean; flipX: boolean; flipY: boolean }> = {
-    nw: { anchor: { x: right, y: bottom }, moveX: true, moveY: true, flipX: true, flipY: true },
-    n:  { anchor: { x: x + width / 2, y: bottom }, moveX: false, moveY: true, flipX: false, flipY: true },
-    ne: { anchor: { x, y: bottom }, moveX: true, moveY: true, flipX: false, flipY: true },
-    e:  { anchor: { x, y: y + height / 2 }, moveX: true, moveY: false, flipX: false, flipY: false },
-    se: { anchor: { x, y }, moveX: true, moveY: true, flipX: false, flipY: false },
-    s:  { anchor: { x: x + width / 2, y }, moveX: false, moveY: true, flipX: false, flipY: false },
-    sw: { anchor: { x: right, y }, moveX: true, moveY: true, flipX: true, flipY: false },
-    w:  { anchor: { x: right, y: y + height / 2 }, moveX: true, moveY: false, flipX: true, flipY: false },
+  const configs: Record<
+    HandleType,
+    {
+      anchor: Point;
+      moveX: boolean;
+      moveY: boolean;
+      flipX: boolean;
+      flipY: boolean;
+    }
+  > = {
+    nw: {
+      anchor: { x: right, y: bottom },
+      moveX: true,
+      moveY: true,
+      flipX: true,
+      flipY: true,
+    },
+    n: {
+      anchor: { x: x + width / 2, y: bottom },
+      moveX: false,
+      moveY: true,
+      flipX: false,
+      flipY: true,
+    },
+    ne: {
+      anchor: { x, y: bottom },
+      moveX: true,
+      moveY: true,
+      flipX: false,
+      flipY: true,
+    },
+    e: {
+      anchor: { x, y: y + height / 2 },
+      moveX: true,
+      moveY: false,
+      flipX: false,
+      flipY: false,
+    },
+    se: {
+      anchor: { x, y },
+      moveX: true,
+      moveY: true,
+      flipX: false,
+      flipY: false,
+    },
+    s: {
+      anchor: { x: x + width / 2, y },
+      moveX: false,
+      moveY: true,
+      flipX: false,
+      flipY: false,
+    },
+    sw: {
+      anchor: { x: right, y },
+      moveX: true,
+      moveY: true,
+      flipX: true,
+      flipY: false,
+    },
+    w: {
+      anchor: { x: right, y: y + height / 2 },
+      moveX: true,
+      moveY: false,
+      flipX: true,
+      flipY: false,
+    },
   };
 
   return configs[handle];
@@ -90,7 +151,12 @@ export function useRegionTransform() {
    * Returns true if the event was consumed (handle hit or body hit on selected caption).
    */
   const handleMouseDown = useCallback(
-    (x: number, y: number, captions: CaptionData[], selectedCaptionId: string | null): boolean => {
+    (
+      x: number,
+      y: number,
+      captions: CaptionData[],
+      selectedCaptionId: string | null,
+    ): boolean => {
       if (!selectedCaptionId) return false;
 
       const caption = captions.find((c) => c.id === selectedCaptionId);
@@ -107,7 +173,9 @@ export function useRegionTransform() {
           y: caption.y,
           width: caption.width,
           height: caption.height,
-          polygonPoints: caption.polygonPoints ? caption.polygonPoints.map((p) => ({ ...p })) : undefined,
+          polygonPoints: caption.polygonPoints
+            ? caption.polygonPoints.map((p) => ({ ...p }))
+            : undefined,
         };
         startMouseRef.current = { x, y };
         previewRef.current = null;
@@ -125,7 +193,9 @@ export function useRegionTransform() {
           y: caption.y,
           width: caption.width,
           height: caption.height,
-          polygonPoints: caption.polygonPoints ? caption.polygonPoints.map((p) => ({ ...p })) : undefined,
+          polygonPoints: caption.polygonPoints
+            ? caption.polygonPoints.map((p) => ({ ...p }))
+            : undefined,
         };
         startMouseRef.current = { x, y };
         previewRef.current = null;
@@ -153,7 +223,10 @@ export function useRegionTransform() {
         y: snap.y + dy,
         width: snap.width,
         height: snap.height,
-        polygonPoints: snap.polygonPoints?.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+        polygonPoints: snap.polygonPoints?.map((p) => ({
+          x: p.x + dx,
+          y: p.y + dy,
+        })),
       };
       return;
     }
@@ -205,8 +278,16 @@ export function useRegionTransform() {
         const sx = newW / snap.width;
         const sy = newH / snap.height;
         // Anchor in the snapshot's coordinate space
-        const snapAnchorX = moveX ? (flipX ? snap.x + snap.width : snap.x) : snap.x;
-        const snapAnchorY = moveY ? (flipY ? snap.y + snap.height : snap.y) : snap.y;
+        const snapAnchorX = moveX
+          ? flipX
+            ? snap.x + snap.width
+            : snap.x
+          : snap.x;
+        const snapAnchorY = moveY
+          ? flipY
+            ? snap.y + snap.height
+            : snap.y
+          : snap.y;
 
         scaledPoints = snap.polygonPoints.map((p) => ({
           x: newX + (p.x - snapAnchorX) * sx + (moveX && flipX ? 0 : 0),
@@ -283,7 +364,12 @@ export function useRegionTransform() {
    * Returns a CSS cursor string, or null if not hovering anything transformable.
    */
   const getCursor = useCallback(
-    (x: number, y: number, captions: CaptionData[], selectedCaptionId: string | null): string | null => {
+    (
+      x: number,
+      y: number,
+      captions: CaptionData[],
+      selectedCaptionId: string | null,
+    ): string | null => {
       if (!selectedCaptionId) return null;
 
       const caption = captions.find((c) => c.id === selectedCaptionId);

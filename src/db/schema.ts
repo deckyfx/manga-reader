@@ -50,6 +50,27 @@ export const pages = sqliteTable("pages", {
 });
 
 /**
+ * Page Data table - stores mask data and other page-specific studio data
+ */
+export const pageData = sqliteTable("page_data", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  pageId: integer("page_id")
+    .notNull()
+    .references(() => pages.id, { onDelete: "cascade" }),
+  seriesSlug: text("series_slug").notNull(),
+  chapterSlug: text("chapter_slug").notNull(),
+  pageSlug: text("page_slug").notNull(),
+  maskData: text("mask_data"), // Fabric.js canvas JSON serialization
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`)
+    .$onUpdate(() => new Date()),
+});
+
+/**
  * User Captions table - stores OCR and translation results for manga bubbles
  */
 
@@ -92,5 +113,7 @@ export type Chapter = typeof chapters.$inferSelect;
 export type NewChapter = typeof chapters.$inferInsert;
 export type Page = typeof pages.$inferSelect;
 export type NewPage = typeof pages.$inferInsert;
+export type PageData = typeof pageData.$inferSelect;
+export type NewPageData = typeof pageData.$inferInsert;
 export type UserCaption = typeof userCaptions.$inferSelect;
 export type NewUserCaption = typeof userCaptions.$inferInsert;

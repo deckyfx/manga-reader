@@ -2,7 +2,7 @@ import { useRectangleTool } from "./useRectangleTool";
 import { usePolygonTool } from "./usePolygonTool";
 import { useOvalTool } from "./useOvalTool";
 
-export type DrawingToolType = "none" | "rectangle" | "polygon" | "oval";
+export type DrawingToolType = "none" | "rectangle" | "polygon" | "oval" | "brush";
 
 interface Point {
   x: number;

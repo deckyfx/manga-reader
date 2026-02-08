@@ -4,6 +4,7 @@ import { useSnackbar } from "../../hooks/useSnackbar";
 import { api } from "../../lib/api";
 import { StickyHeader } from "../../components/StickyHeader";
 import { catchError } from "../../../lib/error-handler";
+import type { Series } from "../../../db/schema";
 
 /**
  * Admin page - upload compressed chapter containing pages
@@ -12,7 +13,7 @@ export function UploadChapterPage() {
   const { seriesSlug } = useParams();
   const navigate = useNavigate();
   const { showSnackbar, SnackbarComponent } = useSnackbar();
-  const [series, setSeries] = useState<any>(null);
+  const [series, setSeries] = useState<Series | null>(null);
   const [chapterTitle, setChapterTitle] = useState("");
   const [chapterNumber, setChapterNumber] = useState("");
   const [loading, setLoading] = useState(false);

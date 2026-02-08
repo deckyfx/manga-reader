@@ -1,21 +1,11 @@
 import { Link, useNavigate } from "react-router-dom";
-
-/**
- * Series data interface
- */
-interface SeriesData {
-  id: number;
-  slug: string;
-  title: string;
-  coverArt?: string;
-  tags?: string;
-}
+import type { Series } from "../../db/schema";
 
 /**
  * SeriesListItem props
  */
 interface SeriesListItemProps {
-  series: SeriesData;
+  series: Series;
 }
 
 /**

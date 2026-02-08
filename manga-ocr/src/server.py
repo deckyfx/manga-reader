@@ -19,10 +19,11 @@ import uvicorn
 from fastapi import FastAPI, UploadFile, File
 from loguru import logger
 
-from .models import (
+from .response_models import (
     ScanResponse, HealthResponse, StatusResponse,
     ImageRequest, PatchRequest, PatchResponse,
     MergePatchesRequest, MergePatchesResponse,
+    InpaintMaskResponse,
 )
 from .state import BUILD_ID, start_model_loading
 from .handlers import (
@@ -32,6 +33,7 @@ from .handlers import (
     scan_image_upload,
     generate_patch,
     merge_patches,
+    inpaint_mask,
 )
 
 
@@ -66,6 +68,7 @@ async def lifespan(app: FastAPI):
     logger.info("   POST /scan-upload      - Scan image (file upload)")
     logger.info("   POST /generate-patch   - Generate translation patch")
     logger.info("   POST /merge-patches    - Merge patches onto page")
+    logger.info("   POST /inpaint-mask     - Inpaint with mask")
 
     yield
 
@@ -118,6 +121,15 @@ async def route_generate_patch(request: PatchRequest):
 async def route_merge_patches(request: MergePatchesRequest):
     """Merge patches onto page image."""
     return await merge_patches(request)
+
+
+@app.post("/inpaint-mask", response_model=InpaintMaskResponse)
+async def route_inpaint_mask(
+    image: UploadFile = File(...),
+    mask: UploadFile = File(...),
+):
+    """Inpaint page using binary mask."""
+    return await inpaint_mask(image, mask)
 
 
 def start_server(socket_path: str = "/app/sock/manga-ocr.sock", log_level: str = "info"):

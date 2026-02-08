@@ -7,7 +7,7 @@ import numpy as np
 from fastapi import HTTPException
 from loguru import logger
 
-from ..models import MergePatchesRequest, MergePatchesResponse
+from ..response_models import MergePatchesRequest, MergePatchesResponse
 from ..utils import decode_base64_image, encode_image_to_base64
 
 

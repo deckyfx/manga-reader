@@ -1,9 +1,16 @@
 import React, { useRef, useEffect, useCallback, useState } from "react";
 import { useCanvasCoords } from "../../hooks/useCanvasCoords";
 import { useCanvasImage } from "../../hooks/useCanvasImage";
-import { useDrawingTool, type DrawingToolType } from "../../hooks/useDrawingTool";
-import { useRegionTransform, type TransformResult } from "../../hooks/useRegionTransform";
-import { CanvasRenderer } from "../v2/CanvasRenderer";
+import {
+  useDrawingTool,
+  type DrawingToolType,
+} from "../../hooks/useDrawingTool";
+import {
+  useRegionTransform,
+  type TransformResult,
+} from "../../hooks/useRegionTransform";
+import { useFabricBrush } from "../../hooks/useFabricBrush";
+import { CanvasRenderer } from "./CanvasRenderer";
 import { api } from "../../lib/api";
 import { catchError } from "../../../lib/error-handler";
 import { getRegionPolygonPoints } from "../../../lib/region-types";
@@ -73,7 +80,7 @@ export function StudioCanvas({
   const [isCreating, setIsCreating] = React.useState(false);
 
   // Reuse V2 hooks
-  const { toImageCoords, toDisplayCoords } = useCanvasCoords(canvasRef);
+  const { toImageCoords, toDisplayCoords} = useCanvasCoords(canvasRef);
   const { loaded, imageElement, naturalWidth, naturalHeight } = useCanvasImage(
     canvasRef,
     imageSrc,
@@ -81,6 +88,14 @@ export function StudioCanvas({
   const drawing = useDrawingTool(drawingTool);
   const transform = useRegionTransform();
   const [canvasCursor, setCanvasCursor] = useState("default");
+
+  // Fabric.js brush for masking tool
+  const fabricBrush = useFabricBrush({
+    width: naturalWidth * zoom,
+    height: naturalHeight * zoom,
+    brushSize: 20, // Fixed brush size
+    enabled: drawingTool === "brush",
+  });
 
   // Reset drawing on tool change
   useEffect(() => {
@@ -166,7 +181,7 @@ export function StudioCanvas({
         imageElement,
         captions,
         selectedCaptionId,
-        drawingTool,
+        drawingTool === "brush" ? "none" : drawingTool,
         drawing.rectangleRenderData,
         drawing.polygonRenderData,
         patchImagesRef.current,
@@ -277,11 +292,36 @@ export function StudioCanvas({
     // Build Region from transform result
     let region: Region;
     if (result.shape === "polygon" && result.polygonPoints) {
-      region = { shape: "polygon", data: { x: result.x, y: result.y, width: result.width, height: result.height, points: result.polygonPoints } };
+      region = {
+        shape: "polygon",
+        data: {
+          x: result.x,
+          y: result.y,
+          width: result.width,
+          height: result.height,
+          points: result.polygonPoints,
+        },
+      };
     } else if (result.shape === "oval") {
-      region = { shape: "oval", data: { x: result.x, y: result.y, width: result.width, height: result.height } };
+      region = {
+        shape: "oval",
+        data: {
+          x: result.x,
+          y: result.y,
+          width: result.width,
+          height: result.height,
+        },
+      };
     } else {
-      region = { shape: "rectangle", data: { x: result.x, y: result.y, width: result.width, height: result.height } };
+      region = {
+        shape: "rectangle",
+        data: {
+          x: result.x,
+          y: result.y,
+          width: result.width,
+          height: result.height,
+        },
+      };
     }
 
     // Capture from source image (not canvas) to avoid overlay contamination
@@ -320,7 +360,12 @@ export function StudioCanvas({
 
     // When tool="none", try transform first on the selected caption
     if (drawingTool === "none" && !drawing.isDrawing) {
-      const consumed = transform.handleMouseDown(x, y, captions, selectedCaptionId);
+      const consumed = transform.handleMouseDown(
+        x,
+        y,
+        captions,
+        selectedCaptionId,
+      );
       if (consumed) return;
     }
 
@@ -416,6 +461,7 @@ export function StudioCanvas({
     <div ref={scrollRef} className="flex-1 overflow-auto bg-gray-800 relative">
       {/* Canvas container sized by zoom */}
       <div
+        className="relative"
         style={{
           width: naturalWidth * zoom,
           height: naturalHeight * zoom,
@@ -430,9 +476,9 @@ export function StudioCanvas({
             cursor: isCreating
               ? "wait"
               : transform.isActive()
-                ? (transform.mode === "resizing" && transform.activeHandle
+                ? transform.mode === "resizing" && transform.activeHandle
                   ? CanvasRenderer.getCursorForHandle(transform.activeHandle)
-                  : "move")
+                  : "move"
                 : drawingTool !== "none"
                   ? "crosshair"
                   : canvasCursor,
@@ -441,6 +487,19 @@ export function StudioCanvas({
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
         />
+
+        {/* Fabric.js Brush Canvas Overlay */}
+        {drawingTool === "brush" && loaded && (
+          <canvas
+            ref={fabricBrush.canvasRef}
+            className="absolute top-0 left-0 pointer-events-auto"
+            style={{
+              width: "100%",
+              height: "100%",
+              cursor: "crosshair",
+            }}
+          />
+        )}
       </div>
 
       {/* Polygon DONE button */}

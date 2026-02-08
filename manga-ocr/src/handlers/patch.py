@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from PIL import Image, ImageDraw, ImageFont
 from loguru import logger
 
-from ..models import PatchRequest, PatchResponse
+from ..response_models import PatchRequest, PatchResponse
 from .. import state
 from ..utils import decode_base64_image, encode_image_to_base64
 from ..patch_generator import clean_text_region

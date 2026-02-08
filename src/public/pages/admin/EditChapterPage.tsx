@@ -4,6 +4,7 @@ import { useSnackbar } from "../../hooks/useSnackbar";
 import { api } from "../../lib/api";
 import { StickyHeader } from "../../components/StickyHeader";
 import { catchError } from "../../../lib/error-handler";
+import type { Chapter } from "../../../db/schema";
 
 /**
  * Admin page - edit chapter details (title and slug)
@@ -12,7 +13,7 @@ export function EditChapterPage() {
   const { chapterSlug } = useParams();
   const navigate = useNavigate();
   const { showSnackbar, SnackbarComponent } = useSnackbar();
-  const [chapter, setChapter] = useState<any>(null);
+  const [chapter, setChapter] = useState<Chapter | null>(null);
   const [chapterTitle, setChapterTitle] = useState("");
   const [chapterNumber, setChapterNumber] = useState("");
   const [loading, setLoading] = useState(false);

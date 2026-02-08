@@ -1,4 +1,4 @@
-import { Elysia, t } from "elysia";
+import { Elysia, t, type Static } from "elysia";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { SeriesStore } from "../../stores/series-store";
@@ -7,12 +7,49 @@ import { envConfig } from "../../env-config";
 import { catchError } from "../../lib/error-handler";
 
 /**
+ * Series API schema definitions
+ */
+export const SeriesAPISchema = {
+  getSeries: {
+    query: t.Object({
+      searchName: t.Optional(t.String()),
+      hasChapters: t.Optional(t.Union([t.Boolean(), t.String()])),
+      mustHaveTags: t.Optional(t.String()), // Comma-separated
+      mustNotHaveTags: t.Optional(t.String()), // Comma-separated
+    }),
+  },
+  createSeries: {
+    body: t.Object({
+      title: t.String(),
+      synopsis: t.Optional(t.String()),
+      tags: t.Optional(t.String()),
+      coverArt: t.Optional(t.File({ type: "image" })),
+    }),
+  },
+  updateSeries: {
+    body: t.Object({
+      title: t.String(),
+      synopsis: t.Optional(t.String()),
+      tags: t.Optional(t.String()),
+      coverArt: t.Optional(t.File({ type: "image" })),
+    }),
+  },
+} as const;
+
+/**
+ * Export inferred types
+ */
+export type GetSeriesQuery = Static<typeof SeriesAPISchema.getSeries.query>;
+export type CreateSeriesBody = Static<typeof SeriesAPISchema.createSeries.body>;
+export type UpdateSeriesBody = Static<typeof SeriesAPISchema.updateSeries.body>;
+
+/**
  * Series API endpoints
  */
 export const seriesApi = new Elysia({ prefix: "/series" })
   .get(
     "/",
-    async ({ query }) => {
+    async ({ query }: { query: GetSeriesQuery }) => {
       // Parse filters from query parameters
       const filters: {
         searchName?: string;
@@ -67,12 +104,7 @@ export const seriesApi = new Elysia({ prefix: "/series" })
       };
     },
     {
-      query: t.Object({
-        searchName: t.Optional(t.String()),
-        hasChapters: t.Optional(t.Union([t.Boolean(), t.String()])),
-        mustHaveTags: t.Optional(t.String()), // Comma-separated
-        mustNotHaveTags: t.Optional(t.String()), // Comma-separated
-      }),
+      query: SeriesAPISchema.getSeries.query,
     },
   )
   .get("/:slug", async ({ params }) => {
@@ -143,7 +175,7 @@ export const seriesApi = new Elysia({ prefix: "/series" })
   })
   .post(
     "/",
-    async ({ body }) => {
+    async ({ body }: { body: CreateSeriesBody }) => {
       const { title, synopsis, tags, coverArt } = body;
 
       // Parse tags if provided (store as comma-separated string)
@@ -242,17 +274,12 @@ export const seriesApi = new Elysia({ prefix: "/series" })
       };
     },
     {
-      body: t.Object({
-        title: t.String(),
-        synopsis: t.Optional(t.String()),
-        tags: t.Optional(t.String()),
-        coverArt: t.Optional(t.File({ type: "image" })),
-      }),
+      body: SeriesAPISchema.createSeries.body,
     },
   )
   .put(
     "/:slug",
-    async ({ params, body }) => {
+    async ({ params, body }: { params: { slug: string }; body: UpdateSeriesBody }) => {
       // Find series by slug first
       const [findError, series] = await catchError(
         SeriesStore.findBySlug(params.slug),
@@ -368,12 +395,7 @@ export const seriesApi = new Elysia({ prefix: "/series" })
       };
     },
     {
-      body: t.Object({
-        title: t.String(),
-        synopsis: t.Optional(t.String()),
-        tags: t.Optional(t.String()),
-        coverArt: t.Optional(t.File({ type: "image" })),
-      }),
+      body: SeriesAPISchema.updateSeries.body,
     },
   )
   .delete("/:slug", async ({ params }) => {

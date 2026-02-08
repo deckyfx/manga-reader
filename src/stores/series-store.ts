@@ -46,6 +46,21 @@ export class SeriesStore {
   }
 
   /**
+   * Find series by chapter slug
+   * Useful for navigation when you have a chapter slug but need the series
+   */
+  static async findByChapterSlug(chapterSlug: string): Promise<Series | null> {
+    const result = await db
+      .select({ series })
+      .from(chapters)
+      .innerJoin(series, eq(chapters.seriesId, series.id))
+      .where(eq(chapters.slug, chapterSlug))
+      .limit(1);
+
+    return result[0]?.series ?? null;
+  }
+
+  /**
    * Get all series
    */
   static async findAll(): Promise<Series[]> {

@@ -165,6 +165,7 @@ const TOOL_OPTIONS: {
   { type: "rectangle", label: "Rectangle", icon: "fa-square" },
   { type: "oval", label: "Oval", icon: "fa-circle" },
   { type: "polygon", label: "Polygon", icon: "fa-draw-polygon" },
+  { type: "brush", label: "Masking Brush", icon: "fa-paintbrush" },
 ];
 
 interface DrawingToolSelectorProps {

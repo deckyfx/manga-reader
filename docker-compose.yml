@@ -39,10 +39,8 @@ services:
     environment:
       # Hugging Face API token (optional)
       - HF_TOKEN=${HF_TOKEN}
-      # Text cleaner mode: "lama" (AI inpainting) or "opencv" (fast traditional)
-      - CLEANER_MODE=${CLEANER_MODE:-lama}
     volumes:
-      # Persist Hugging Face model cache (~850MB manga-ocr + ~680MB Er0mangaInpaint)
+      # Persist Hugging Face model cache (~850MB manga-ocr + ~197MB AnimeLaMa)
       - ${DATA_DIR:-./data}/models:/root/.cache/huggingface/hub
       # Shared sockets directory (for IPC with main app)
       - ${DATA_DIR:-./data}/sock:/app/sock

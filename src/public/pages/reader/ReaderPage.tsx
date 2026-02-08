@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { MangaPageV2 } from "../../components/v2/MangaPageV2";
+import { MangaPageV2 } from "../../components/MangaPageV2";
 import { ChapterNavigation } from "../../components/ChapterNavigation";
 import { StickyHeader } from "../../components/StickyHeader";
 import { api } from "../../lib/api";
 import { catchError } from "../../../lib/error-handler";
 import { useSnackbar } from "../../hooks/useSnackbar";
+import type { Page, Chapter } from "../../../db/schema";
 
 /**
  * Reader page - displays a single manga page with navigation
@@ -22,9 +23,9 @@ export function ReaderPage() {
     createdAt: Date;
   } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [pagesCache, setPagesCache] = useState<any[]>([]);
+  const [pagesCache, setPagesCache] = useState<Page[]>([]);
   const [totalPages, setTotalPages] = useState(0);
-  const [chaptersCache, setChaptersCache] = useState<any[]>([]);
+  const [chaptersCache, setChaptersCache] = useState<Chapter[]>([]);
   const [chapterTitle, setChapterTitle] = useState("");
 
   const currentPage = parseInt(pageNum || "1");
@@ -129,7 +130,7 @@ export function ReaderPage() {
       setTotalPages(pages.length);
 
       // Set initial page
-      const page = pages.find((p: any) => p.orderNum === currentPage);
+      const page = pages.find((p) => p.orderNum === currentPage);
       if (page) {
         setPageData(page);
       }
@@ -155,7 +156,7 @@ export function ReaderPage() {
 
   // Update current page from cache (no API call)
   const updateCurrentPage = () => {
-    const page = pagesCache.find((p: any) => p.orderNum === currentPage);
+    const page = pagesCache.find((p) => p.orderNum === currentPage);
     if (page) {
       setPageData(page);
     }
@@ -168,11 +169,13 @@ export function ReaderPage() {
     } else {
       // At first page - try to go to previous chapter's last page
       const currentChapterIndex = chaptersCache.findIndex(
-        (ch: any) => ch.slug === chapterSlug,
+        (ch) => ch.slug === chapterSlug,
       );
 
       if (currentChapterIndex > 0) {
         const previousChapter = chaptersCache[currentChapterIndex - 1];
+
+        if (!previousChapter || !previousChapter.slug) return;
 
         // Load previous chapter's pages to get last page
         const [error, pagesResult] = await catchError(
@@ -203,7 +206,7 @@ export function ReaderPage() {
     } else {
       // At last page - try to go to next chapter's first page
       const currentChapterIndex = chaptersCache.findIndex(
-        (ch: any) => ch.slug === chapterSlug,
+        (ch) => ch.slug === chapterSlug,
       );
 
       if (
@@ -211,6 +214,8 @@ export function ReaderPage() {
         currentChapterIndex < chaptersCache.length - 1
       ) {
         const nextChapter = chaptersCache[currentChapterIndex + 1];
+
+        if (!nextChapter || !nextChapter.slug) return;
 
         // Load next chapter's pages to check if it has pages
         const [error, pagesResult] = await catchError(
@@ -244,9 +249,7 @@ export function ReaderPage() {
           <>
             <button
               onClick={() =>
-                navigate(
-                  `/studio/${chapterSlug}#${pageData?.slug || ""}`,
-                )
+                navigate(`/studio/${chapterSlug}#${pageData?.slug || ""}`)
               }
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition-colors whitespace-nowrap flex items-center gap-2"
               title="Open Studio editor"
@@ -288,7 +291,7 @@ export function ReaderPage() {
           {(() => {
             // Detect if at chapter boundaries
             const currentChapterIndex = chaptersCache.findIndex(
-              (ch: any) => ch.slug === chapterSlug,
+              (ch) => ch.slug === chapterSlug,
             );
             const hasPreviousChapter = currentChapterIndex > 0;
             const hasNextChapter =

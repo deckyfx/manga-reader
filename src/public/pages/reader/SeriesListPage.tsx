@@ -2,17 +2,14 @@ import { useState, useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { SeriesListItem } from "../../components/SeriesListItem";
-import { SeriesFilterPanel, type SeriesFilters } from "../../components/SeriesFilterPanel";
+import {
+  SeriesFilterPanel,
+  type SeriesFilters,
+} from "../../components/SeriesFilterPanel";
 import { StickyHeader } from "../../components/StickyHeader";
 import { catchError } from "../../../lib/error-handler";
-
-interface Series {
-  id: number;
-  title: string;
-  slug: string | null;
-  tags: string | null;
-  coverArt: string | null;
-}
+import type { GetSeriesQuery } from "../../../plugins/api/series";
+import type { Series } from "../../../db/schema";
 
 /**
  * Series List page - displays all available manga series with server-side filtering
@@ -33,7 +30,9 @@ export function SeriesListPage() {
       searchName: searchNameParam || "",
       hasChapters: hasChaptersParam === "true",
       mustHaveTags: mustHaveTagsParam ? mustHaveTagsParam.split(",") : [],
-      mustNotHaveTags: mustNotHaveTagsParam ? mustNotHaveTagsParam.split(",") : [],
+      mustNotHaveTags: mustNotHaveTagsParam
+        ? mustNotHaveTagsParam.split(",")
+        : [],
     };
   });
 
@@ -46,7 +45,7 @@ export function SeriesListPage() {
     setLoading(true);
 
     // Build query parameters
-    const queryParams: any = {};
+    const queryParams: Partial<GetSeriesQuery> = {};
 
     if (filters.searchName) {
       queryParams.searchName = filters.searchName;
@@ -68,7 +67,7 @@ export function SeriesListPage() {
     const [error, result] = await catchError(
       Object.keys(queryParams).length > 0
         ? api.api.series.get({ query: queryParams })
-        : api.api.series.get()
+        : api.api.series.get(),
     );
 
     if (error) {
@@ -102,7 +101,6 @@ export function SeriesListPage() {
       />
 
       <div className="container mx-auto px-4 py-8">
-
         {/* Filter Panel */}
         <SeriesFilterPanel
           onFilterChange={setFilters}
@@ -129,7 +127,7 @@ export function SeriesListPage() {
             {series
               .filter((s) => s.slug !== null) // Filter out series without slugs
               .map((s) => (
-                <SeriesListItem key={s.id} series={s as any} />
+                <SeriesListItem key={s.id} series={s} />
               ))}
           </div>
         )}

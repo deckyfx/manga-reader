@@ -5,6 +5,7 @@ import { useSnackbar } from "../../hooks/useSnackbar";
 import { ChapterListItem } from "../../components/ChapterListItem";
 import { StickyHeader } from "../../components/StickyHeader";
 import { catchError } from "../../../lib/error-handler";
+import type { Series, Chapter } from "../../../db/schema";
 
 /**
  * Series Detail page - displays series info and chapter list
@@ -15,12 +16,12 @@ export function SeriesDetailPage() {
   const { showSnackbar, SnackbarComponent } = useSnackbar();
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const deleteChapterDialogRef = useRef<HTMLDialogElement>(null);
-  const [series, setSeries] = useState<any>(null);
-  const [chapters, setChapters] = useState<any[]>([]);
+  const [series, setSeries] = useState<Series | null>(null);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [deletingChapter, setDeletingChapter] = useState(false);
-  const [chapterToDelete, setChapterToDelete] = useState<any>(null);
+  const [chapterToDelete, setChapterToDelete] = useState<Chapter | null>(null);
 
   useEffect(() => {
     if (seriesSlug) {
@@ -92,13 +93,13 @@ export function SeriesDetailPage() {
     deleteDialogRef.current?.close();
   };
 
-  const handleDeleteChapterClick = (chapter: any) => {
+  const handleDeleteChapterClick = (chapter: Chapter) => {
     setChapterToDelete(chapter);
     deleteChapterDialogRef.current?.showModal();
   };
 
   const handleDeleteChapterConfirm = async () => {
-    if (!chapterToDelete) return;
+    if (!chapterToDelete || !chapterToDelete.slug) return;
 
     setDeletingChapter(true);
 
@@ -132,7 +133,9 @@ export function SeriesDetailPage() {
     setChapterToDelete(null);
   };
 
-  const handleDownloadChapterClick = async (chapter: any) => {
+  const handleDownloadChapterClick = async (chapter: Chapter) => {
+    if (!series || !chapter.slug) return;
+
     showSnackbar("Preparing download...", "info");
 
     // Use Eden Treaty for type-safe API call
@@ -278,15 +281,17 @@ export function SeriesDetailPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4">
-              {chapters.map((chapter) => (
-                <ChapterListItem
-                  key={chapter.slug}
-                  chapter={chapter}
-                  seriesSlug={series.slug}
-                  onDeleteClick={handleDeleteChapterClick}
-                  onDownloadClick={handleDownloadChapterClick}
-                />
-              ))}
+              {chapters
+                .filter((c) => c.slug !== null)
+                .map((chapter) => (
+                  <ChapterListItem
+                    key={chapter.slug}
+                    chapter={chapter}
+                    seriesSlug={series.slug!}
+                    onDeleteClick={handleDeleteChapterClick}
+                    onDownloadClick={handleDownloadChapterClick}
+                  />
+                ))}
             </div>
           )}
         </div>

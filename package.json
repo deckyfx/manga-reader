@@ -34,6 +34,7 @@
     "drizzle-orm": "^0.45.1",
     "drizzle-typebox": "^0.3.3",
     "elysia": "^1.4.22",
+    "fabric": "^7.1.0",
     "fflate": "^0.8.2",
     "image-size": "^2.0.2",
     "react": "^19.2.4",
@@ -41,7 +42,8 @@
     "react-router-dom": "^7.13.0",
     "tailwindcss": "^4.1.18",
     "tesseract.js": "^7.0.0",
-    "tsuki-logger": "^0.0.32"
+    "tsuki-logger": "^0.0.32",
+    "zustand": "^5.0.11"
   },
   "overrides": {
     "@sinclair/typebox": "0.34.0"

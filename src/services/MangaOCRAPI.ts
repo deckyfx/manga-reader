@@ -35,6 +35,14 @@ interface MergePatchesResponse {
 }
 
 /**
+ * Inpaint Mask Response
+ */
+interface InpaintMaskResponse {
+  status: "success";
+  cleanedImage: string; // base64 encoded PNG
+}
+
+/**
  * Error Response
  */
 interface ErrorResponse {
@@ -268,6 +276,29 @@ export class MangaOCRAPI {
       "Patch merging"
     );
     return result.mergedImage;
+  }
+
+  /**
+   * Inpaint page using binary mask (AnimeLaMa)
+   *
+   * @param imageBlob - Page image blob
+   * @param maskBlob - Binary mask PNG (white=inpaint, black=preserve)
+   * @returns Base64 encoded cleaned image (with data:image/png;base64, prefix)
+   */
+  static async inpaintMask(imageBlob: Blob, maskBlob: Blob): Promise<string> {
+    const formData = new FormData();
+    formData.append("image", imageBlob, "page.png");
+    formData.append("mask", maskBlob, "mask.png");
+
+    const result = await this.fetchAPI<InpaintMaskResponse>(
+      "/inpaint-mask",
+      {
+        method: "POST",
+        body: formData,
+      },
+      "Inpaint mask"
+    );
+    return result.cleanedImage;
   }
 
   /**

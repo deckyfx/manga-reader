@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { StudioToolPanel } from "../../components/studio/StudioToolPanel";
-import { StudioCanvas } from "../../components/studio/StudioCanvas";
-import { StudioSidebar } from "../../components/studio/StudioSidebar";
+import { StudioToolPanel } from "./StudioToolPanel";
+import { StudioCanvas } from "./StudioCanvas";
+import { StudioSidebar } from "./StudioSidebar";
 import { useCanvasZoom } from "../../hooks/useCanvasZoom";
 import { useSnackbar } from "../../hooks/useSnackbar";
 import { api } from "../../lib/api";
