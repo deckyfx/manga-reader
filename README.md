@@ -20,44 +20,11 @@ A manga reader with OCR text extraction and translation capabilities.
 
 ## Showcase
 
-<div align="center">
-  <table>
-    <tr>
-      <td width="33%"><img src="screenshoot/01.png" alt="Series List" width="100%"/></td>
-      <td width="33%"><img src="screenshoot/02.png" alt="Series Detail" width="100%"/></td>
-      <td width="33%"><img src="screenshoot/03.png" alt="Chapter Gallery" width="100%"/></td>
-    </tr>
-    <tr>
-      <td width="33%"><img src="screenshoot/04.png" alt="Reader View" width="100%"/></td>
-      <td width="33%"><img src="screenshoot/05.png" alt="OCR & Translation" width="100%"/></td>
-      <td width="33%"><img src="screenshoot/06.png" alt="Admin Panel" width="100%"/></td>
-    </tr>
-  </table>
-</div>
+**See In Action:**
 
-## New Feature 0.0.6 Polygon form to path image and download from URL
+[![Manga Reader Studio Mode Demo](https://img.youtube.com/vi/Y1ZHw7I8qxA/maxresdefault.jpg)](https://www.youtube.com/watch?v=Y1ZHw7I8qxA)
 
-<div align="center">
-  <table>
-    <tr>
-      <td width="33%"><img src="screenshoot/10.png" alt="Add Page Dropdown" width="100%"/></td>
-      <td width="33%"><img src="screenshoot/11.png" alt="Download from URL Dialog" width="100%"/></td>
-      <td width="33%"><img src="screenshoot/12.png" alt="Download Result" width="100%"/></td>
-    </tr>
-  </table>
-</div>
-
-## New Feature 0.0.5 Patch Page and Image
-
-<div align="center">
-  <table>
-    <tr>
-      <td width="33%"><img src="screenshoot/07.png" alt="Patch Image" width="100%"/></td>
-      <td width="33%"><img src="screenshoot/08.png" alt="Patch Image Setup" width="100%"/></td>
-      <td width="33%"><img src="screenshoot/09.png" alt="Patch Page" width="100%"/></td>
-    </tr>
-  </table>
-</div>
+🎥 [Watch on YouTube](https://www.youtube.com/watch?v=Y1ZHw7I8qxA)
 
 ## Architecture
 
@@ -93,6 +60,7 @@ A manga reader with OCR text extraction and translation capabilities.
 ### Frontend
 - **[React](https://react.dev/)** - UI framework
 - **[Tailwind CSS](https://tailwindcss.com/)** - Utility-first CSS
+- **[Fabric.js](http://fabricjs.com/)** - HTML5 canvas library for Studio mode
 
 ### OCR & Translation
 - **[manga-ocr](https://github.com/kha-white/manga-ocr)** - Japanese manga OCR model
@@ -162,12 +130,19 @@ You can now access the app at `http://localhost:3000`
 
 - **[manga-ocr](https://github.com/kha-white/manga-ocr)** by [@kha-white](https://github.com/kha-white) - Optical character recognition (OCR) for Japanese manga. This project would not be possible without this amazing OCR model specifically trained for manga text extraction.
 
+- **[PanelPachi](https://github.com/firecomet/PanelPachi)** by [@firecomet](https://github.com/firecomet) - Inspiration for Studio mode workflow and advanced editing capabilities.
+
+- **[YOLOv8](https://github.com/ultralytics/ultralytics)** - Text region prediction model (ogkalu/manga-text-detector-yolov8s) for automatic text bubble detection.
+
+- **[AnimeLaMa](https://huggingface.co/dreMaz/AnimeMangaInpainting)** - Text cleaning and inpainting model (anime-big-lama) for professional-quality text removal.
+
 - **[Bun](https://bun.sh/)** - Fast all-in-one JavaScript runtime
 - **[ElysiaJS](https://elysiajs.com/)** - Web framework for Human
 - **[Drizzle ORM](https://orm.drizzle.team/)** - TypeScript ORM
 - **[FastAPI](https://fastapi.tiangolo.com/)** - Modern Python web framework
 - **[React](https://react.dev/)** - JavaScript library for user interfaces
 - **[Tailwind CSS](https://tailwindcss.com/)** - Utility-first CSS framework
+- **[Fabric.js](http://fabricjs.com/)** - HTML5 canvas library
 
 ## License
 

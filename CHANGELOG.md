@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2026-02-09
+
+### Added
+- **Studio Mode**: Complete overhaul of Editor mode, now called Studio
+  - Fabric.js-based canvas for advanced manipulation
+  - Auto-detect text regions using YOLOv8 model (ogkalu/manga-text-detector-yolov8s)
+  - Text region predictions with automatic selection generation
+  - Batch OCR & translation processing for multiple regions
+  - Advanced text object patch controls with Fabric.js
+  - Cleanup and inpaint capabilities using AnimeLaMa (anime-big-lama model)
+  - Professional text editing with real-time preview
+  - History controls (undo/redo)
+  - Zoom and pan controls for precise editing
+
+### Changed
+- **Database Schema**: Regenerated migrations with clean schema
+  - Region data now stored as JSON (discriminated union)
+  - Simplified caption storage structure
+- **Chapter Upload**: Made chapter title optional (defaults to "Chapter {number}")
+- **Python Models**: Display loaded models on server startup (OCR, cleaner, predict)
+- **Auto Cover Art**: First page automatically promoted as series cover if none exists
+
+### Fixed
+- Database schema mismatch (region field vs old x,y,width,height columns)
+- OCR batch processing with new region format
+
+### Technical
+- Added Fabric.js to tech stack for advanced canvas manipulation
+- Consolidated studio2/ components into unified studio/ directory
+- Removed ~9K lines of deprecated code from pre-Fabric.js implementation
+- Added Python model status monitoring and health checks
+
+### Credits
+- [PanelPachi](https://github.com/firecomet/PanelPachi) for the Studio mode inspiration
+- YOLOv8 (ogkalu/manga-text-detector-yolov8s) for text region prediction model
+- AnimeLaMa (anime-big-lama) for text cleaning and inpainting model
+
 ## [0.0.6] - 2026-02-06
 
 ### Added
@@ -125,6 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Drag-and-drop page reordering in gallery view
 - Edit mode for caption management
 
+[0.0.7]: https://github.com/deckyfx/manga-reader/releases/tag/v0.0.7
 [0.0.6]: https://github.com/deckyfx/manga-reader/releases/tag/v0.0.6
 [0.0.5]: https://github.com/deckyfx/manga-reader/releases/tag/v0.0.5
 [0.0.4]: https://github.com/deckyfx/manga-reader/releases/tag/v0.0.4
