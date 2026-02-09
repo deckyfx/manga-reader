@@ -116,6 +116,19 @@ export class PageStore {
   }
 
   /**
+   * Update page by ID
+   */
+  static async update(id: number, data: Partial<NewPage>): Promise<Page | null> {
+    const result = await db
+      .update(pages)
+      .set(data)
+      .where(eq(pages.id, id))
+      .returning();
+
+    return result[0] ?? null;
+  }
+
+  /**
    * Delete page by ID (cascades to captions)
    */
   static async delete(id: number): Promise<boolean> {

@@ -1,1 +1,0 @@
-ALTER TABLE `pages` ADD `mask_data` text;

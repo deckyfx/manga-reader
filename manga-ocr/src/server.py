@@ -6,8 +6,6 @@ Endpoints:
 - GET /status - Model readiness status
 - POST /scan - OCR image scan (base64 JSON)
 - POST /scan-upload - OCR image scan (file upload)
-- POST /generate-patch - Generate translation patch
-- POST /merge-patches - Merge patches onto page
 - POST /inpaint-mask - Inpaint with mask (AnimeLaMa)
 - POST /predict-regions - Predict text regions (YOLOv8l)
 """
@@ -23,8 +21,7 @@ from loguru import logger
 
 from .response_models import (
     ScanResponse, HealthResponse, StatusResponse,
-    ImageRequest, PatchRequest, PatchResponse,
-    MergePatchesRequest, MergePatchesResponse,
+    ImageRequest,
     InpaintMaskResponse,
     PredictRegionsRequest, PredictRegionsResponse,
 )
@@ -34,8 +31,6 @@ from .handlers import (
     status,
     scan_image_base64,
     scan_image_upload,
-    generate_patch,
-    merge_patches,
     inpaint_mask,
     predict_regions,
 )
@@ -70,8 +65,6 @@ async def lifespan(app: FastAPI):
     logger.info("   GET  /status           - Model readiness status")
     logger.info("   POST /scan             - Scan image (base64 JSON)")
     logger.info("   POST /scan-upload      - Scan image (file upload)")
-    logger.info("   POST /generate-patch   - Generate translation patch")
-    logger.info("   POST /merge-patches    - Merge patches onto page")
     logger.info("   POST /inpaint-mask     - Inpaint with mask")
     logger.info("   POST /predict-regions  - Predict text regions (YOLO)")
 
@@ -85,7 +78,7 @@ meta = get_project_metadata()
 app = FastAPI(
     title=meta.get("name", "Manga OCR Server"),
     description=meta.get("description", "OCR server for Japanese manga"),
-    version=meta.get("version", "0.0.6"),
+    version=meta.get("version", "0.0.7"),
     lifespan=lifespan,
 )
 
@@ -114,18 +107,6 @@ async def route_scan(request: ImageRequest):
 async def route_scan_upload(file: UploadFile = File(...)):
     """Scan image from file upload."""
     return await scan_image_upload(file)
-
-
-@app.post("/generate-patch", response_model=PatchResponse)
-async def route_generate_patch(request: PatchRequest):
-    """Generate patch image with translated text overlay."""
-    return await generate_patch(request)
-
-
-@app.post("/merge-patches", response_model=MergePatchesResponse)
-async def route_merge_patches(request: MergePatchesRequest):
-    """Merge patches onto page image."""
-    return await merge_patches(request)
 
 
 @app.post("/inpaint-mask", response_model=InpaintMaskResponse)

@@ -39,6 +39,7 @@ export interface MaskData {
   captionSlug?: string;     // Associated caption in database
   customFontSize?: number;  // Custom font size for text overlay
   clean?: boolean;          // Enable cleaning when running OCR
+  cleaned?: boolean;        // Flag: region has been cleaned (prevents re-OCR)
 }
 
 /**

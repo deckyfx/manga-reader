@@ -1,9 +1,10 @@
 import { Elysia, t } from "elysia";
-import { mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, rm, copyFile } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { unzipSync } from "fflate";
 import { ChapterStore } from "../../stores/chapter-store";
 import { PageStore } from "../../stores/page-store";
+import { SeriesStore } from "../../stores/series-store";
 import { envConfig } from "../../env-config";
 import { catchError, catchErrorSync } from "../../lib/error-handler";
 import { generateUniqueFilename } from "./helpers";
@@ -231,6 +232,51 @@ export const chaptersApi = new Elysia({ prefix: "/chapters" })
         }
 
         pages.push(page);
+      }
+
+      // Promote first page as series cover art if series has no cover
+      const [seriesError, seriesData] = await catchError(
+        SeriesStore.findById(seriesId),
+      );
+
+      if (!seriesError && seriesData && !seriesData.coverArt && pages.length > 0) {
+        const firstPage = pages[0];
+        if (firstPage) {
+          // Create series covers directory
+          const coversDir = join(
+            envConfig.MANGA_DIR,
+            seriesId.toString(),
+            "covers",
+          );
+
+          const [coverDirError] = await catchError(
+            mkdir(coversDir, { recursive: true }),
+          );
+
+          if (!coverDirError) {
+            // Copy first page to covers directory
+            const sourcePath = join(
+              envConfig.MANGA_DIR,
+              firstPage.originalImage.replace("/uploads/", ""),
+            );
+            const ext = extname(firstPage.originalImage);
+            const coverFilename = `cover${ext}`;
+            const coverPath = join(coversDir, coverFilename);
+
+            const [copyError] = await catchError(
+              copyFile(sourcePath, coverPath),
+            );
+
+            if (!copyError) {
+              // Update series with cover art path
+              const coverArtPath = `/uploads/${seriesId}/covers/${coverFilename}`;
+              await catchError(
+                SeriesStore.update(seriesId, { coverArt: coverArtPath }),
+              );
+              console.log(`✅ Set series cover art from first page: ${coverArtPath}`);
+            }
+          }
+        }
       }
 
       return {

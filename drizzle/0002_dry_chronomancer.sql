@@ -1,1 +1,0 @@
-ALTER TABLE `user_captions` ADD `polygon_points` text;

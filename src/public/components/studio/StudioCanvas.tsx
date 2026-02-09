@@ -1,532 +1,313 @@
-import React, { useRef, useEffect, useCallback, useState } from "react";
-import { useCanvasCoords } from "../../hooks/useCanvasCoords";
-import { useCanvasImage } from "../../hooks/useCanvasImage";
+import { useRef, useEffect } from "react";
+import { Canvas, FabricImage } from "fabric";
+import { useStudioStore } from "../../stores/studioFabricStore";
+import { catchError, catchErrorSync } from "../../../lib/error-handler";
+import { StudioToolType } from "./types";
 import {
-  useDrawingTool,
-  type DrawingToolType,
-} from "../../hooks/useDrawingTool";
-import {
-  useRegionTransform,
-  type TransformResult,
-} from "../../hooks/useRegionTransform";
-import { useFabricBrush } from "../../hooks/useFabricBrush";
-import { CanvasRenderer } from "./CanvasRenderer";
-import { api } from "../../lib/api";
-import { catchError } from "../../../lib/error-handler";
-import { getRegionPolygonPoints } from "../../../lib/region-types";
-import type { Region } from "../../../lib/region-types";
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-interface CaptionRect {
-  id: string;
-  captionId?: number;
-  captionSlug?: string;
-  shape: "rectangle" | "polygon" | "oval";
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  polygonPoints?: Point[];
-  capturedImage?: string;
-  rawText?: string;
-  translatedText?: string;
-  patchImagePath?: string;
-  patchGeneratedAt?: Date;
-}
-
-interface StudioCanvasProps {
-  pageId: number;
-  imageSrc: string;
-  captions: CaptionRect[];
-  selectedCaptionId: string | null;
-  drawingTool: DrawingToolType;
-  zoom: number;
-  onCaptionCreated: (caption: CaptionRect) => void;
-  onSelectCaption: (id: string | null) => void;
-  onCaptionMoved: () => void;
-  onNotification: (msg: string, type: "success" | "error" | "info") => void;
-  showOverlay: boolean;
-}
+  useBrushTool,
+  useRectangleTool,
+  useOvalTool,
+  usePolygonTool,
+  PolygonFinishButton,
+} from "./tools";
+import type { ExtendedTextbox } from "../../types/fabric-extensions";
 
 /**
- * StudioCanvas — Center column of the Studio layout.
+ * StudioCanvas - Main canvas area with Fabric.js (PanelPachi approach)
  *
- * Renders a zoomable canvas with drawing tools. Canvas internal resolution
- * always matches the image's natural resolution. CSS sizing controls zoom.
+ * Key difference: Image is INSIDE Fabric canvas, not a separate HTML element
+ * Uses modular tool system for clean separation of concerns
  */
-export function StudioCanvas({
-  pageId,
-  imageSrc,
-  captions,
-  selectedCaptionId,
-  drawingTool,
-  zoom,
-  onCaptionCreated,
-  onSelectCaption,
-  onCaptionMoved,
-  onNotification,
-  showOverlay,
-}: StudioCanvasProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number>(0);
-  const dirtyRef = useRef(true);
-  const patchImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
+export function StudioCanvas() {
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const [isCreating, setIsCreating] = React.useState(false);
-
-  // Reuse V2 hooks
-  const { toImageCoords, toDisplayCoords} = useCanvasCoords(canvasRef);
-  const { loaded, imageElement, naturalWidth, naturalHeight } = useCanvasImage(
-    canvasRef,
-    imageSrc,
+  // Zustand store
+  const imageSrc = useStudioStore((state) => state.imageSrc);
+  const tool = useStudioStore((state) => state.tool);
+  const zoom = useStudioStore((state) => state.zoom);
+  const isLoadingChapter = useStudioStore((state) => state.isLoadingChapter);
+  const fabricCanvas = useStudioStore((state) => state.fabricCanvas);
+  const setFabricCanvas = useStudioStore((state) => state.setFabricCanvas);
+  const saveHistory = useStudioStore((state) => state.saveHistory);
+  const undo = useStudioStore((state) => state.undo);
+  const redo = useStudioStore((state) => state.redo);
+  const clearHistory = useStudioStore((state) => state.clearHistory);
+  const currentPageData = useStudioStore((state) => state.currentPageData);
+  const setSelectedTextbox = useStudioStore(
+    (state) => state.setSelectedTextbox,
   );
-  const drawing = useDrawingTool(drawingTool);
-  const transform = useRegionTransform();
-  const [canvasCursor, setCanvasCursor] = useState("default");
+  const setPopoverAnchor = useStudioStore((state) => state.setPopoverAnchor);
 
-  // Fabric.js brush for masking tool
-  const fabricBrush = useFabricBrush({
-    width: naturalWidth * zoom,
-    height: naturalHeight * zoom,
-    brushSize: 20, // Fixed brush size
-    enabled: drawingTool === "brush",
-  });
-
-  // Reset drawing on tool change
+  // Initialize Fabric canvas once on mount
   useEffect(() => {
-    drawing.reset();
-  }, [drawingTool]);
+    if (!containerRef.current) return;
 
-  // Scroll canvas to selected caption's position
-  useEffect(() => {
-    if (!selectedCaptionId || !scrollRef.current) return;
-    const caption = captions.find((c) => c.id === selectedCaptionId);
-    if (!caption) return;
+    const container = containerRef.current;
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
 
-    const container = scrollRef.current;
-    const centerX = (caption.x + caption.width / 2) * zoom;
-    const centerY = (caption.y + caption.height / 2) * zoom;
+    // Preload fonts before creating canvas
+    const preloadFonts = async () => {
+      const [error] = await catchError((async () => {
+        await document.fonts.ready;
+        // Force load specific fonts
+        await Promise.all([
+          document.fonts.load('16px "Anime Ace"'),
+          document.fonts.load('16px "Nunito"'),
+          document.fonts.load('16px "ToonTime"'),
+        ]);
+      })());
 
-    container.scrollTo({
-      left: centerX - container.clientWidth / 2,
-      top: centerY - container.clientHeight / 2,
-      behavior: "smooth",
+      if (error) {
+        console.warn("⚠️ Font loading error (non-critical):", error);
+      }
+    };
+
+    preloadFonts();
+
+    // Create canvas element imperatively (let Fabric.js fully own it)
+    const canvasEl = document.createElement("canvas");
+    container.appendChild(canvasEl);
+
+    // Create Fabric canvas
+    const canvas = new Canvas(canvasEl, {
+      width: containerWidth,
+      height: containerHeight,
+      isDrawingMode: false,
+      selection: true, // Enable click selection of objects
+      backgroundColor: "#1f2937", // gray-800
+      enableRetinaScaling: false, // Disable retina scaling to prevent coordinate issues
     });
-  }, [selectedCaptionId]);
 
-  // Load patch images when captions change
-  useEffect(() => {
-    const currentMap = patchImagesRef.current;
-    const activeIds = new Set<string>();
+    setFabricCanvas(canvas);
 
-    for (const c of captions) {
-      if (!c.patchImagePath) continue;
-      activeIds.add(c.id);
-
-      // Build a cache key that includes generation timestamp
-      const cacheKey = c.patchGeneratedAt
-        ? `${c.patchImagePath}?t=${c.patchGeneratedAt.getTime()}`
-        : c.patchImagePath;
-
-      const existing = currentMap.get(c.id);
-      // Skip if already loaded with the same src + timestamp
-      if (existing && existing.dataset.cacheKey === cacheKey) continue;
-
-      const img = new Image();
-      img.dataset.cacheKey = cacheKey;
-      img.onload = () => {
-        dirtyRef.current = true;
-      };
-      img.src = cacheKey;
-      currentMap.set(c.id, img);
-    }
-
-    // Remove stale entries
-    for (const key of currentMap.keys()) {
-      if (!activeIds.has(key)) {
-        currentMap.delete(key);
+    // Handle selection color changes
+    canvas.on("selection:created", (e) => {
+      const obj = e.selected?.[0];
+      if (
+        obj &&
+        (obj.type === "rect" ||
+          obj.type === "ellipse" ||
+          obj.type === "polygon")
+      ) {
+        obj.set({ fill: "rgba(59, 130, 246, 0.3)" }); // Blue color when selected
+        canvas.renderAll();
       }
-    }
+    });
 
-    dirtyRef.current = true;
-  }, [captions]);
+    canvas.on("selection:updated", (e) => {
+      // Deselect previous object - restore original color
+      const deselected = e.deselected?.[0];
+      if (
+        deselected &&
+        (deselected.type === "rect" ||
+          deselected.type === "ellipse" ||
+          deselected.type === "polygon")
+      ) {
+        deselected.set({ fill: "rgba(236, 72, 153, 0.1)" }); // Original pink color
+      }
 
-  // ─── Render loop ──────────────────────────────
-  const scheduleRedraw = useCallback(() => {
-    dirtyRef.current = true;
-  }, []);
+      // Select new object - change to blue
+      const selected = e.selected?.[0];
+      if (
+        selected &&
+        (selected.type === "rect" ||
+          selected.type === "ellipse" ||
+          selected.type === "polygon")
+      ) {
+        selected.set({ fill: "rgba(59, 130, 246, 0.3)" }); // Blue color
+      }
 
+      canvas.renderAll();
+    });
+
+    canvas.on("selection:cleared", (e) => {
+      const deselected = e.deselected?.[0];
+      if (
+        deselected &&
+        (deselected.type === "rect" ||
+          deselected.type === "ellipse" ||
+          deselected.type === "polygon")
+      ) {
+        deselected.set({ fill: "rgba(236, 72, 153, 0.1)" }); // Original pink color
+        canvas.renderAll();
+      }
+    });
+
+    // Handle textbox clicks to open popover
+    canvas.on("mouse:down", (e) => {
+      const target = e.target;
+      if (!target || target.type !== "textbox") return;
+
+      const textbox = target as ExtendedTextbox;
+
+      // Only open popover for text-patch type textboxes
+      if (textbox.data?.type !== "text-patch") return;
+
+      // Calculate popover anchor position (top-right of textbox)
+      const bounds = textbox.getBoundingRect();
+      const canvasEl = canvas.getElement();
+      const rect = canvasEl.getBoundingClientRect();
+
+      const anchorX = rect.left + bounds.left + bounds.width;
+      const anchorY = rect.top + bounds.top;
+
+      // Set selected textbox and popover anchor
+      setSelectedTextbox(textbox);
+      setPopoverAnchor({ x: anchorX, y: anchorY });
+    });
+
+    return () => {
+      const [error] = catchErrorSync(() => {
+        // Dispose Fabric canvas first
+        canvas.dispose();
+        // Then remove the canvas element we created
+        if (canvasEl.parentNode === container) {
+          container.removeChild(canvasEl);
+        }
+      });
+
+      if (error) {
+        // Ignore cleanup errors - DOM may already be cleaned up
+        console.warn("Canvas disposal warning (safe to ignore):", error);
+      }
+
+      setFabricCanvas(null);
+    };
+  }, []); // Only run once on mount
+
+  // Load image into Fabric canvas when imageSrc changes
   useEffect(() => {
-    // Always mark dirty when deps change so we guarantee a redraw
-    // (fixes race where dirtyRef was consumed before imageElement loaded)
-    dirtyRef.current = true;
+    if (!fabricCanvas || !imageSrc || !containerRef.current) return;
 
-    const loop = () => {
-      rafRef.current = requestAnimationFrame(loop);
-      if (!dirtyRef.current) return;
-      dirtyRef.current = false;
+    // Clear canvas and history
+    fabricCanvas.clear();
+    fabricCanvas.backgroundColor = "#1f2937";
+    clearHistory();
 
-      const canvas = canvasRef.current;
-      if (!canvas || !imageElement) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
+    // Load image
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = async () => {
+      const fabricImg = new FabricImage(img);
 
-      CanvasRenderer.redraw(
-        ctx,
-        imageElement,
-        captions,
-        selectedCaptionId,
-        drawingTool === "brush" ? "none" : drawingTool,
-        drawing.rectangleRenderData,
-        drawing.polygonRenderData,
-        patchImagesRef.current,
-        drawing.ovalRenderData,
-        transform.preview,
-        showOverlay,
-      );
+      // Resize canvas to match image dimensions (full size)
+      fabricCanvas.setDimensions({
+        width: img.width,
+        height: img.height,
+      });
+
+      // Add image at natural size (no scaling)
+      fabricImg.scale(1);
+      fabricCanvas.add(fabricImg);
+      fabricCanvas.centerObject(fabricImg);
+
+      // Make image non-interactive and exclude from history
+      fabricImg.selectable = false;
+      fabricImg.evented = false;
+      fabricImg.excludeFromExport = true; // Don't include in toJSON()
+
+      // Load mask data if available (after image is loaded)
+      if (currentPageData?.maskData) {
+        const maskData = currentPageData.maskData; // Type narrowing
+        const [error] = await catchError((async () => {
+          const maskJSON = JSON.parse(maskData);
+          await fabricCanvas.loadFromJSON(maskJSON);
+
+          // Ensure background image stays at the back
+          fabricCanvas.sendObjectToBack(fabricImg);
+
+          // Note: Text objects are created manually by user clicking "Create Text Object"
+          // We only load mask regions here, not text overlays
+
+          console.log("Mask data loaded after image");
+        })());
+
+        if (error) {
+          console.error("Failed to load mask data:", error);
+        }
+      }
+
+      fabricCanvas.renderAll();
     };
 
-    rafRef.current = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [
-    imageElement,
-    captions,
-    selectedCaptionId,
-    drawingTool,
-    drawing.rectangleRenderData,
-    drawing.polygonRenderData,
-    drawing.ovalRenderData,
-    showOverlay,
-  ]);
-
-  // ─── Drawing completion ───────────────────────
-  const createCaptionFromDrawing = async (drawResult: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    points?: Point[];
-  }) => {
-    const { x, y, width, height, points } = drawResult;
-    if (!imageElement) return;
-
-    // Build Region based on active drawing tool
-    let region: Region;
-    if (drawingTool === "polygon" && points) {
-      region = { shape: "polygon", data: { x, y, width, height, points } };
-    } else if (drawingTool === "oval") {
-      region = { shape: "oval", data: { x, y, width, height } };
-    } else {
-      region = { shape: "rectangle", data: { x, y, width, height } };
-    }
-
-    // Derive polygon points for capture clipping
-    const clipPoints = getRegionPolygonPoints(region);
-
-    // Capture from source image (not canvas) to avoid overlay contamination
-    const capturedImage = CanvasRenderer.captureRegion(
-      imageElement,
-      x,
-      y,
-      width,
-      height,
-      clipPoints,
-    );
-    if (!capturedImage) return;
-
-    setIsCreating(true);
-
-    const [error, result] = await catchError(
-      api.api.studio.ocr.post({
-        pageId,
-        capturedImage,
-        region,
-      }),
-    );
-
-    setIsCreating(false);
-
-    if (error) {
-      onNotification("Failed to create caption", "error");
-      return;
-    }
-
-    if (!result.data?.success || !result.data.captionId) {
-      onNotification("Failed to create caption", "error");
-      return;
-    }
-
-    // Show warning if OCR/translation failed (caption is still saved)
-    if (result.data.warning) {
-      onNotification(result.data.warning, "error");
-    }
-
-    const newCaption: CaptionRect = {
-      id: `caption-${result.data.captionId}`,
-      captionId: result.data.captionId,
-      captionSlug: result.data.captionSlug || undefined,
-      shape: region.shape,
-      x,
-      y,
-      width,
-      height,
-      polygonPoints: clipPoints,
-      capturedImage,
-      rawText: result.data.rawText,
-      translatedText: result.data.translatedText || undefined,
+    img.onerror = (err) => {
+      console.error("Failed to load image:", err);
     };
 
-    onCaptionCreated(newCaption);
-    scheduleRedraw();
-  };
+    img.src = imageSrc;
+  }, [fabricCanvas, imageSrc, clearHistory]);
+  // Note: currentPageData deliberately excluded from dependencies
+  // We only want to reload when imageSrc changes (new page)
+  // currentPageData in dependencies caused re-render on every update
 
-  // ─── Persist region update after move/resize ──
-  const persistRegionUpdate = async (result: TransformResult) => {
-    if (!imageElement || !result.captionSlug) return;
+  // Activate tools using modular tool hooks
+  useBrushTool(fabricCanvas, tool === StudioToolType.BRUSH, saveHistory);
 
-    // Build Region from transform result
-    let region: Region;
-    if (result.shape === "polygon" && result.polygonPoints) {
-      region = {
-        shape: "polygon",
-        data: {
-          x: result.x,
-          y: result.y,
-          width: result.width,
-          height: result.height,
-          points: result.polygonPoints,
-        },
-      };
-    } else if (result.shape === "oval") {
-      region = {
-        shape: "oval",
-        data: {
-          x: result.x,
-          y: result.y,
-          width: result.width,
-          height: result.height,
-        },
-      };
-    } else {
-      region = {
-        shape: "rectangle",
-        data: {
-          x: result.x,
-          y: result.y,
-          width: result.width,
-          height: result.height,
-        },
-      };
-    }
+  useRectangleTool(
+    fabricCanvas,
+    tool === StudioToolType.RECTANGLE,
+    saveHistory,
+  );
 
-    // Capture from source image (not canvas) to avoid overlay contamination
-    const clipPoints = getRegionPolygonPoints(region);
-    const capturedImage = CanvasRenderer.captureRegion(
-      imageElement,
-      result.x,
-      result.y,
-      result.width,
-      result.height,
-      clipPoints,
+  useOvalTool(fabricCanvas, tool === StudioToolType.OVAL, saveHistory);
+
+  usePolygonTool(fabricCanvas, tool === StudioToolType.POLYGON, saveHistory);
+
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+Z or Cmd+Z for undo
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      // Ctrl+Shift+Z or Cmd+Shift+Z for redo
+      // Also Ctrl+Y or Cmd+Y for redo
+      if (
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "z") ||
+        ((e.ctrlKey || e.metaKey) && e.key === "y")
+      ) {
+        e.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [undo, redo]);
+
+  // Conditional rendering instead of early return (React Rules of Hooks)
+  if (isLoadingChapter) {
+    return (
+      <div className="flex-1 overflow-auto bg-gray-800">
+        <div className="flex items-center justify-center h-full">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-pink-500 mx-auto mb-4" />
+            <p className="text-gray-400">Loading chapter...</p>
+          </div>
+        </div>
+      </div>
     );
-    if (!capturedImage) {
-      onNotification("Failed to capture region image", "error");
-      return;
-    }
-
-    const [error] = await catchError(
-      api.api.studio.captions({ slug: result.captionSlug }).region.patch({
-        region,
-        capturedImage,
-      }),
-    );
-
-    if (error) {
-      onNotification("Failed to update region", "error");
-      return;
-    }
-
-    onCaptionMoved();
-  };
-
-  // ─── Mouse handlers ───────────────────────────
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const { x, y } = toImageCoords(e);
-
-    // When tool="none", try transform first on the selected caption
-    if (drawingTool === "none" && !drawing.isDrawing) {
-      const consumed = transform.handleMouseDown(
-        x,
-        y,
-        captions,
-        selectedCaptionId,
-      );
-      if (consumed) return;
-    }
-
-    // Hit test for caption selection
-    if (selectedCaptionId !== null && !drawing.isDrawing) {
-      const hitId = CanvasRenderer.hitTestCaption(x, y, captions);
-      if (hitId) {
-        onSelectCaption(hitId);
-        return;
-      }
-      onSelectCaption(null);
-    }
-
-    const isDoubleClick = e.detail === 2;
-
-    if (!drawing.isDrawing && !isDoubleClick) {
-      const hitId = CanvasRenderer.hitTestCaption(x, y, captions);
-      if (hitId) {
-        onSelectCaption(hitId);
-        return;
-      }
-    }
-
-    if (drawingTool === "none") return;
-    drawing.handleMouseDown(x, y, isDoubleClick);
-    scheduleRedraw();
-  };
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const { x, y } = toImageCoords(e);
-
-    // Transform in progress — update preview
-    if (transform.isActive()) {
-      transform.handleMouseMove(x, y);
-      scheduleRedraw();
-      return;
-    }
-
-    // Update cursor when tool="none" (lightweight, no redraw)
-    if (drawingTool === "none" && !drawing.isDrawing) {
-      const cursor = transform.getCursor(x, y, captions, selectedCaptionId);
-      setCanvasCursor(cursor ?? "default");
-    }
-
-    // Drawing in progress
-    if (drawing.isDrawing) {
-      drawing.handleMouseMove(x, y);
-      scheduleRedraw();
-    }
-  };
-
-  const handleMouseUp = async () => {
-    // Transform in progress — finish and persist
-    if (transform.isActive()) {
-      const result = transform.handleMouseUp();
-      scheduleRedraw();
-      if (result) {
-        await persistRegionUpdate(result);
-      }
-      return;
-    }
-
-    // Drawing in progress
-    if (!drawing.isDrawing) return;
-    const drawResult = drawing.handleMouseUp();
-    scheduleRedraw();
-    if (!drawResult) return;
-    await createCaptionFromDrawing(drawResult);
-  };
-
-  // ─── Polygon DONE ─────────────────────────────
-  const handlePolygonDone = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const result = drawing.finishPolygon();
-    scheduleRedraw();
-    if (result) {
-      await createCaptionFromDrawing(result);
-    }
-  };
-
-  // Compute polygon DONE button position
-  const polygonFirstPoint =
-    drawingTool === "polygon" &&
-    drawing.polygonRenderData &&
-    drawing.polygonRenderData.points.length > 0
-      ? toDisplayCoords(
-          drawing.polygonRenderData.points[0]!.x,
-          drawing.polygonRenderData.points[0]!.y,
-        )
-      : null;
+  }
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-auto bg-gray-800 relative">
-      {/* Canvas container sized by zoom */}
+    <div className="flex-1 overflow-auto bg-gray-800 relative flex items-start justify-center p-4">
       <div
-        className="relative"
+        id="studio-canvas-container"
+        ref={containerRef}
+        className="inline-block"
         style={{
-          width: naturalWidth * zoom,
-          height: naturalHeight * zoom,
+          transform: `scale(${zoom})`,
+          transformOrigin: "center",
+          transition: "transform 0.2s",
         }}
-      >
-        <canvas
-          ref={canvasRef}
-          className="block"
-          style={{
-            width: "100%",
-            height: "100%",
-            cursor: isCreating
-              ? "wait"
-              : transform.isActive()
-                ? transform.mode === "resizing" && transform.activeHandle
-                  ? CanvasRenderer.getCursorForHandle(transform.activeHandle)
-                  : "move"
-                : drawingTool !== "none"
-                  ? "crosshair"
-                  : canvasCursor,
-          }}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-        />
+      />
 
-        {/* Fabric.js Brush Canvas Overlay */}
-        {drawingTool === "brush" && loaded && (
-          <canvas
-            ref={fabricBrush.canvasRef}
-            className="absolute top-0 left-0 pointer-events-auto"
-            style={{
-              width: "100%",
-              height: "100%",
-              cursor: "crosshair",
-            }}
-          />
-        )}
-      </div>
-
-      {/* Polygon DONE button */}
-      {polygonFirstPoint && (
-        <button
-          onClick={handlePolygonDone}
-          onMouseDown={(e) => e.stopPropagation()}
-          className="absolute bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded-lg font-semibold shadow-lg z-50"
-          style={{
-            left: polygonFirstPoint.left - 30,
-            top: polygonFirstPoint.top - 35,
-            pointerEvents: "auto",
-          }}
-        >
-          DONE
-        </button>
-      )}
-
-      {/* Loading spinner while creating caption */}
-      {isCreating && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-white rounded-lg shadow-2xl border-2 border-blue-500 px-4 py-2 z-50 flex items-center gap-3">
-          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500" />
-          <span className="text-sm text-gray-700 font-medium">
-            Creating region...
-          </span>
-        </div>
-      )}
+      {/* Polygon finish button */}
+      <PolygonFinishButton />
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { SeriesListPage } from "./pages/reader/SeriesListPage";
 import { SeriesDetailPage } from "./pages/reader/SeriesDetailPage";
 import { ChapterGalleryPage } from "./pages/reader/ChapterGalleryPage";
 import { ReaderPage } from "./pages/reader/ReaderPage";
-import { FabricStudioPage } from "./components/studio2/FabricStudioPage";
+import { FabricStudioPage } from "./components/studio/FabricStudioPage";
 import { CreateSeriesPage } from "./pages/admin/CreateSeriesPage";
 import { EditSeriesPage } from "./pages/admin/EditSeriesPage";
 import { UploadChapterPage } from "./pages/admin/UploadChapterPage";
@@ -37,10 +37,7 @@ function App() {
         />
 
         {/* Studio Route */}
-        <Route
-          path="/studio/:chapterSlug"
-          element={<FabricStudioPage />}
-        />
+        <Route path="/studio/:chapterSlug" element={<FabricStudioPage />} />
 
         {/* Admin Routes */}
         <Route path="/a/create" element={<CreateSeriesPage />} />

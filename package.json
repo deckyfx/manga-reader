@@ -1,6 +1,6 @@
 {
   "name": "manga-reader",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "A modern manga/manga reader with real-time OCR text extraction and translation capabilities",
   "module": "src/index.ts",
   "type": "module",

@@ -7,9 +7,10 @@ import {
   type FabricObject,
 } from "fabric";
 import { api } from "../lib/api";
+import { catchError, catchErrorSync } from "../../lib/error-handler";
 import type { Chapter, Page, Series, PageData } from "../../db/schema";
-import type { StudioTool } from "../components/studio2/types";
-import { ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "../components/studio2/types";
+import type { StudioTool } from "../components/studio/types";
+import { ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "../components/studio/types";
 import type {
   ExtendedEllipse,
   ExtendedPolygon,
@@ -98,8 +99,6 @@ interface StudioState {
   saveHistory: (obj: FabricObject) => void;
   undo: () => void;
   redo: () => void;
-  canUndo: () => boolean;
-  canRedo: () => boolean;
   clearHistory: () => void;
   hasUnsavedChanges: () => boolean;
   hasMaskData: () => boolean;
@@ -111,30 +110,19 @@ interface StudioState {
   ) => Promise<void>;
   loadPageData: (chapterSlug: string, pageSlug: string) => Promise<void>;
   setCurrentPageIndex: (index: number) => void;
-  nextPage: () => void;
-  prevPage: () => void;
-  goToPage: (pageSlug: string) => void;
 
   // Inpaint actions
   exportMask: () => Promise<Blob>;
   inpaintPage: () => Promise<void>;
 
-  // OCR + Text Patch actions
-  cropRegion: (region: Region) => Promise<string | null>;
-  createTextPatch: (config: {
-    text: string;
-    bounds: BoundingBox;
-    captionSlug?: string;
-    fontFamily?: string;
-    fontWeight?: FontWeight;
-    fontStyle?: FontStyle;
-    fill?: string;
-    stroke?: string;
-    strokeWidth?: number;
-  }) => void;
+  // Export text patch
   exportTextPatch: (textbox: ExtendedTextbox) => string | null;
-  savePatch: (captionSlug: string, textbox: ExtendedTextbox) => Promise<void>;
-  syncTextOverlays: () => void;
+
+  // Create text object from region
+  createTextObjectFromRegion: (regionObject: FabricObject) => void;
+
+  // Merge & Save
+  mergeAndSave: () => Promise<void>;
 
   // Utility
   reset: () => void;
@@ -253,16 +241,6 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     set({ canvasHistory, redoStack });
   },
 
-  canUndo: () => {
-    const { canvasHistory } = get();
-    return canvasHistory.length > 0;
-  },
-
-  canRedo: () => {
-    const { redoStack } = get();
-    return redoStack.length > 0;
-  },
-
   clearHistory: () => {
     set({ canvasHistory: [], redoStack: [] });
   },
@@ -281,7 +259,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   loadChapterData: async (chapterSlug, initialPageSlug) => {
     set({ isLoadingChapter: true });
 
-    try {
+    const [error] = await catchError((async () => {
       // Fetch all studio data in one request
       const dataRes = await api.api.studio
         .data({ chapterSlug })
@@ -326,14 +304,16 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       }
 
       // Note: Mask data is loaded in StudioCanvas after image loads
-    } catch (error) {
+    })());
+
+    if (error) {
       console.error("Failed to load studio data:", error);
       set({ isLoadingChapter: false });
     }
   },
 
   loadPageData: async (chapterSlug, pageSlug) => {
-    try {
+    const [error] = await catchError((async () => {
       // Fetch page data
       const dataRes = await api.api.studio
         .data({ chapterSlug })
@@ -350,7 +330,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         pageDataId: pageData?.id,
         currentPageData: pageData || null,
       });
-    } catch (error) {
+    })());
+
+    if (error) {
       console.error("Failed to reload page data:", error);
     }
   },
@@ -366,28 +348,6 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           imageLoaded: false,
         });
       }
-    }
-  },
-
-  nextPage: () => {
-    const { currentPageIndex, pages } = get();
-    if (currentPageIndex < pages.length - 1) {
-      get().setCurrentPageIndex(currentPageIndex + 1);
-    }
-  },
-
-  prevPage: () => {
-    const { currentPageIndex } = get();
-    if (currentPageIndex > 0) {
-      get().setCurrentPageIndex(currentPageIndex - 1);
-    }
-  },
-
-  goToPage: (pageSlug) => {
-    const { pages } = get();
-    const index = pages.findIndex((p) => p.slug === pageSlug);
-    if (index !== -1) {
-      get().setCurrentPageIndex(index);
     }
   },
 
@@ -490,7 +450,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
     set({ isInpainting: true });
 
-    try {
+    const [error] = await catchError((async () => {
       // Export mask
       const maskBlob = await get().exportMask();
 
@@ -521,6 +481,18 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         throw new Error(response.data?.error || "Inpaint failed");
       }
 
+      // Save non-brush objects (mask regions with data)
+      const objects = canvas.getObjects();
+      const regionsToPreserve = objects.filter(
+        (obj) =>
+          obj.type !== "path" && // Remove brush strokes
+          obj.type !== "image" && // Remove old image (will be reloaded)
+          (obj.type === "rect" ||
+            obj.type === "ellipse" ||
+            obj.type === "polygon" ||
+            obj.type === "textbox"),
+      );
+
       // Clear canvas
       canvas.clear();
       canvas.backgroundColor = "#1f2937";
@@ -534,184 +506,29 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       const newImageSrc = `${currentPage.originalImage}?t=${timestamp}`;
       set({ imageSrc: newImageSrc, imageLoaded: false });
 
-      // Force reload
+      // Force reload and restore regions
       setTimeout(() => {
         set({ imageLoaded: true });
+
+        // Re-add preserved regions after image loads
+        setTimeout(() => {
+          regionsToPreserve.forEach((obj) => canvas.add(obj));
+          canvas.renderAll();
+        }, 50);
       }, 100);
-    } catch (error) {
+    })());
+
+    if (error) {
       console.error("❌ Inpaint error:", error);
       alert(
-        `Inpainting failed: ${error instanceof Error ? error.message : String(error)}`,
+        `Inpainting failed: ${error.message}`,
       );
-    } finally {
-      set({ isInpainting: false });
     }
+
+    set({ isInpainting: false });
   },
 
   // OCR + Text Patch actions
-  cropRegion: async (region) => {
-    const canvas = get().fabricCanvas;
-    if (!canvas) return null;
-
-    const bounds = getRegionBounds(region);
-
-    // Get background image from canvas objects (not backgroundImage property)
-    const objects = canvas.getObjects();
-    const bgImage = objects.find((o) => o.type === "image");
-    if (!bgImage || !(bgImage instanceof FabricImage)) return null;
-
-    const img = bgImage;
-    if (!img._element) return null;
-
-    // Create off-screen canvas at region size
-    const offCanvas = document.createElement("canvas");
-    offCanvas.width = bounds.width;
-    offCanvas.height = bounds.height;
-    const ctx = offCanvas.getContext("2d");
-    if (!ctx) return null;
-
-    // Handle different region shapes
-    if (region.shape === "rectangle") {
-      // Simple crop
-      ctx.drawImage(
-        img._element,
-        bounds.x,
-        bounds.y,
-        bounds.width,
-        bounds.height,
-        0,
-        0,
-        bounds.width,
-        bounds.height,
-      );
-    } else if (region.shape === "oval") {
-      // Elliptical clipping
-      ctx.save();
-      ctx.beginPath();
-      ctx.ellipse(
-        bounds.width / 2,
-        bounds.height / 2,
-        bounds.width / 2,
-        bounds.height / 2,
-        0,
-        0,
-        2 * Math.PI,
-      );
-      ctx.clip();
-      ctx.drawImage(
-        img._element,
-        bounds.x,
-        bounds.y,
-        bounds.width,
-        bounds.height,
-        0,
-        0,
-        bounds.width,
-        bounds.height,
-      );
-      ctx.restore();
-    } else if (region.shape === "polygon") {
-      // Polygon clipping
-      const points = getRegionPolygonPoints(region);
-      if (!points) return null;
-
-      const localPoints = points.map((p) => ({
-        x: p.x - bounds.x,
-        y: p.y - bounds.y,
-      }));
-
-      ctx.save();
-      ctx.beginPath();
-      if (localPoints.length > 0) {
-        const first = localPoints[0];
-        if (first) {
-          ctx.moveTo(first.x, first.y);
-          for (let i = 1; i < localPoints.length; i++) {
-            const pt = localPoints[i];
-            if (pt) {
-              ctx.lineTo(pt.x, pt.y);
-            }
-          }
-          ctx.closePath();
-        }
-      }
-      ctx.clip();
-      ctx.drawImage(
-        img._element,
-        bounds.x,
-        bounds.y,
-        bounds.width,
-        bounds.height,
-        0,
-        0,
-        bounds.width,
-        bounds.height,
-      );
-      ctx.restore();
-    }
-
-    return offCanvas.toDataURL("image/png");
-  },
-
-  createTextPatch: (config) => {
-    const canvas = get().fabricCanvas;
-    if (!canvas) return;
-
-    const {
-      text,
-      bounds,
-      captionSlug,
-      fontFamily = "Anime Ace",
-      fontWeight = "normal",
-      fontStyle = "normal",
-      fill = "#000000",
-      stroke = "#FFFFFF",
-      strokeWidth = 0,
-    } = config;
-
-    const canvasWidth = canvas.getWidth();
-    const canvasHeight = canvas.getHeight();
-
-    const fontSize = bounds.height * 0.8;
-    const fontSizeRatio = fontSize / canvasWidth;
-
-    const textbox = new Textbox(text, {
-      left: bounds.x,
-      top: bounds.y,
-      width: bounds.width,
-      fontSize,
-      fontFamily,
-      fontWeight,
-      fontStyle,
-      fill,
-      stroke,
-      strokeWidth,
-      textAlign: "center",
-      selectable: true,
-      evented: true,
-    }) as ExtendedTextbox;
-
-    // Assign unique ID
-    textbox.id = `textbox-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
-    // Store caption slug and ratio-based positioning data
-    const patchData: TextPatchData = {
-      type: "text-patch",
-      captionSlug,
-      leftRatio: bounds.x / canvasWidth,
-      topRatio: bounds.y / canvasHeight,
-      widthRatio: bounds.width / canvasWidth,
-      fontSizeRatio,
-    };
-    textbox.data = patchData;
-
-    canvas.add(textbox);
-    canvas.setActiveObject(textbox);
-    canvas.renderAll();
-
-    // Save to history
-    get().saveHistory(textbox);
-  },
 
   exportTextPatch: (textbox) => {
     const canvas = get().fabricCanvas;
@@ -738,43 +555,6 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     return offCanvas.toDataURL("image/png");
   },
 
-  savePatch: async (captionSlug, textbox) => {
-    const canvas = get().fabricCanvas;
-    if (!canvas) return;
-
-    const patchImage = get().exportTextPatch(textbox);
-    if (!patchImage) return;
-
-    const canvasWidth = canvas.getWidth();
-    const canvasHeight = canvas.getHeight();
-    const data = textbox.data;
-
-    const patchData = {
-      text: textbox.text || "",
-      leftRatio: data?.leftRatio ?? (textbox.left || 0) / canvasWidth,
-      topRatio: data?.topRatio ?? (textbox.top || 0) / canvasHeight,
-      widthRatio: data?.widthRatio ?? (textbox.width || 100) / canvasWidth,
-      fontSizeRatio:
-        data?.fontSizeRatio ?? (textbox.fontSize || 16) / canvasWidth,
-      fontFamily: textbox.fontFamily || "Arial",
-      fontWeight: String(textbox.fontWeight || "normal"),
-      fontStyle: String(textbox.fontStyle || "normal"),
-      fill: (textbox.fill as string) || "#000000",
-      stroke: textbox.stroke as string | undefined,
-      strokeWidth: textbox.strokeWidth,
-    };
-
-    const response = await api.api.studio.patches.save.post({
-      captionSlug,
-      patchImage,
-      patchData,
-    });
-
-    if (!response.data || !response.data.success) {
-      throw new Error(response.data?.error || "Failed to save patch");
-    }
-  },
-
   /**
    * Sync text overlays for all mask regions with translatedText
    *
@@ -785,111 +565,242 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   setSelectedTextbox: (textbox) => set({ selectedTextbox: textbox }),
   setPopoverAnchor: (anchor) => set({ popoverAnchor: anchor }),
 
-  syncTextOverlays: () => {
+  /**
+   * Create text object from a region mask
+   * Creates text overlay and removes the mask region
+   */
+  createTextObjectFromRegion: (regionObject) => {
     const canvas = get().fabricCanvas;
     if (!canvas) return;
 
-    const objects = canvas.getObjects();
+    const mask = regionObject as ExtendedRect | ExtendedEllipse | ExtendedPolygon;
+    const maskId = mask.id;
+    const translatedText = mask.data?.translatedText;
 
-    // Find all existing textboxes with mask IDs to avoid duplicates
-    const existingTextboxes = new Set<string>();
-    for (const obj of objects) {
-      if (obj.type !== "textbox") {
-        continue;
-      }
-      const textbox = obj as ExtendedTextbox;
-      const maskId = textbox.data?.maskId;
-      if (maskId) {
-        existingTextboxes.add(maskId);
-      }
+    // Validate
+    if (!mask.data || mask.data.type !== "mask" || !translatedText || !maskId) {
+      return;
     }
 
-    // Find all mask objects with translated text
-    for (const obj of objects) {
-      if (
-        obj.type !== "rect" &&
-        obj.type !== "ellipse" &&
-        obj.type !== "polygon"
-      ) {
-        continue;
-      }
-      const mask = obj as ExtendedRect | ExtendedEllipse | ExtendedPolygon;
-      const maskId = mask.id;
-      const translatedText = mask.data?.translatedText;
-
-      // Skip if no translated text or textbox already exists
-      if (!translatedText || !maskId || existingTextboxes.has(maskId)) {
-        continue;
-      }
-
-      // Get mask bounds
-      const bounds = obj.getBoundingRect();
-
-      // Use custom font size if provided, otherwise calculate using PanelPachi's algorithm
-      let fontSize: number;
-      if (mask.data?.customFontSize) {
-        fontSize = mask.data.customFontSize;
-      } else {
-        // fontSize = min(max(10, width * 0.05), min(width * 0.2, height * 0.2))
-        const minSize = 10;
-        const basedOnWidth = bounds.width * 0.05;
-        const maxByWidth = bounds.width * 0.2;
-        const maxByHeight = bounds.height * 0.2;
-        fontSize = Math.min(
-          Math.max(minSize, basedOnWidth),
-          Math.min(maxByWidth, maxByHeight),
-        );
-      }
-
-      // Create textbox with proper defaults
-      const textbox = new Textbox(translatedText, {
-        left: bounds.left,
-        top: bounds.top,
-        width: bounds.width,
-        fontSize,
-        fontFamily: "Anime Ace",
-        fontWeight: "normal",
-        fontStyle: "normal",
-        fill: "#000000",
-        stroke: "#FFFFFF", // White stroke (when enabled)
-        strokeWidth: 0, // No stroke by default
-        textAlign: "center",
-        originX: "left",
-        originY: "top",
-        selectable: true,
-        hasControls: true,
-        evented: true,
-        splitByGrapheme: true, // Better text wrapping
-        lockScalingY: false, // Allow vertical scaling
-        lockScalingFlip: false, // Allow flipping
-      }) as ExtendedTextbox;
-
-      // Assign unique ID
-      textbox.id = `textbox-${maskId}`;
-
-      // Store mask ID reference and ratio-based positioning
-      const canvasWidth = canvas.getWidth();
-      const canvasHeight = canvas.getHeight();
-      const patchData: TextPatchData = {
-        type: "text-patch",
-        captionSlug: mask.data?.captionSlug,
-        maskId, // Link to parent mask
-        originalText: mask.data?.originalText, // Preserve original text even after mask removed
-        leftRatio: bounds.left / canvasWidth,
-        topRatio: bounds.top / canvasHeight,
-        widthRatio: bounds.width / canvasWidth,
-        fontSizeRatio: fontSize / canvasWidth,
-      };
-      textbox.data = patchData;
-
-      // Add to canvas
-      canvas.add(textbox);
-
-      // Add to existing textboxes set
-      existingTextboxes.add(maskId);
+    // Set default font size if not set
+    if (!mask.data.customFontSize) {
+      mask.data.customFontSize = 16;
     }
 
+    // Get mask bounds
+    const bounds = regionObject.getBoundingRect();
+
+    // Calculate font size using PanelPachi's algorithm
+    let fontSize: number;
+    if (mask.data.customFontSize) {
+      fontSize = mask.data.customFontSize;
+    } else {
+      const minSize = 10;
+      const basedOnWidth = bounds.width * 0.05;
+      const maxByWidth = bounds.width * 0.2;
+      const maxByHeight = bounds.height * 0.2;
+      fontSize = Math.min(
+        Math.max(minSize, basedOnWidth),
+        Math.min(maxByWidth, maxByHeight),
+      );
+    }
+
+    // Create textbox
+    const textbox = new Textbox(translatedText, {
+      left: bounds.left,
+      top: bounds.top,
+      width: bounds.width,
+      fontSize,
+      fontFamily: "Anime Ace",
+      fontWeight: "normal",
+      fontStyle: "normal",
+      fill: "#000000",
+      stroke: "#FFFFFF",
+      strokeWidth: 0,
+      textAlign: "center",
+      originX: "left",
+      originY: "top",
+      selectable: true,
+      hasControls: true,
+      evented: true,
+      splitByGrapheme: true,
+      lockScalingY: false,
+      lockScalingFlip: false,
+    }) as ExtendedTextbox;
+
+    // Assign unique ID
+    textbox.id = `textbox-${maskId}`;
+
+    // Store patch data with ratios
+    const canvasWidth = canvas.getWidth();
+    const canvasHeight = canvas.getHeight();
+    const patchData: TextPatchData = {
+      type: "text-patch",
+      captionSlug: mask.data.captionSlug,
+      maskId,
+      originalText: mask.data.originalText,
+      leftRatio: bounds.left / canvasWidth,
+      topRatio: bounds.top / canvasHeight,
+      widthRatio: bounds.width / canvasWidth,
+      fontSizeRatio: fontSize / canvasWidth,
+    };
+    textbox.data = patchData;
+
+    // Add textbox and remove mask
+    canvas.add(textbox);
+    canvas.remove(regionObject);
     canvas.renderAll();
+  },
+
+  /**
+   * Merge all textboxes onto image and save as new page image
+   *
+   * Workflow:
+   * 1. Export canvas with all textboxes merged
+   * 2. Upload to replace page's originalImage
+   * 3. Remove all textboxes from canvas
+   * 4. Reload page
+   */
+  mergeAndSave: async () => {
+    const canvas = get().fabricCanvas;
+    const pages = get().pages;
+    const currentPageIndex = get().currentPageIndex;
+    const currentPage = pages[currentPageIndex];
+
+    if (!canvas || !currentPage) {
+      throw new Error("Canvas or page not ready");
+    }
+
+    const [error] = await catchError((async () => {
+      // Get background image
+      const objects = canvas.getObjects();
+      const bgImage = objects.find((o) => o.type === "image");
+      if (!bgImage || !(bgImage instanceof FabricImage)) {
+        throw new Error("Background image not found");
+      }
+
+      const img = bgImage._element || bgImage._originalElement;
+      if (!img) {
+        throw new Error("Image element not found");
+      }
+
+      const imageWidth =
+        "naturalWidth" in img && typeof img.naturalWidth === "number"
+          ? img.naturalWidth
+          : img.width;
+      const imageHeight =
+        "naturalHeight" in img && typeof img.naturalHeight === "number"
+          ? img.naturalHeight
+          : img.height;
+
+      // Create off-screen canvas for merging
+      const offCanvas = document.createElement("canvas");
+      offCanvas.width = imageWidth;
+      offCanvas.height = imageHeight;
+      const ctx = offCanvas.getContext("2d");
+      if (!ctx) {
+        throw new Error("Failed to get canvas context");
+      }
+
+      // Draw background image
+      ctx.drawImage(img, 0, 0, imageWidth, imageHeight);
+
+      // Find all textboxes and draw them onto the image
+      for (const obj of objects) {
+        if (obj.type !== "textbox") continue;
+        const textbox = obj as ExtendedTextbox;
+
+        // Get textbox properties
+        const left = textbox.left || 0;
+        const top = textbox.top || 0;
+        const text = textbox.text || "";
+        const fontSize = textbox.fontSize || 16;
+        const fontFamily = textbox.fontFamily || "Anime Ace";
+        const fontWeight = textbox.fontWeight || "normal";
+        const fontStyle = textbox.fontStyle || "normal";
+        const fill = (textbox.fill as string) || "#000000";
+        const stroke = textbox.stroke as string | undefined;
+        const strokeWidth = textbox.strokeWidth || 0;
+        const width = textbox.width || 100;
+
+        // Set font
+        ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+
+        // Split text into lines (Fabric wraps text, we need to do the same)
+        const lines = text.split("\n");
+        const lineHeight = fontSize * 1.16; // Fabric's default line height
+
+        // Draw each line
+        lines.forEach((line, index) => {
+          const y = top + index * lineHeight;
+          const x = left + width / 2; // Center horizontally
+
+          // Draw stroke if enabled
+          if (strokeWidth > 0 && stroke) {
+            ctx.strokeStyle = stroke;
+            ctx.lineWidth = strokeWidth;
+            ctx.strokeText(line, x, y);
+          }
+
+          // Draw fill
+          ctx.fillStyle = fill;
+          ctx.fillText(line, x, y);
+        });
+      }
+
+      // Export merged image as base64
+      const mergedImageBase64 = offCanvas.toDataURL("image/png");
+
+      // Upload to server to replace page image
+      const response = await api.api.studio
+        .pages({ pageId: currentPage.id })
+        ["merge-textboxes"].post({
+          mergedImage: mergedImageBase64,
+        });
+
+      if (!response.data || !response.data.success) {
+        throw new Error(response.data?.error || "Failed to save merged image");
+      }
+
+      // Get the new image path from response
+      const newImagePath = response.data.imagePath;
+      if (!newImagePath) {
+        throw new Error("No image path returned from server");
+      }
+
+      // Add cache-busting timestamp to force browser reload
+      const timestamp = Date.now();
+      const imagePathWithCacheBuster = `${newImagePath}?t=${timestamp}`;
+
+      // Update the page in the pages array with new image path
+      const updatedPages = [...pages];
+      updatedPages[currentPageIndex] = {
+        ...currentPage,
+        originalImage: imagePathWithCacheBuster,
+      };
+
+      set({ pages: updatedPages });
+
+      // Remove all textboxes from canvas
+      const textboxes = objects.filter((o) => o.type === "textbox");
+      textboxes.forEach((tb) => canvas.remove(tb));
+
+      // Clear history
+      get().clearHistory();
+
+      // Force image reload using setCurrentPageIndex
+      // This will set imageSrc and imageLoaded: false, triggering proper reload
+      get().setCurrentPageIndex(currentPageIndex);
+
+      canvas.renderAll();
+    })());
+
+    if (error) {
+      console.error("Merge and save failed:", error);
+      throw error;
+    }
   },
 
   // Utility

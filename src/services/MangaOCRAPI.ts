@@ -19,6 +19,25 @@ interface HealthResponse {
 }
 
 /**
+ * Model Status
+ */
+export interface ModelStatus {
+  name: string;
+  ready: boolean;
+}
+
+/**
+ * Status Response (detailed model information)
+ */
+export interface StatusResponse {
+  models: {
+    ocr: ModelStatus;
+    cleaner: ModelStatus;
+    predict: ModelStatus;
+  };
+}
+
+/**
  * Patch Response
  */
 interface PatchResponse {
@@ -157,6 +176,15 @@ export class MangaOCRAPI {
    */
   static async healthCheck(): Promise<HealthResponse> {
     return this.fetchAPI<HealthResponse>("/health", {}, "Health check");
+  }
+
+  /**
+   * Get detailed status of all models
+   *
+   * @returns Status of all loaded models (OCR, AnimeLaMa, YOLO)
+   */
+  static async getStatus(): Promise<StatusResponse> {
+    return this.fetchAPI<StatusResponse>("/status", {}, "Status check");
   }
 
   /**
@@ -329,7 +357,9 @@ export class MangaOCRAPI {
    * @param imageBase64 - Base64 encoded image
    * @returns Array of bounding boxes with confidence scores
    */
-  static async predictRegions(imageBase64: string): Promise<PredictRegionsResponse> {
+  static async predictRegions(
+    imageBase64: string,
+  ): Promise<PredictRegionsResponse> {
     return this.fetchAPI<PredictRegionsResponse>(
       "/predict-regions",
       {

@@ -14,29 +14,6 @@ import { generateUniqueFilename, reindexChapterPages } from "./helpers";
  * Pages API endpoints
  */
 export const pagesApi = new Elysia({ prefix: "/pages" })
-  .get("/:slug", async ({ params }) => {
-    const [error, page] = await catchError(PageStore.findBySlug(params.slug));
-
-    if (error) {
-      console.error("Get page error:", error);
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-
-    if (!page) {
-      return {
-        success: false,
-        error: "Page not found",
-      };
-    }
-
-    return {
-      success: true,
-      page,
-    };
-  })
   .post(
     "/upload",
     async ({ body }) => {

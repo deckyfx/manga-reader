@@ -6,19 +6,71 @@ import { ChapterStore } from "../../stores/chapter-store";
 import { SeriesStore } from "../../stores/series-store";
 import { CaptionStore } from "../../stores/caption-store";
 import { PageDataStore } from "../../stores/page-data-store";
-import { PatchGeneratorService } from "../../services/PatchGeneratorService";
 import { MangaOCRService } from "../../services/MangaOCRService";
 import { CleaningService } from "../../services/CleaningService";
 import { TranslationService } from "../../services/TranslationService";
 import { BBPredictionService } from "../../services/BBPredictionService";
 import { envConfig } from "../../env-config";
-import { catchError } from "../../lib/error-handler";
+import { catchError, catchErrorSync } from "../../lib/error-handler";
 import {
   getRegionBounds,
   getRegionPolygonPoints,
 } from "../../lib/region-types";
 import type { Region } from "../../lib/region-types";
 import { unlink } from "node:fs/promises";
+
+/**
+ * Sort regions in manga reading order (right-to-left, top-to-bottom)
+ */
+function sortMangaReadingOrder(
+  regions: Array<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    confidence: number;
+    type: string;
+  }>,
+): typeof regions {
+  const ROW_THRESHOLD = 20; // Pixels tolerance for same row detection
+
+  // Group regions by row based on Y coordinate
+  const rows: Array<{ y: number; regions: typeof regions }> = [];
+
+  for (const region of regions) {
+    const centerY = (region.y1 + region.y2) / 2;
+    let foundRow = false;
+
+    // Check if region belongs to existing row
+    for (const row of rows) {
+      if (Math.abs(row.y - centerY) <= ROW_THRESHOLD) {
+        row.regions.push(region);
+        foundRow = true;
+        break;
+      }
+    }
+
+    // Create new row if not found
+    if (!foundRow) {
+      rows.push({ y: centerY, regions: [region] });
+    }
+  }
+
+  // Sort rows top-to-bottom (ascending Y)
+  rows.sort((a, b) => a.y - b.y);
+
+  // Within each row, sort right-to-left (descending X for manga)
+  for (const row of rows) {
+    row.regions.sort((a, b) => {
+      const centerXA = (a.x1 + a.x2) / 2;
+      const centerXB = (b.x1 + b.x2) / 2;
+      return centerXB - centerXA; // Descending order (right to left)
+    });
+  }
+
+  // Flatten back to single array
+  return rows.flatMap((row) => row.regions);
+}
 
 // ─── TypeBox schemas matching Region discriminated union ───
 const tPoint = t.Object({ x: t.Number(), y: t.Number() });
@@ -46,104 +98,14 @@ const tRegion = t.Union([
 ]);
 
 /**
- * Helper function to generate and save patch image with manual parameters
- */
-async function generateAndSavePatch(
-  captionSlug: string,
-  lines: string[],
-  fontSize: number,
-  fontType: "regular" | "bold" | "italic",
-  textColor: string,
-  strokeColor: string | null,
-  strokeWidth: number,
-  cleanerThreshold: number = 200,
-  alphaBackground: boolean = false,
-): Promise<string> {
-  const caption = await CaptionStore.findBySlug(captionSlug);
-  if (!caption) {
-    throw new Error("Caption not found");
-  }
-
-  const page = await PageStore.findById(caption.pageId);
-  if (!page) {
-    throw new Error("Page not found");
-  }
-
-  const chapter = await ChapterStore.findById(page.chapterId);
-  if (!chapter) {
-    throw new Error("Chapter not found");
-  }
-
-  // Derive polygon points from region (if applicable)
-  const bounds = getRegionBounds(caption.region);
-  const polygonPoints = getRegionPolygonPoints(caption.region);
-
-  let relativePolygonPoints: Array<{ x: number; y: number }> | undefined;
-  if (polygonPoints) {
-    relativePolygonPoints = polygonPoints.map((point) => ({
-      x: point.x - bounds.x,
-      y: point.y - bounds.y,
-    }));
-  }
-
-  // Generate patch using PatchGeneratorService with manual parameters
-  const patchService = PatchGeneratorService.getInstance();
-  const base64Data = caption.capturedImage.replace(
-    /^data:image\/\w+;base64,/,
-    "",
-  );
-
-  const patchImageBase64 = await patchService.generatePatch(
-    base64Data,
-    lines,
-    fontSize,
-    fontType,
-    textColor,
-    strokeColor,
-    strokeWidth,
-    relativePolygonPoints,
-    cleanerThreshold,
-    alphaBackground,
-  );
-
-  // Create patches directory if it doesn't exist
-  const patchesDir = join(
-    envConfig.MANGA_DIR,
-    chapter.seriesId.toString(),
-    "chapters",
-    chapter.id.toString(),
-    "patches",
-  );
-
-  await mkdir(patchesDir, { recursive: true });
-
-  // Save patch image
-  const patchFilename = `${caption.slug}.png`;
-  const patchPath = join(patchesDir, patchFilename);
-  const patchBuffer = Buffer.from(patchImageBase64, "base64");
-  await Bun.write(patchPath, patchBuffer);
-
-  // Update database with patch path (relative path for serving)
-  const relativePatchPath = `/uploads/${chapter.seriesId}/chapters/${chapter.id}/patches/${patchFilename}`;
-  await CaptionStore.updatePatchPath(caption.slug!, relativePatchPath);
-
-  return relativePatchPath;
-}
-
-/**
- * Studio API plugin — all caption, OCR, patch, and merge endpoints.
+ * Studio API plugin — Fabric.js-based studio endpoints.
  *
- * Route structure:
- * /api/studio/captions?pageId=        GET    — list captions for a page
- * /api/studio/captions/:slug          PUT    — update caption text
- * /api/studio/captions/:slug          DELETE — delete caption
- * /api/studio/captions/:slug/region   PATCH  — update region after move/resize
- * /api/studio/captions/:slug/translate POST  — retry translation
- * /api/studio/captions/:slug/patch    POST   — generate patch
- * /api/studio/captions/:slug/patch    DELETE — delete patch
- * /api/studio/ocr                     POST   — create caption via OCR
- * /api/studio/merge                   PATCH  — merge patches onto page
- * /api/studio/extract                 POST   — re-extract OCR
+ * Current routes:
+ * /api/studio/captions/:slug/translate POST  — translate caption text
+ * /api/studio/ocr-batch               POST   — batch OCR + translation with optional cleaning
+ * /api/studio/inpaint                 POST   — LaMa-based text cleaning
+ * /api/studio/pages/:pageId/merge-textboxes POST — merge Fabric.js textboxes onto image
+ * /api/studio/predict                 POST   — YOLO manga text detection
  */
 export const studioApi = new Elysia({ prefix: "/studio" })
   // ─── Chapter endpoints ─────────────────────────────
@@ -349,135 +311,6 @@ export const studioApi = new Elysia({ prefix: "/studio" })
   )
 
   // ─── Caption endpoints ─────────────────────────────
-  .get(
-    "/captions",
-    async ({ query }) => {
-      const { pageId } = query;
-
-      const [error, captions] = await catchError(
-        CaptionStore.findByPageId(pageId),
-      );
-
-      if (error) {
-        console.error("Get captions error:", error);
-        return {
-          success: false,
-          error: error.message,
-          captions: [],
-        };
-      }
-
-      return {
-        success: true,
-        captions,
-      };
-    },
-    {
-      query: t.Object({
-        pageId: t.Number(),
-      }),
-    },
-  )
-  .put(
-    "/captions/:slug",
-    async ({ params: { slug }, body }) => {
-      const [error, caption] = await catchError(
-        CaptionStore.updateBySlug(slug, {
-          rawText: body.rawText,
-          translatedText: body.translatedText,
-        }),
-      );
-
-      if (error) {
-        console.error("Update caption error:", error);
-        return {
-          success: false,
-          error: error.message,
-        };
-      }
-
-      if (!caption) {
-        return {
-          success: false,
-          error: "Caption not found",
-        };
-      }
-
-      return {
-        success: true,
-        caption,
-      };
-    },
-    {
-      body: t.Object({
-        rawText: t.String(),
-        translatedText: t.Optional(t.String()),
-      }),
-    },
-  )
-  .delete("/captions/:slug", async ({ params: { slug } }) => {
-    const [error, deleted] = await catchError(CaptionStore.deleteBySlug(slug));
-
-    if (error) {
-      console.error("Delete caption error:", error);
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-
-    if (!deleted) {
-      return {
-        success: false,
-        error: "Caption not found",
-      };
-    }
-
-    return {
-      success: true,
-    };
-  })
-  .patch(
-    "/captions/:slug/region",
-    async ({ params: { slug }, body }) => {
-      const { region, capturedImage } = body;
-
-      const [error, caption] = await catchError(
-        CaptionStore.updateBySlug(slug, {
-          region: region as Region,
-          capturedImage,
-          patchImagePath: null,
-          patchGeneratedAt: null,
-        }),
-      );
-
-      if (error) {
-        console.error("Update region error:", error);
-        return {
-          success: false,
-          error: error.message,
-        };
-      }
-
-      if (!caption) {
-        return {
-          success: false,
-          error: "Caption not found",
-        };
-      }
-
-      return {
-        success: true,
-        caption,
-      };
-    },
-    {
-      body: t.Object({
-        region: tRegion,
-        capturedImage: t.String(),
-      }),
-    },
-  )
   .post("/captions/:slug/translate", async ({ params: { slug } }) => {
     const [captionError, caption] = await catchError(
       CaptionStore.findBySlug(slug),
@@ -520,173 +353,54 @@ export const studioApi = new Elysia({ prefix: "/studio" })
     return {
       success: true,
       caption: updatedCaption,
+      translatedText: updatedCaption.translatedText,
     };
+  }, {
+    response: t.Union([
+      t.Object({
+        success: t.Literal(true),
+        caption: t.Any(), // Caption type
+        translatedText: t.Union([t.String(), t.Null()]),
+      }),
+      t.Object({
+        success: t.Literal(false),
+        error: t.String(),
+      }),
+    ]),
   })
-  .post(
-    "/captions/:slug/patch",
-    async ({ params: { slug }, body }) => {
-      const patchService = PatchGeneratorService.getInstance();
-      const [availError, isAvailable] = await catchError(
-        patchService.isAvailable(),
-      );
-
-      if (availError || !isAvailable) {
-        return {
-          success: false,
-          error: "Patch generator service is not available",
-        };
-      }
-
-      const [error, patchUrl] = await catchError(
-        generateAndSavePatch(
-          slug,
-          body.lines,
-          body.fontSize,
-          body.fontType,
-          body.textColor,
-          body.strokeColor,
-          body.strokeWidth,
-          body.cleanerThreshold ?? 200,
-          body.alphaBackground ?? false,
-        ),
-      );
-
-      if (error) {
-        console.error("Generate patch error:", error);
-        return {
-          success: false,
-          error: error.message,
-        };
-      }
-
-      const [captionError, caption] = await catchError(
-        CaptionStore.findBySlug(slug),
-      );
-
-      if (captionError || !caption) {
-        return {
-          success: false,
-          error: "Failed to retrieve updated caption",
-        };
-      }
-
-      return {
-        success: true,
-        patchUrl,
-        patchGeneratedAt: caption.patchGeneratedAt?.toISOString(),
-      };
-    },
-    {
-      body: t.Object({
-        lines: t.Array(t.String()),
-        fontSize: t.Number(),
-        fontType: t.Union([
-          t.Literal("regular"),
-          t.Literal("bold"),
-          t.Literal("italic"),
-        ]),
-        textColor: t.String(),
-        strokeColor: t.Nullable(t.String()),
-        strokeWidth: t.Number(),
-        cleanerThreshold: t.Optional(t.Number()),
-        alphaBackground: t.Optional(t.Boolean()),
-      }),
-    },
-  )
-
-  // ─── OCR endpoint ──────────────────────────────────
-  .post(
-    "/ocr",
-    async ({ body }) => {
-      const { pageId, capturedImage, region } = body;
-
-      const base64Data = capturedImage.replace(/^data:image\/\w+;base64,/, "");
-      const buffer = Buffer.from(base64Data, "base64");
-
-      const ocrService = MangaOCRService.getInstance();
-      const translationService = TranslationService.getInstance();
-
-      let rawText = "";
-      let translatedText: string | null = null;
-      let ocrWarning: string | undefined;
-
-      const [ocrError, ocrResult] = await catchError(
-        ocrService.extractText(buffer),
-      );
-
-      if (ocrError) {
-        console.error("OCR Error:", ocrError);
-        ocrWarning = `OCR failed: ${ocrError.message}`;
-      } else {
-        rawText = ocrResult;
-
-        const [translateError, translateResult] = await catchError(
-          translationService.translate(rawText),
-        );
-
-        if (translateError) {
-          console.error("Translation Error:", translateError);
-          ocrWarning = `Translation failed: ${translateError.message}`;
-        } else {
-          translatedText = translateResult || null;
-        }
-      }
-
-      const [captionError, caption] = await catchError(
-        CaptionStore.create({
-          pageId,
-          region,
-          capturedImage,
-          rawText,
-          translatedText,
-        }),
-      );
-
-      if (captionError) {
-        console.error("Caption Error:", captionError);
-        return {
-          success: false,
-          error: captionError.message,
-        };
-      }
-
-      return {
-        success: true,
-        captionId: caption.id,
-        captionSlug: caption.slug,
-        rawText: caption.rawText,
-        translatedText: caption.translatedText,
-        warning: ocrWarning,
-      };
-    },
-    {
-      body: t.Object({
-        pageId: t.Number(),
-        capturedImage: t.String(),
-        region: tRegion,
-      }),
-    },
-  )
 
   // ─── OCR Batch endpoint ────────────────────────────
   .post(
     "/ocr-batch",
     async ({ body }) => {
-      const { pageId, regions, withCleaning } = body;
+      const { pageId, regions, withCleaning, maskImageBase64 } = body;
 
       const ocrService = MangaOCRService.getInstance();
       const translationService = TranslationService.getInstance();
 
-      const results = [];
-      const successfulRegions: Array<Region> = []; // Track successful regions for cleaning
+      const results: Array<
+        | {
+            id: string;
+            success: true;
+            captionId: number;
+            captionSlug: string;
+            rawText: string;
+            translatedText: string | null;
+            warning?: string;
+          }
+        | { id: string; success: false; error: string }
+      > = [];
 
       // Process each region one-by-one
       for (const regionItem of regions) {
         const { id, capturedImage, region } = regionItem;
 
-        try {
+        const [error] = await catchError((async () => {
           // Convert base64 to buffer
-          const base64Data = capturedImage.replace(/^data:image\/\w+;base64,/, "");
+          const base64Data = capturedImage.replace(
+            /^data:image\/\w+;base64,/,
+            "",
+          );
           const buffer = Buffer.from(base64Data, "base64");
 
           let rawText = "";
@@ -710,7 +424,10 @@ export const studioApi = new Elysia({ prefix: "/studio" })
             );
 
             if (translateError) {
-              console.error(`Translation Error for region ${id}:`, translateError);
+              console.error(
+                `Translation Error for region ${id}:`,
+                translateError,
+              );
               warning = `Translation failed: ${translateError.message}`;
             } else {
               translatedText = translateResult || null;
@@ -740,15 +457,15 @@ export const studioApi = new Elysia({ prefix: "/studio" })
               id,
               success: true,
               captionId: caption.id,
-              captionSlug: caption.slug,
-              rawText: caption.rawText,
+              captionSlug: caption.slug || "",
+              rawText: caption.rawText || "",
               translatedText: caption.translatedText,
               warning,
             });
-            // Track successful region for cleaning
-            successfulRegions.push(region);
           }
-        } catch (error) {
+        })());
+
+        if (error) {
           console.error(`Unexpected error for region ${id}:`, error);
           results.push({
             id,
@@ -758,135 +475,100 @@ export const studioApi = new Elysia({ prefix: "/studio" })
         }
       }
 
-      // Perform cleaning if requested and we have successful regions
-      if (withCleaning && successfulRegions.length > 0) {
-        const [pageError, page] = await catchError(
-          PageStore.findById(pageId),
-        );
+      // Perform cleaning if requested and mask provided
+      if (!withCleaning || !maskImageBase64) {
+        return {
+          success: true,
+          results,
+          cleaned: false,
+        };
+      }
+      const [pageError, page] = await catchError(PageStore.findById(pageId));
 
-        if (pageError || !page) {
-          return {
-            success: false,
-            error: "Page not found for cleaning",
-            results,
-          };
-        }
+      if (pageError || !page) {
+        return {
+          success: false,
+          error: "Page not found for cleaning",
+          results,
+        };
+      }
 
-        // Load page image
-        const pageImagePath = join(
-          envConfig.MANGA_DIR,
-          page.originalImage.replace("/uploads/", ""),
-        );
+      // Load page image
+      const pageImagePath = join(
+        envConfig.MANGA_DIR,
+        page.originalImage.replace("/uploads/", ""),
+      );
 
-        const [imageError, imageFile] = await catchError(
-          Bun.file(pageImagePath).arrayBuffer(),
-        );
+      const [imageError, imageFile] = await catchError(
+        Bun.file(pageImagePath).arrayBuffer(),
+      );
 
-        if (imageError) {
-          return {
-            success: false,
-            error: `Failed to load page image: ${imageError.message}`,
-            results,
-          };
-        }
+      if (imageError) {
+        return {
+          success: false,
+          error: `Failed to load page image: ${imageError.message}`,
+          results,
+        };
+      }
 
-        // Create canvas and mask from successful regions
-        const imageBuffer = Buffer.from(imageFile);
-        const pageBlob = new Blob([imageBuffer], { type: "image/png" });
+      // Convert image and mask to blobs
+      const imageBuffer = Buffer.from(imageFile);
+      const pageBlob = new Blob([imageBuffer], { type: "image/png" });
 
-        // Get image dimensions
-        const img = new Image();
-        const imageUrl = URL.createObjectURL(pageBlob);
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = reject;
-          img.src = imageUrl;
-        });
+      const maskBlob = new Blob(
+        [
+          Buffer.from(
+            maskImageBase64.replace(/^data:image\/\w+;base64,/, ""),
+            "base64",
+          ),
+        ],
+        { type: "image/png" },
+      );
 
-        // Create canvas for mask generation
-        const canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
+      // Perform inpainting with mask
+      const [cleanError, cleanedImageBase64] = await catchError(
+        CleaningService.inpaintWithMask(pageBlob, maskBlob),
+      );
 
-        // Convert regions to CleaningService format
-        const regionsForMask = successfulRegions.map((region) => {
-          const bounds = getRegionBounds(region);
-          const points = getRegionPolygonPoints(region);
+      if (cleanError) {
+        return {
+          success: false,
+          error: `Cleaning failed: ${cleanError.message}`,
+          results,
+        };
+      }
 
-          // Convert bounds format from { x, y, width, height } to { left, top, width, height }
-          const cleaningBounds = {
-            left: bounds.x,
-            top: bounds.y,
-            width: bounds.width,
-            height: bounds.height,
-          };
+      // Save cleaned image
+      const cleanedImageBuffer = Buffer.from(
+        cleanedImageBase64.replace(/^data:image\/\w+;base64,/, ""),
+        "base64",
+      );
 
-          if (region.shape === "rectangle") {
-            return {
-              type: "rectangle" as const,
-              bounds: cleaningBounds,
-            };
-          } else if (region.shape === "oval") {
-            return {
-              type: "ellipse" as const,
-              bounds: cleaningBounds,
-            };
-          } else {
-            return {
-              type: "polygon" as const,
-              bounds: cleaningBounds,
-              points: points || [],
-            };
-          }
-        });
+      const [writeError] = await catchError(
+        Bun.write(pageImagePath, cleanedImageBuffer),
+      );
 
-        // Generate mask and perform inpainting
-        const [cleanError, cleanedImageBase64] = await catchError(
-          CleaningService.cleanRegions(pageBlob, canvas, regionsForMask),
-        );
+      if (writeError) {
+        return {
+          success: false,
+          error: "Failed to save cleaned image",
+          results,
+        };
+      }
 
-        URL.revokeObjectURL(imageUrl);
+      // Clear page mask data
+      const [, pageData] = await catchError(
+        PageDataStore.findByPageId(pageId),
+      );
 
-        if (cleanError) {
-          return {
-            success: false,
-            error: `Cleaning failed: ${cleanError.message}`,
-            results,
-          };
-        }
-
-        // Save cleaned image
-        const cleanedImageBuffer = Buffer.from(
-          cleanedImageBase64.replace(/^data:image\/\w+;base64,/, ""),
-          "base64",
-        );
-
-        const [writeError] = await catchError(
-          Bun.write(pageImagePath, cleanedImageBuffer),
-        );
-
-        if (writeError) {
-          return {
-            success: false,
-            error: "Failed to save cleaned image",
-            results,
-          };
-        }
-
-        // Clear page mask data
-        const [pageDataError, pageData] = await catchError(
-          PageDataStore.findByPageId(pageId),
-        );
-
-        if (pageData) {
-          await catchError(PageDataStore.delete(pageData.id));
-        }
+      if (pageData) {
+        await catchError(PageDataStore.delete(pageData.id));
       }
 
       return {
         success: true,
         results,
-        cleaned: withCleaning && successfulRegions.length > 0,
+        cleaned: withCleaning && !!maskImageBase64,
       };
     },
     {
@@ -900,238 +582,39 @@ export const studioApi = new Elysia({ prefix: "/studio" })
           }),
         ),
         withCleaning: t.Optional(t.Boolean()),
+        maskImageBase64: t.Optional(t.String()),
       }),
-    },
-  )
-
-  // ─── Merge endpoint ────────────────────────────────
-  .patch(
-    "/merge",
-    async ({ body }) => {
-      const { pageSlug } = body;
-
-      const [pageError, page] = await catchError(
-        PageStore.findBySlug(pageSlug),
-      );
-      if (pageError || !page) {
-        return { success: false, error: "Page not found" };
-      }
-
-      const [captionsError, captions] = await catchError(
-        CaptionStore.findByPageId(page.id),
-      );
-      if (captionsError) {
-        return { success: false, error: captionsError.message };
-      }
-
-      const captionsWithPatches = captions.filter((c) => c.patchImagePath);
-      if (captionsWithPatches.length === 0) {
-        return { success: false, error: "No patches to merge" };
-      }
-
-      // Load original page image
-      const pageImagePath = join(
-        envConfig.MANGA_DIR,
-        page.originalImage.replace("/uploads/", ""),
-      );
-
-      const [imageError, imageFile] = await catchError(
-        Bun.file(pageImagePath).arrayBuffer(),
-      );
-      if (imageError) {
-        return {
-          success: false,
-          error: `Failed to load page image: ${imageError.message}`,
-        };
-      }
-
-      const pageImageBase64 = Buffer.from(imageFile).toString("base64");
-
-      // Prepare patches — coords are already in image-pixel space
-      const patches = [];
-      for (const caption of captionsWithPatches) {
-        if (!caption.patchImagePath) continue;
-
-        const patchPath = join(
-          envConfig.MANGA_DIR,
-          caption.patchImagePath.replace("/uploads/", ""),
-        );
-
-        const [patchError, patchFile] = await catchError(
-          Bun.file(patchPath).arrayBuffer(),
-        );
-        if (patchError) {
-          console.warn(`Failed to load patch: ${caption.patchImagePath}`);
-          continue;
-        }
-
-        const bounds = getRegionBounds(caption.region);
-
-        patches.push({
-          patchImageBase64: Buffer.from(patchFile).toString("base64"),
-          x: bounds.x,
-          y: bounds.y,
-          width: Math.round(bounds.width),
-          height: Math.round(bounds.height),
-        });
-      }
-
-      if (patches.length === 0) {
-        return { success: false, error: "Failed to load any patches" };
-      }
-
-      // Merge via Python service
-      const patchService = PatchGeneratorService.getInstance();
-      const [mergeError, mergedImageBase64] = await catchError(
-        patchService.mergePatches(pageImageBase64, patches),
-      );
-      if (mergeError) {
-        return {
-          success: false,
-          error: `Failed to merge patches: ${mergeError.message}`,
-        };
-      }
-
-      // Overwrite original image
-      const [saveError] = await catchError(
-        Bun.write(pageImagePath, Buffer.from(mergedImageBase64, "base64")),
-      );
-      if (saveError) {
-        return {
-          success: false,
-          error: `Failed to save merged image: ${saveError.message}`,
-        };
-      }
-
-      // Delete all captions for the page
-      for (const caption of captions) {
-        await CaptionStore.deleteBySlug(caption.slug!);
-      }
-
-      // Delete patches directory
-      const chapter = await ChapterStore.findById(page.chapterId);
-      if (chapter) {
-        const patchesDir = join(
-          envConfig.MANGA_DIR,
-          chapter.seriesId.toString(),
-          "chapters",
-          chapter.id.toString(),
-          "patches",
-        );
-        await catchError(rm(patchesDir, { recursive: true, force: true }));
-      }
-
-      return {
-        success: true,
-        message: `Successfully merged ${patches.length} patches`,
-      };
-    },
-    {
-      body: t.Object({
-        pageSlug: t.String(),
-      }),
-    },
-  )
-
-  // ─── Re-extract OCR endpoint ───────────────────────
-  .post(
-    "/extract",
-    async ({ body }) => {
-      const { captionSlug } = body;
-
-      const [captionError, caption] = await catchError(
-        CaptionStore.findBySlug(captionSlug),
-      );
-      if (captionError || !caption) {
-        return { success: false, error: "Caption not found" };
-      }
-
-      const base64Data = caption.capturedImage.replace(
-        /^data:image\/\w+;base64,/,
-        "",
-      );
-      const buffer = Buffer.from(base64Data, "base64");
-
-      const ocrService = MangaOCRService.getInstance();
-      const translationService = TranslationService.getInstance();
-
-      const [ocrError, rawText] = await catchError(
-        ocrService.extractText(buffer),
-      );
-      if (ocrError) {
-        return { success: false, error: `OCR failed: ${ocrError.message}` };
-      }
-
-      const [translateError, translatedText] = await catchError(
-        translationService.translate(rawText),
-      );
-      if (translateError) {
-        console.warn("Translation failed after re-extract:", translateError);
-      }
-
-      const [updateError, updated] = await catchError(
-        CaptionStore.updateBySlug(captionSlug, {
-          rawText,
-          translatedText: translatedText || null,
+      response: {
+        200: t.Object({
+          success: t.Literal(true),
+          results: t.Array(
+            t.Union([
+              t.Object({
+                id: t.String(),
+                success: t.Literal(true),
+                captionId: t.Number(),
+                captionSlug: t.String(),
+                rawText: t.String(),
+                translatedText: t.Union([t.String(), t.Null()]),
+                warning: t.Optional(t.String()),
+              }),
+              t.Object({
+                id: t.String(),
+                success: t.Literal(false),
+                error: t.String(),
+              }),
+            ]),
+          ),
+          cleaned: t.Boolean(),
         }),
-      );
-      if (updateError || !updated) {
-        return { success: false, error: "Failed to update caption" };
-      }
-
-      return {
-        success: true,
-        caption: updated,
-      };
-    },
-    {
-      body: t.Object({
-        captionSlug: t.String(),
-      }),
+        400: t.Object({
+          success: t.Literal(false),
+          error: t.String(),
+          results: t.Optional(t.Array(t.Any())),
+        }),
+      },
     },
   )
-
-  // ─── Delete patch endpoint ─────────────────────────
-  .delete("/captions/:slug/patch", async ({ params: { slug } }) => {
-    const [captionError, caption] = await catchError(
-      CaptionStore.findBySlug(slug),
-    );
-    if (captionError || !caption) {
-      return { success: false, error: "Caption not found" };
-    }
-
-    if (!caption.patchImagePath) {
-      return { success: false, error: "Caption has no patch" };
-    }
-
-    // Delete patch file from disk
-    const patchPath = join(
-      envConfig.MANGA_DIR,
-      caption.patchImagePath.replace("/uploads/", ""),
-    );
-    await catchError(
-      Bun.file(patchPath)
-        .exists()
-        .then(async (exists) => {
-          if (exists) {
-            await unlink(patchPath);
-          }
-        }),
-    );
-
-    // Clear patch fields in DB
-    const [updateError] = await catchError(
-      CaptionStore.updateBySlug(slug, {
-        patchImagePath: null,
-        patchGeneratedAt: null,
-      }),
-    );
-    if (updateError) {
-      return { success: false, error: "Failed to clear patch data" };
-    }
-
-    return { success: true };
-  })
 
   // ─── Inpaint endpoint ──────────────────────────────
   .post(
@@ -1204,7 +687,7 @@ export const studioApi = new Elysia({ prefix: "/studio" })
       }
 
       // Clear mask data from page data
-      const [pageDataError, pageData] = await catchError(
+      const [, pageData] = await catchError(
         PageDataStore.findByPageId(pageId),
       );
 
@@ -1252,7 +735,7 @@ export const studioApi = new Elysia({ prefix: "/studio" })
 
       return {
         success: true,
-        regions: result.regions,
+        regions: sortMangaReadingOrder(result.regions),
         imageSize: result.imageSize,
       };
     },
@@ -1401,6 +884,129 @@ export const studioApi = new Elysia({ prefix: "/studio" })
           stroke: t.Optional(t.String()),
           strokeWidth: t.Optional(t.Number()),
         }),
+      }),
+    },
+  )
+  /**
+   * Merge textboxes onto page image
+   * POST /api/studio/pages/:pageId/merge-textboxes
+   *
+   * Replaces page's originalImage with merged version
+   */
+  .post(
+    "/pages/:pageId/merge-textboxes",
+    async ({ params, body }) => {
+      const { pageId } = params;
+      const { mergedImage } = body;
+
+      // Find page
+      const [pageError, page] = await catchError(
+        PageStore.findById(Number(pageId)),
+      );
+
+      if (pageError || !page) {
+        return {
+          success: false,
+          error: "Page not found",
+        };
+      }
+
+      // Get chapter and series for path construction
+      const [chapterError, chapter] = await catchError(
+        ChapterStore.findById(page.chapterId),
+      );
+
+      if (chapterError || !chapter) {
+        return {
+          success: false,
+          error: "Chapter not found",
+        };
+      }
+
+      const [seriesError, series] = await catchError(
+        SeriesStore.findById(chapter.seriesId),
+      );
+
+      if (seriesError || !series) {
+        return {
+          success: false,
+          error: "Series not found",
+        };
+      }
+
+      // Construct path for merged image
+      const mergedDir = join(
+        envConfig.MANGA_DIR,
+        `series_${series.id}`,
+        `chapter_${chapter.id}`,
+        "pages",
+      );
+
+      // Create directory if needed
+      const [mkdirError] = await catchError(
+        mkdir(mergedDir, { recursive: true }),
+      );
+
+      if (mkdirError) {
+        console.error("Failed to create merged directory:", mkdirError);
+        return {
+          success: false,
+          error: "Failed to create directory",
+        };
+      }
+
+      // Save merged image (replace original)
+      const mergedFilename = `page_${String(page.orderNum).padStart(5, "0")}.png`;
+      const mergedPath = join(mergedDir, mergedFilename);
+
+      // Decode base64 and write file
+      const base64Data = mergedImage.replace(/^data:image\/\w+;base64,/, "");
+      const mergedBuffer = Buffer.from(base64Data, "base64");
+
+      const [writeError] = await catchError(Bun.write(mergedPath, mergedBuffer));
+
+      if (writeError) {
+        console.error("Failed to save merged image:", writeError);
+        return {
+          success: false,
+          error: "Failed to save merged image",
+        };
+      }
+
+      // Update page record with new image path
+      const relativeImagePath = join(
+        "uploads",
+        `series_${series.id}`,
+        `chapter_${chapter.id}`,
+        "pages",
+        mergedFilename,
+      );
+
+      const [updateError] = await catchError(
+        PageStore.update(page.id, {
+          originalImage: `/${relativeImagePath}`,
+        }),
+      );
+
+      if (updateError) {
+        console.error("Failed to update page:", updateError);
+        return {
+          success: false,
+          error: "Failed to update page",
+        };
+      }
+
+      return {
+        success: true,
+        imagePath: `/${relativeImagePath}`,
+      };
+    },
+    {
+      params: t.Object({
+        pageId: t.String(),
+      }),
+      body: t.Object({
+        mergedImage: t.String(), // Base64 PNG
       }),
     },
   );

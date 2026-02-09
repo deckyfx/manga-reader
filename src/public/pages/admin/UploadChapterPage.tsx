@@ -54,7 +54,7 @@ export function UploadChapterPage() {
     const fileInput = document.getElementById("file") as HTMLInputElement;
     const selectedFile = fileInput.files?.[0];
 
-    if (!chapterTitle.trim() || !chapterNumber.trim() || !selectedFile) {
+    if (!chapterNumber.trim() || !selectedFile) {
       showSnackbar("Please fill all required fields", "warning");
       return;
     }
@@ -85,10 +85,13 @@ export function UploadChapterPage() {
 
     setLoading(true);
 
+    // Use default title if empty: "Chapter ${chapterNumber}"
+    const finalTitle = chapterTitle.trim() || `Chapter ${chapterNumber.trim()}`;
+
     const [error, result] = await catchError(
       api.api.chapters.post({
         seriesId: series!.id.toString(), // Send actual series ID (not slug)
-        title: chapterTitle.trim(),
+        title: finalTitle,
         chapterNumber: chapterNumber.trim(),
         zipFile: selectedFile,
       })
@@ -166,7 +169,7 @@ export function UploadChapterPage() {
                 htmlFor="chapterTitle"
                 className="block text-sm font-semibold text-gray-700 mb-2"
               >
-                Chapter Title *
+                Chapter Title (optional)
               </label>
               <input
                 type="text"
@@ -174,9 +177,8 @@ export function UploadChapterPage() {
                 value={chapterTitle}
                 onChange={(e) => setChapterTitle(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="e.g., The Beginning"
+                placeholder="Leave empty to auto-generate (e.g., 'Chapter 1')"
                 maxLength={100}
-                required
               />
             </div>
 

@@ -27,13 +27,14 @@ except ImportError as e:
     hf_hub_download = None  # type: ignore
 
 # Build identifier
-BUILD_ID = "2026-02-08_comic-bubble-yolov8m"
+BUILD_ID = "2026-02-08_manga-text-yolov8s"
 
 # Model names
 OCR_MODEL_NAME = "kha-white/manga-ocr-base"
 ANIMELAMA_MODEL_NAME = "df1412/anime-big-lama"
-YOLO_MODEL_REPO = "ogkalu/comic-speech-bubble-detector-yolov8m"
-YOLO_MODEL_FILE = "comic-speech-bubble-detector.pt"
+YOLO_MODEL_NAME = "ogkalu/manga-text-detector-yolov8s"
+YOLO_MODEL_REPO = "ogkalu/manga-text-detector-yolov8s"
+YOLO_MODEL_FILE = "manga-text-detector.pt"
 
 # Global instances (loaded in background)
 ocr_instance: Optional[MangaOcr] = None
@@ -79,7 +80,7 @@ def _load_yolo_model() -> None:
         logger.warning("⚠️ YOLO or HF Hub not available - skipping load")
         return
 
-    logger.info(f"📦 Loading YOLO model ({YOLO_MODEL_REPO})...")
+    logger.info(f"📦 Loading YOLO model ({YOLO_MODEL_NAME})...")
     try:
         # Download model from Hugging Face Hub
         logger.info(f"Downloading {YOLO_MODEL_FILE} from {YOLO_MODEL_REPO}...")

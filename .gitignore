@@ -13,8 +13,16 @@ build/
 temp/
 tmp/
 
-# Data directory (models, OCR input/output, uploads)
-data/
+# Data directories (preserve structure, ignore contents)
+data/db/*
+!data/db/.gitignore
+data/manga/*
+!data/manga/.gitignore
+data/models/*
+!data/models/.gitignore
+data/sock/*
+!data/sock/.gitignore
+
 src/public/uploads/cropped/*.png
 
 # Docker backups (large tar files)

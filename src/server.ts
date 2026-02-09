@@ -6,6 +6,7 @@ import { apiPlugin } from "./plugins/routeApi";
 import { appPlugin } from "./plugins/routeApp";
 import { appPluginBinary } from "./plugins/routeAppBinary";
 import { MangaOCRService } from "./services/MangaOCRService";
+import { PythonHealthService } from "./services/PythonHealthService";
 import { MigrationManager } from "./db/migration-manager";
 import { createLogger } from "tsuki-logger/elysia";
 import { catchError } from "./lib/error-handler";
@@ -40,6 +41,12 @@ async function initializeMangaOCR() {
   console.log("   Status:", health.status);
   console.log("   Model loaded:", health.model_loaded);
   console.log("   Socket:", envConfig.MANGA_OCR_SOCKET);
+
+  // Get and display detailed model status
+  const modelStatus = await PythonHealthService.getModelStatus();
+  if (modelStatus) {
+    PythonHealthService.displayModelStatus(modelStatus);
+  }
 }
 
 // Initialize database migrations first
