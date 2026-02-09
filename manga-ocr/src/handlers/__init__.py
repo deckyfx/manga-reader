@@ -10,6 +10,7 @@ from .scan_upload import scan_image_upload
 from .patch import generate_patch
 from .merge import merge_patches
 from .inpaint import inpaint_mask
+from .predict import predict_regions
 
 __all__ = [
     "health_check",
@@ -19,4 +20,5 @@ __all__ = [
     "generate_patch",
     "merge_patches",
     "inpaint_mask",
+    "predict_regions",
 ]

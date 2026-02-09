@@ -26,3 +26,4 @@ export { HistoryControls } from "./HistoryControls";
 export { DeleteMaskButton } from "./DeleteMaskButton";
 export { SaveMaskButton } from "./SaveMaskButton";
 export { InpaintButton } from "./InpaintButton";
+export { AutoDetectButton } from "./AutoDetectButton";

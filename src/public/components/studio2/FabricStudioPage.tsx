@@ -41,7 +41,6 @@ export function FabricStudioPage() {
   // Reset store on unmount
   useEffect(() => {
     return () => {
-      console.log("FabricStudioPage unmounting - resetting store");
       reset();
     };
   }, [reset]);
@@ -57,14 +56,6 @@ export function FabricStudioPage() {
     if (!pageChanged && !isInitialLoad) {
       return;
     }
-
-    console.log("Page navigation:", {
-      isInitialLoad,
-      pageChanged,
-      from: prevPageSlugRef.current || "(none)",
-      to: pageSlug || "(default)",
-      hasUnsavedChanges,
-    });
 
     // Check for unsaved changes (but not on initial load)
     if (!isInitialLoad && pageChanged && hasUnsavedChanges) {

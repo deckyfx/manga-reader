@@ -43,6 +43,27 @@ interface InpaintMaskResponse {
 }
 
 /**
+ * Bounding Box for detected text region
+ */
+interface BoundingBox {
+  type: "rectangle";
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  confidence: number;
+}
+
+/**
+ * Predict Regions Response
+ */
+interface PredictRegionsResponse {
+  status: "success";
+  regions: BoundingBox[];
+  image_size: [number, number];
+}
+
+/**
  * Error Response
  */
 interface ErrorResponse {
@@ -300,6 +321,24 @@ export class MangaOCRAPI {
       "Inpaint mask",
     );
     return result.cleanedImage;
+  }
+
+  /**
+   * Predict text regions using YOLO
+   *
+   * @param imageBase64 - Base64 encoded image
+   * @returns Array of bounding boxes with confidence scores
+   */
+  static async predictRegions(imageBase64: string): Promise<PredictRegionsResponse> {
+    return this.fetchAPI<PredictRegionsResponse>(
+      "/predict-regions",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: imageBase64 }),
+      },
+      "Region prediction",
+    );
   }
 
   /**

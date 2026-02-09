@@ -8,8 +8,9 @@ import { CaptionStore } from "../../stores/caption-store";
 import { PageDataStore } from "../../stores/page-data-store";
 import { PatchGeneratorService } from "../../services/PatchGeneratorService";
 import { MangaOCRService } from "../../services/MangaOCRService";
-import { MangaOCRAPI } from "../../services/MangaOCRAPI";
+import { CleaningService } from "../../services/CleaningService";
 import { TranslationService } from "../../services/TranslationService";
+import { BBPredictionService } from "../../services/BBPredictionService";
 import { envConfig } from "../../env-config";
 import { catchError } from "../../lib/error-handler";
 import {
@@ -671,12 +672,13 @@ export const studioApi = new Elysia({ prefix: "/studio" })
   .post(
     "/ocr-batch",
     async ({ body }) => {
-      const { pageId, regions } = body;
+      const { pageId, regions, withCleaning } = body;
 
       const ocrService = MangaOCRService.getInstance();
       const translationService = TranslationService.getInstance();
 
       const results = [];
+      const successfulRegions: Array<Region> = []; // Track successful regions for cleaning
 
       // Process each region one-by-one
       for (const regionItem of regions) {
@@ -743,6 +745,8 @@ export const studioApi = new Elysia({ prefix: "/studio" })
               translatedText: caption.translatedText,
               warning,
             });
+            // Track successful region for cleaning
+            successfulRegions.push(region);
           }
         } catch (error) {
           console.error(`Unexpected error for region ${id}:`, error);
@@ -754,9 +758,135 @@ export const studioApi = new Elysia({ prefix: "/studio" })
         }
       }
 
+      // Perform cleaning if requested and we have successful regions
+      if (withCleaning && successfulRegions.length > 0) {
+        const [pageError, page] = await catchError(
+          PageStore.findById(pageId),
+        );
+
+        if (pageError || !page) {
+          return {
+            success: false,
+            error: "Page not found for cleaning",
+            results,
+          };
+        }
+
+        // Load page image
+        const pageImagePath = join(
+          envConfig.MANGA_DIR,
+          page.originalImage.replace("/uploads/", ""),
+        );
+
+        const [imageError, imageFile] = await catchError(
+          Bun.file(pageImagePath).arrayBuffer(),
+        );
+
+        if (imageError) {
+          return {
+            success: false,
+            error: `Failed to load page image: ${imageError.message}`,
+            results,
+          };
+        }
+
+        // Create canvas and mask from successful regions
+        const imageBuffer = Buffer.from(imageFile);
+        const pageBlob = new Blob([imageBuffer], { type: "image/png" });
+
+        // Get image dimensions
+        const img = new Image();
+        const imageUrl = URL.createObjectURL(pageBlob);
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = reject;
+          img.src = imageUrl;
+        });
+
+        // Create canvas for mask generation
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+
+        // Convert regions to CleaningService format
+        const regionsForMask = successfulRegions.map((region) => {
+          const bounds = getRegionBounds(region);
+          const points = getRegionPolygonPoints(region);
+
+          // Convert bounds format from { x, y, width, height } to { left, top, width, height }
+          const cleaningBounds = {
+            left: bounds.x,
+            top: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+          };
+
+          if (region.shape === "rectangle") {
+            return {
+              type: "rectangle" as const,
+              bounds: cleaningBounds,
+            };
+          } else if (region.shape === "oval") {
+            return {
+              type: "ellipse" as const,
+              bounds: cleaningBounds,
+            };
+          } else {
+            return {
+              type: "polygon" as const,
+              bounds: cleaningBounds,
+              points: points || [],
+            };
+          }
+        });
+
+        // Generate mask and perform inpainting
+        const [cleanError, cleanedImageBase64] = await catchError(
+          CleaningService.cleanRegions(pageBlob, canvas, regionsForMask),
+        );
+
+        URL.revokeObjectURL(imageUrl);
+
+        if (cleanError) {
+          return {
+            success: false,
+            error: `Cleaning failed: ${cleanError.message}`,
+            results,
+          };
+        }
+
+        // Save cleaned image
+        const cleanedImageBuffer = Buffer.from(
+          cleanedImageBase64.replace(/^data:image\/\w+;base64,/, ""),
+          "base64",
+        );
+
+        const [writeError] = await catchError(
+          Bun.write(pageImagePath, cleanedImageBuffer),
+        );
+
+        if (writeError) {
+          return {
+            success: false,
+            error: "Failed to save cleaned image",
+            results,
+          };
+        }
+
+        // Clear page mask data
+        const [pageDataError, pageData] = await catchError(
+          PageDataStore.findByPageId(pageId),
+        );
+
+        if (pageData) {
+          await catchError(PageDataStore.delete(pageData.id));
+        }
+      }
+
       return {
         success: true,
         results,
+        cleaned: withCleaning && successfulRegions.length > 0,
       };
     },
     {
@@ -769,6 +899,7 @@ export const studioApi = new Elysia({ prefix: "/studio" })
             region: tRegion,
           }),
         ),
+        withCleaning: t.Optional(t.Boolean()),
       }),
     },
   )
@@ -1028,10 +1159,9 @@ export const studioApi = new Elysia({ prefix: "/studio" })
         { type: "image/png" },
       );
 
-      // Call MangaOCRAPI via Unix socket
-      const ocrAPI = MangaOCRAPI;
+      // Call CleaningService for inpainting
       const [inpaintError, cleanedImageBase64] = await catchError(
-        ocrAPI.inpaintMask(pageBlob, maskBlob),
+        CleaningService.inpaintWithMask(pageBlob, maskBlob),
       );
 
       if (inpaintError) {
@@ -1097,6 +1227,38 @@ export const studioApi = new Elysia({ prefix: "/studio" })
         pageId: t.Number(),
         pageImageBase64: t.String(),
         maskImageBase64: t.String(),
+      }),
+    },
+  )
+
+  // ─── Predict Regions (YOLO) endpoint ───────────────────
+  .post(
+    "/predict",
+    async ({ body }) => {
+      const { imageBase64 } = body;
+
+      // Call BBPredictionService
+      const [error, result] = await catchError(
+        BBPredictionService.predictRegions(imageBase64),
+      );
+
+      if (error) {
+        console.error("Predict regions error:", error);
+        return {
+          success: false,
+          error: error.message,
+        };
+      }
+
+      return {
+        success: true,
+        regions: result.regions,
+        imageSize: result.imageSize,
+      };
+    },
+    {
+      body: t.Object({
+        imageBase64: t.String(),
       }),
     },
   )

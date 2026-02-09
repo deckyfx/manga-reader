@@ -13,7 +13,7 @@ async def health_check() -> HealthResponse:
     """
     return HealthResponse(
         status="healthy",
-        model_loaded=state.ocr_ready and state.animelama_ready,
+        model_loaded=state.ocr_ready and state.animelama_ready and state.yolo_ready,
         build_id=state.BUILD_ID,
     )
 
@@ -27,5 +27,6 @@ async def status() -> StatusResponse:
         models={
             "ocr": ModelStatus(name=state.OCR_MODEL_NAME, ready=state.ocr_ready),
             "cleaner": ModelStatus(name=state.ANIMELAMA_MODEL_NAME, ready=state.animelama_ready),
+            "predict": ModelStatus(name=state.YOLO_MODEL_NAME, ready=state.yolo_ready),
         }
     )

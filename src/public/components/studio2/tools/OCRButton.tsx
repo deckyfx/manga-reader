@@ -26,6 +26,7 @@ export function OCRButton() {
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [status, setStatus] = useState("");
+  const [withCleaning, setWithCleaning] = useState(true); // Default: clean after OCR
 
   const currentPage = pages[currentPageIndex];
 
@@ -234,7 +235,9 @@ export function OCRButton() {
         return;
       }
 
-      setStatus(`Processing ${regionsWithPreview.length} region(s)...`);
+      setStatus(
+        `Processing ${regionsWithPreview.length} region(s)${withCleaning ? " + cleaning" : ""}...`,
+      );
 
       // Call batch OCR API with all regions at once
       const response = await api.api.studio["ocr-batch"].post({
@@ -244,6 +247,7 @@ export function OCRButton() {
           capturedImage: item.preview,
           region: item.region,
         })),
+        withCleaning,
       });
 
       if (!response.data || !response.data.success) {
@@ -299,6 +303,17 @@ export function OCRButton() {
 
   return (
     <div className="flex flex-col gap-2">
+      <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={withCleaning}
+          onChange={(e) => setWithCleaning(e.target.checked)}
+          disabled={isProcessing}
+          className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-pink-500 focus:ring-pink-500 focus:ring-offset-gray-800"
+        />
+        <span>Clean text after OCR</span>
+      </label>
+
       <button
         onClick={handleOCR}
         disabled={!canProcess}

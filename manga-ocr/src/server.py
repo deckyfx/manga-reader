@@ -8,6 +8,8 @@ Endpoints:
 - POST /scan-upload - OCR image scan (file upload)
 - POST /generate-patch - Generate translation patch
 - POST /merge-patches - Merge patches onto page
+- POST /inpaint-mask - Inpaint with mask (AnimeLaMa)
+- POST /predict-regions - Predict text regions (YOLOv8l)
 """
 
 import os
@@ -24,6 +26,7 @@ from .response_models import (
     ImageRequest, PatchRequest, PatchResponse,
     MergePatchesRequest, MergePatchesResponse,
     InpaintMaskResponse,
+    PredictRegionsRequest, PredictRegionsResponse,
 )
 from .state import BUILD_ID, start_model_loading
 from .handlers import (
@@ -34,6 +37,7 @@ from .handlers import (
     generate_patch,
     merge_patches,
     inpaint_mask,
+    predict_regions,
 )
 
 
@@ -69,6 +73,7 @@ async def lifespan(app: FastAPI):
     logger.info("   POST /generate-patch   - Generate translation patch")
     logger.info("   POST /merge-patches    - Merge patches onto page")
     logger.info("   POST /inpaint-mask     - Inpaint with mask")
+    logger.info("   POST /predict-regions  - Predict text regions (YOLO)")
 
     yield
 
@@ -130,6 +135,12 @@ async def route_inpaint_mask(
 ):
     """Inpaint page using binary mask."""
     return await inpaint_mask(image, mask)
+
+
+@app.post("/predict-regions", response_model=PredictRegionsResponse)
+async def route_predict_regions(request: PredictRegionsRequest):
+    """Predict text regions using YOLO."""
+    return await predict_regions(request)
 
 
 def start_server(socket_path: str = "/app/sock/manga-ocr.sock", log_level: str = "info"):

@@ -33,7 +33,9 @@ export function StudioCanvas() {
   const clearHistory = useStudioStore((state) => state.clearHistory);
   const currentPageData = useStudioStore((state) => state.currentPageData);
   const syncTextOverlays = useStudioStore((state) => state.syncTextOverlays);
-  const setSelectedTextbox = useStudioStore((state) => state.setSelectedTextbox);
+  const setSelectedTextbox = useStudioStore(
+    (state) => state.setSelectedTextbox,
+  );
   const setPopoverAnchor = useStudioStore((state) => state.setPopoverAnchor);
 
   // Initialize Fabric canvas once on mount
@@ -54,7 +56,6 @@ export function StudioCanvas() {
           document.fonts.load('16px "Nunito"'),
           document.fonts.load('16px "ToonTime"'),
         ]);
-        console.log("✅ Fonts loaded");
       } catch (error) {
         console.warn("⚠️ Font loading error (non-critical):", error);
       }
@@ -81,7 +82,12 @@ export function StudioCanvas() {
     // Handle selection color changes
     canvas.on("selection:created", (e) => {
       const obj = e.selected?.[0];
-      if (obj && (obj.type === "rect" || obj.type === "ellipse" || obj.type === "polygon")) {
+      if (
+        obj &&
+        (obj.type === "rect" ||
+          obj.type === "ellipse" ||
+          obj.type === "polygon")
+      ) {
         obj.set({ fill: "rgba(59, 130, 246, 0.3)" }); // Blue color when selected
         canvas.renderAll();
       }
@@ -90,13 +96,23 @@ export function StudioCanvas() {
     canvas.on("selection:updated", (e) => {
       // Deselect previous object - restore original color
       const deselected = e.deselected?.[0];
-      if (deselected && (deselected.type === "rect" || deselected.type === "ellipse" || deselected.type === "polygon")) {
+      if (
+        deselected &&
+        (deselected.type === "rect" ||
+          deselected.type === "ellipse" ||
+          deselected.type === "polygon")
+      ) {
         deselected.set({ fill: "rgba(236, 72, 153, 0.1)" }); // Original pink color
       }
 
       // Select new object - change to blue
       const selected = e.selected?.[0];
-      if (selected && (selected.type === "rect" || selected.type === "ellipse" || selected.type === "polygon")) {
+      if (
+        selected &&
+        (selected.type === "rect" ||
+          selected.type === "ellipse" ||
+          selected.type === "polygon")
+      ) {
         selected.set({ fill: "rgba(59, 130, 246, 0.3)" }); // Blue color
       }
 
@@ -105,7 +121,12 @@ export function StudioCanvas() {
 
     canvas.on("selection:cleared", (e) => {
       const deselected = e.deselected?.[0];
-      if (deselected && (deselected.type === "rect" || deselected.type === "ellipse" || deselected.type === "polygon")) {
+      if (
+        deselected &&
+        (deselected.type === "rect" ||
+          deselected.type === "ellipse" ||
+          deselected.type === "polygon")
+      ) {
         deselected.set({ fill: "rgba(236, 72, 153, 0.1)" }); // Original pink color
         canvas.renderAll();
       }

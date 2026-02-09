@@ -9,6 +9,7 @@ import {
   DeleteMaskButton,
   SaveMaskButton,
   InpaintButton,
+  AutoDetectButton,
 } from "./tools";
 import { PageNavigation } from "./tools/PageNavigation";
 import { OCRButton } from "./tools/OCRButton";
@@ -25,6 +26,11 @@ export function StudioLeftPanel() {
     <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col overflow-hidden">
       {/* Tools section - takes minimum space */}
       <div className="p-4 flex-shrink-0">
+        {/* Auto Detect Button - Top priority */}
+        <div className="mb-4">
+          <AutoDetectButton />
+        </div>
+
         <h3 className="text-white text-sm font-semibold mb-2">Masking Tools</h3>
 
         <div className="grid grid-cols-4 gap-2">

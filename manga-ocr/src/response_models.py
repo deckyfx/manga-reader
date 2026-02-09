@@ -89,3 +89,25 @@ class InpaintMaskResponse(BaseModel):
     """Response model for /inpaint-mask endpoint."""
     status: str
     cleanedImage: str  # Base64 encoded PNG
+
+
+class BoundingBox(BaseModel):
+    """Bounding box for detected text region."""
+    type: str  # "rectangle"
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+    confidence: float
+
+
+class PredictRegionsRequest(BaseModel):
+    """Request model for region prediction."""
+    image: str  # Base64 encoded image
+
+
+class PredictRegionsResponse(BaseModel):
+    """Response model for region prediction."""
+    status: str
+    regions: list[BoundingBox]
+    image_size: tuple[int, int]

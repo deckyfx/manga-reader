@@ -77,6 +77,8 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     libgomp1 \
     libstdc++6 \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy ONLY the installed packages from builder (no source, no cache, no build tools)

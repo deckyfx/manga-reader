@@ -482,6 +482,10 @@ export function RegionListPanel() {
         return;
       }
 
+      // Get clean flag from mask data
+      const withCleaning =
+        extObj.data?.type === "mask" ? extObj.data.clean || false : false;
+
       // Call batch OCR API with single region
       const response = await api.api.studio["ocr-batch"].post({
         pageId: currentPage.id,
@@ -492,6 +496,7 @@ export function RegionListPanel() {
             region: item.region!,
           },
         ],
+        withCleaning,
       });
 
       if (!response.data || !response.data.success) {

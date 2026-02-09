@@ -11,7 +11,7 @@ services:
       # Hugging Face API token (optional)
       - HF_TOKEN=${HF_TOKEN}
     volumes:
-      # Persist Hugging Face model cache (~850MB manga-ocr + ~197MB AnimeLaMa)
+      # Persist Hugging Face model cache (~850MB manga-ocr + ~197MB AnimeLaMa + ~87MB YOLO)
       - ${DATA_DIR:-./data}/models:/root/.cache/huggingface/hub
       # Shared sockets directory (for IPC with main app)
       - ${DATA_DIR:-./data}/sock:/app/sock
