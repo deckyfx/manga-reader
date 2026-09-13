@@ -105,6 +105,25 @@ export function printDownloadPlan(entries: DownloadEntry[]): void {
   for (const m of missing) log.info(m);
 }
 
+/**
+ * Resolve the browser_download_url of the first asset whose name includes `keyword`
+ * in the latest release of a GitHub repo.
+ */
+export async function findGitHubReleaseAsset(owner: string, repo: string, keyword: string): Promise<string> {
+  const url = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
+  const res = await fetch(url, {
+    headers: { "Accept": "application/vnd.github+json", "User-Agent": "web-ocr-bun" },
+  });
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new Error(`GitHub API ${res.status} for ${owner}/${repo}`);
+  }
+  const data = await res.json() as { assets?: { name: string; browser_download_url: string }[] };
+  const asset = data.assets?.find((a) => a.name.includes(keyword));
+  if (!asset) throw new Error(`No release asset matching "${keyword}" in ${owner}/${repo}`);
+  return asset.browser_download_url;
+}
+
 // ── Internals ─────────────────────────────────────────────────────────────────
 
 function printProgress(label: string, done: number, total: number): void {

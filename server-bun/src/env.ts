@@ -39,6 +39,9 @@ class EnvConfig {
   get BUBBLE_MODELS_DIR(): string { return Bun.env.BUBBLE_MODELS_DIR ?? "./data/models/bubble"; }
   get TEXT_SEG_MODELS_DIR(): string { return Bun.env.TEXT_SEG_MODELS_DIR ?? "./data/models/textseg"; }
   get DICT_DIR(): string { return Bun.env.DICT_DIR ?? "./data/models/jdict"; }
+  /** Override the auto-resolved Jitendex GitHub release URL. */
+  get JITENDEX_ZIP_URL(): string | undefined { return Bun.env.JITENDEX_ZIP_URL || undefined; }
+  get DICT_MODEL_ENABLED(): boolean { return Bun.env.DICT_MODEL_ENABLED !== "false"; }
 
   // ── Model repos ──────────────────────────────────────────────────────────
 
