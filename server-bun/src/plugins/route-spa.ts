@@ -1,24 +1,17 @@
-import Elysia from "elysia";
 import index from "../../client/index.html";
 
-/** Serve the React SPA. Paths with file extensions (assets) are NOT intercepted —
- *  Bun serves those natively via its HTML import mechanism or bunfig static plugins. */
-export const routeSpa = new Elysia()
-  .get("/", index)
-  .get("/*", ({ request }) => {
-    const { pathname } = new URL(request.url);
-    // Let Bun handle asset requests: any path with a dot (file extension) or
-    // Bun's virtual module paths (tailwindcss, /_bun/...)
-    if (
-      pathname.includes(".") ||
-      pathname.startsWith("/api") ||
-      pathname.startsWith("/studio/api") ||
-      pathname.startsWith("/read/api") ||
-      pathname.startsWith("/health") ||
-      pathname === "/tailwindcss" ||
-      pathname.startsWith("/_bun")
-    ) {
-      return new Response("Not Found", { status: 404 });
-    }
-    return index;
-  });
+/**
+ * Client routes that serve the React SPA, passed to Bun.serve through Elysia's `serve.routes`.
+ *
+ * The HTML bundle can't be returned from an Elysia handler (it would be serialised as `{}`), and Elysia
+ * only turns inline values into Bun static routes when no request hooks exist — CORS adds one. Bun matches
+ * exact API paths (e.g. `/studio/api/pages/:id`, which Elysia registers too) before these wildcards.
+ */
+export const spaRoutes = {
+  "/": index,
+  "/studio": index,
+  "/studio/*": index,
+  "/read": index,
+  "/read/*": index,
+  "/settings": index,
+};

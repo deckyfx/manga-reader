@@ -8,7 +8,7 @@ import { api } from "@/api";
 import { routeSettings } from "@/plugins/route-settings";
 import { studioPlugin } from "@/plugins/studio/index";
 import { readPlugin } from "@/plugins/read/index";
-import { routeSpa } from "@/plugins/route-spa";
+import { spaRoutes } from "@/plugins/route-spa";
 
 const bootLog = childLogger("boot");
 
@@ -135,14 +135,13 @@ await loadModels().catch((err) => {
   process.exit(1);
 });
 
-const app = new Elysia()
+const app = new Elysia({ serve: { routes: spaRoutes } })
   .use(loggerPlugin)
   .use(cors())
   .use(api)
   .use(routeSettings)
   .use(studioPlugin)
-  .use(readPlugin)
-  .use(routeSpa);
+  .use(readPlugin);
 
 const listen = env.SOCKET_PATH
   ? { unix: env.SOCKET_PATH }
