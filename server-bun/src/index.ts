@@ -105,6 +105,11 @@ async function loadModels(): Promise<void> {
     await loadTextSegModel().catch((err: Error) => { loadErrors.push(`TextSeg: ${err.message}`); });
   }
 
+  if (env.INPAINT_MODEL_ENABLED) {
+    const { loadInpaintModel } = await import("@/services/inpaint-service");
+    await loadInpaintModel().catch((err: Error) => bootLog.warn({ err }, "Inpaint model unavailable"));
+  }
+
   // Dictionary is non-fatal (health reports "degraded"); /analyze needs both tokenizer and index.
   if (env.DICT_MODEL_ENABLED) {
     const { analyzeService } = await import("@/services/analyze-service");

@@ -75,10 +75,11 @@ class EnvConfig {
     return (Bun.env.TRANSLATE_MODEL_FILES ?? "onnx/encoder_model.onnx,onnx/decoder_model.onnx,tokenizer.json").split(",");
   }
 
-  get INPAINT_MODEL_REPO(): string { return Bun.env.INPAINT_MODEL_REPO ?? "Carve/LaMa-ONNX"; }
+  /** Manga-finetuned LaMa with dynamic input size (generic Carve/LaMa-ONNX leaves blocks on manga). */
+  get INPAINT_MODEL_REPO(): string { return Bun.env.INPAINT_MODEL_REPO ?? "ogkalu/lama-manga-onnx-dynamic"; }
   get INPAINT_MODEL_ENABLED(): boolean { return Bun.env.INPAINT_MODEL_ENABLED === "true"; }
   get INPAINT_MODEL_FILES(): string[] {
-    return (Bun.env.INPAINT_MODEL_FILES ?? "lama_fp32.onnx").split(",");
+    return (Bun.env.INPAINT_MODEL_FILES ?? "lama-manga-dynamic.onnx").split(",");
   }
 
   get BUBBLE_MODEL_REPO(): string { return Bun.env.BUBBLE_MODEL_REPO ?? "ogkalu/comic-text-and-bubble-detector"; }
