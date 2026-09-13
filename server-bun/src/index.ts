@@ -6,7 +6,8 @@ import { logger, childLogger } from "@/lib/logger";
 import { loggerPlugin } from "@/plugins/plugin-logger";
 import { api } from "@/api";
 import { routeSettings } from "@/plugins/route-settings";
-import { portalPlugin } from "@/plugins/portal/index";
+import { studioPlugin } from "@/plugins/studio/index";
+import { readPlugin } from "@/plugins/read/index";
 import { routeSpa } from "@/plugins/route-spa";
 
 const bootLog = childLogger("boot");
@@ -139,7 +140,8 @@ const app = new Elysia()
   .use(cors())
   .use(api)
   .use(routeSettings)
-  .use(portalPlugin)
+  .use(studioPlugin)
+  .use(readPlugin)
   .use(routeSpa);
 
 const listen = env.SOCKET_PATH

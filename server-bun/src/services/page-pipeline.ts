@@ -107,10 +107,31 @@ function matchBubble(block: Box, bubbles: Box[]): Box | null {
   return best;
 }
 
+/** Where a page's blocks and metadata are stored: blocks.json for the CLI, SQLite for the server. */
+export interface JobRepository {
+  read(): Promise<PageJob | null>;
+  write(job: PageJob): Promise<void>;
+}
+
+/** Stores the job as blocks.json inside the job directory. */
+export function fileJobRepository(dir: string): JobRepository {
+  const path = join(dir, "blocks.json");
+  return {
+    read: async () => {
+      const file = Bun.file(path);
+      return (await file.exists()) ? ((await file.json()) as PageJob) : null;
+    },
+    write: async (job) => {
+      await Bun.write(path, JSON.stringify(job, null, 2));
+    },
+  };
+}
+
 export class PagePipeline {
   constructor(
     readonly dir: string,
     private readonly report: ProgressReporter = () => {},
+    private readonly repository: JobRepository = fileJobRepository(dir),
   ) {}
 
   /** Path of a file inside the job directory. */
@@ -118,15 +139,14 @@ export class PagePipeline {
     return join(this.dir, file);
   }
 
-  /** Blocks and metadata from blocks.json, or null before `detect` has run. */
-  async readJob(): Promise<PageJob | null> {
-    const file = Bun.file(this.path("blocks.json"));
-    return (await file.exists()) ? ((await file.json()) as PageJob) : null;
+  /** Blocks and metadata, or null before `detect` has run. */
+  readJob(): Promise<PageJob | null> {
+    return this.repository.read();
   }
 
-  /** Saves blocks and metadata to blocks.json. */
-  async writeJob(job: PageJob): Promise<void> {
-    await Bun.write(this.path("blocks.json"), JSON.stringify(job, null, 2));
+  /** Saves blocks and metadata. */
+  writeJob(job: PageJob): Promise<void> {
+    return this.repository.write(job);
   }
 
   /** Text mask and blocks. Text is grouped per bubble when the bubble detector is available. */

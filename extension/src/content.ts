@@ -12,7 +12,7 @@ import type {
   FromEngineMsg,
   FetchImageMsg,
 } from "./types";
-import { errorMessage, serverApi, type PageJobEvent } from "./api";
+import { errorMessage, serverApi, type PageJobEvent, type PageLiveEvent } from "./api";
 
 // ── Guard ─────────────────────────────────────────────────────────────────────
 
@@ -671,9 +671,12 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
           activeEventSource = null;
           img.src = `data:image/png;base64,${update.result}`;
           img.srcset = "";
+          img.dataset.socrJobId = data.job_id;
+          watchPageUpdates(serverUrl, data.job_id);
           setImageTranslateProgress(1);
           appendLogEntry(`Image replaced ✓ (${(update.elapsed_ms / 1000).toFixed(1)} s)`, "done");
-          setTimeout(() => hideImageTranslateLoading(true), 1500);
+          appendStudioLink(`${serverUrl}/studio/pages/${data.job_id}`);
+          setTimeout(() => hideImageTranslateLoading(true), 4000);
           break;
         case "error":
           es.close();
@@ -692,6 +695,47 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
   } catch (e) {
     hideImageTranslateLoading(false, e instanceof Error ? e.message : String(e));
   }
+}
+
+/** Live streams per translated page; they stay open while this tab shows the page. */
+const pageWatchers = new Map<string, EventSource>();
+
+/** Swap in the new result whenever the page is published from the Studio. */
+function watchPageUpdates(serverUrl: string, jobId: string): void {
+  if (pageWatchers.has(jobId)) return;
+  const es = new EventSource(`${serverUrl}/api/translate-page/${jobId}/live`);
+  pageWatchers.set(jobId, es);
+
+  es.onmessage = (event: MessageEvent<string>) => {
+    const update = JSON.parse(event.data) as PageLiveEvent;
+    if (update.type !== "page-updated") return;
+    const shown = document.querySelectorAll<HTMLImageElement>(`img[data-socr-job-id="${CSS.escape(jobId)}"]`);
+    if (shown.length === 0) {
+      // The image left the page (e.g. the reader moved on): stop listening
+      es.close();
+      pageWatchers.delete(jobId);
+      return;
+    }
+    shown.forEach((img) => { img.srcset = ""; });
+    replacePageImages(jobId, `${serverUrl}${update.result_url}`);
+  };
+
+  // EventSource reconnects on its own after network errors; it only closes for good when the server refuses the stream
+  es.onerror = () => {
+    if (es.readyState === EventSource.CLOSED) pageWatchers.delete(jobId);
+  };
+}
+
+/** Link from the progress panel to the page in the Studio. */
+function appendStudioLink(url: string): void {
+  if (!imageTranslateLogList) return;
+  const link = document.createElement("a");
+  link.className = "socr-log-entry";
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener";
+  link.textContent = "Open in Studio ↗";
+  imageTranslateLogList.appendChild(link);
 }
 
 /** Show overall progress (and the current step) in the loading panel's title. */

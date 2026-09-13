@@ -7,21 +7,20 @@ export function Layout() {
       {/* Sidebar */}
       <nav className="flex flex-col gap-1 w-14 shrink-0 bg-gray-900 border-r border-gray-800 py-3 items-center">
         <NavLink
-          to="/"
-          end
+          to="/studio"
           className={({ isActive }) =>
             `p-2.5 rounded-lg transition-colors ${isActive ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-white hover:bg-gray-800"}`
           }
-          title="Jobs"
+          title="Studio"
         >
           <Layers size={20} />
         </NavLink>
         <NavLink
-          to="/library"
+          to="/read"
           className={({ isActive }) =>
             `p-2.5 rounded-lg transition-colors ${isActive ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-white hover:bg-gray-800"}`
           }
-          title="Library"
+          title="Read"
         >
           <BookOpen size={20} />
         </NavLink>
