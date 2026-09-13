@@ -9,7 +9,10 @@ import sharp from "sharp";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { env } from "@/env";
+import { childLogger } from "@/lib/logger";
 import type { Box } from "@/lib/mask";
+
+const log = childLogger("bubble");
 
 const INPUT_SIZE = 640;
 const MIN_SCORE = 0.5;
@@ -76,12 +79,14 @@ export function bubbleModelPath(): string {
 
 let sharedDetector: Promise<BubbleDetector | null> | null = null;
 
-/** Process-wide detector, loaded on first use; null when the model file is not downloaded. */
+/** Process-wide detector, loaded on first use; null when the model file is missing or fails to load. */
 export function getBubbleDetector(): Promise<BubbleDetector | null> {
   sharedDetector ??= existsSync(bubbleModelPath())
     ? BubbleDetector.load(bubbleModelPath()).catch((err: unknown) => {
+        // The detector is optional: fall back to text-detector grouping, and retry loading on the next page
         sharedDetector = null;
-        throw err;
+        log.warn({ err }, "Bubble detector unavailable — falling back to text-detector grouping");
+        return null;
       })
     : Promise.resolve(null);
   return sharedDetector;

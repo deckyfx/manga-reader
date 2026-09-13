@@ -84,6 +84,9 @@ export interface RenderResult {
   skipped: number[];
 }
 
+/** Files produced after `detect`, removed when a page is detected again. */
+const DERIVED_OUTPUTS = ["crops", "clean-text.png", "clean-sfx.png", "patches", "render-overlay.png", "result.png"];
+
 /** Model files the pipeline cannot run without (the bubble detector is optional). */
 export function missingPipelineModels(): string[] {
   return [textSegModelPath(), inpaintModelPath()].filter((path) => !existsSync(path));
@@ -126,6 +129,8 @@ export class PagePipeline {
   /** Text mask and blocks. Text is grouped per bubble when the bubble detector is available. */
   async detect(image: string | Buffer, source: string): Promise<DetectResult> {
     mkdirSync(this.dir, { recursive: true });
+    // Later stages pick their input by file existence, so outputs from an earlier run would go stale
+    for (const stale of DERIVED_OUTPUTS) rmSync(this.path(stale), { recursive: true, force: true });
     this.report({ stage: "detecting", message: "Detecting bubbles and text…", fraction: 0 });
     await sharp(image).png().toFile(this.path("original.png"));
     const page = Buffer.from(await Bun.file(this.path("original.png")).arrayBuffer());
@@ -271,12 +276,19 @@ export class PagePipeline {
 
     // Largest size each block could take, then a shared page size so the lettering looks consistent
     const bestSizes = entries.map(({ block, area }) => typesetter.layout(block.translated_text ?? "", area, maxFontSize).fontSize);
-    const sortedSizes = [...bestSizes].sort((a, b) => a - b);
+    // Size 0 means separateAreas left the area empty: it must not drag the page size down to the minimum
+    const sortedSizes = bestSizes.filter((size) => size > 0).sort((a, b) => a - b);
     const pageFontSize = sortedSizes[Math.floor((sortedSizes.length - 1) / 2)] ?? maxFontSize;
 
     const patches: OverlayOptions[] = [];
     const rendered: RenderedBlock[] = [];
+    const laidOut: TextArea[] = [];
     for (const [i, { block: b, area }] of entries.entries()) {
+      if (bestSizes[i] <= 0) {
+        skipped.push(b.id);
+        continue;
+      }
+      laidOut.push(area);
       const layout = typesetter.layout(b.translated_text ?? "", area, Math.min(pageFontSize, bestSizes[i]));
       const patch = await sharp(Buffer.from(typesetter.renderSvg(layout, area))).png().toBuffer();
       await Bun.write(this.path(`patches/${b.id}.png`), patch);
@@ -287,7 +299,7 @@ export class PagePipeline {
     }
 
     await sharp(page).composite(patches).png().toFile(this.path("result.png"));
-    await this.renderTypesetOverlay(rgb, width, height, entries.map((e) => e.area), patches);
+    await this.renderTypesetOverlay(rgb, width, height, laidOut, patches);
     await this.writeJob(job);
     this.report({ stage: "typesetting", message: `Typeset ${rendered.length} translations`, fraction: 1 });
     return { input, pageFontSize, blocks: rendered, skipped };
