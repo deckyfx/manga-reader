@@ -1,5 +1,8 @@
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import http, { type IncomingMessage } from "node:http";
+import https from "node:https";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { isIP, type LookupFunction } from "node:net";
+import { isNonPublicAddress } from "@/lib/ip-address";
 import { childLogger } from "@/lib/logger";
 import { ImageLoadError, MAX_IMAGE_BYTES } from "@/services/page-jobs";
 
@@ -8,39 +11,53 @@ const log = childLogger("image-fetch");
 const FETCH_TIMEOUT_MS = 20_000;
 const MAX_REDIRECTS = 3;
 
-/** IPv4 ranges that must never be fetched on a user's behalf (loopback, private, link-local, CGNAT, multicast, reserved). */
-const BLOCKED_V4: [number, number][] = [
-  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12],
-  ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 4], ["240.0.0.0", 4],
-].map(([base, bits]) => [ipv4ToInt(base as string), bits as number]);
-
-function ipv4ToInt(ip: string): number {
-  return ip.split(".").reduce((acc, part) => (acc << 8) + Number(part), 0) >>> 0;
+export interface ResolvedAddress {
+  address: string;
+  family: number;
 }
 
-/** True when the address is not a public unicast address. */
-export function isNonPublicAddress(address: string): boolean {
-  if (isIP(address) === 4) {
-    const value = ipv4ToInt(address);
-    return BLOCKED_V4.some(([base, bits]) => (value >>> (32 - bits)) === (base >>> (32 - bits)));
-  }
-  const ip = address.toLowerCase();
-  // IPv4-mapped (::ffff:a.b.c.d) is judged by its IPv4 part
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip);
-  if (mapped) return isNonPublicAddress(mapped[1]);
-  return ip === "::" || ip === "::1" || /^f[cd]/.test(ip) || /^fe[89ab]/.test(ip) || ip.startsWith("ff");
-}
+/** DNS resolution used for every connection; injectable so tests can simulate hostile DNS. */
+export type Resolver = (hostname: string) => Promise<ResolvedAddress[]>;
 
-/** Resolves the URL's host and rejects it when any address it maps to isn't public. */
-async function assertPublicHost(url: URL): Promise<void> {
-  const host = url.hostname.replace(/^\[|\]$/g, "");
-  const addresses = isIP(host) ? [host] : (await lookup(host, { all: true }).catch(() => [])).map((a) => a.address);
+const systemResolver: Resolver = (hostname) => dnsLookup(hostname, { all: true, verbatim: true });
+
+/** Hostname or IP literal from a URL, without IPv6 brackets. */
+const hostOf = (url: URL): string => url.hostname.replace(/^\[|\]$/g, "");
+
+/** Resolves the host and keeps only public addresses; throws when any address is non-public or none resolve. */
+async function publicAddresses(hostname: string, resolve: Resolver): Promise<ResolvedAddress[]> {
+  const addresses = isIP(hostname)
+    ? [{ address: hostname, family: isIP(hostname) }]
+    : await resolve(hostname).catch((err: unknown) => {
+      log.warn({ err, hostname }, "Image host lookup failed");
+      return [];
+    });
   if (addresses.length === 0) throw new ImageLoadError("could not resolve the image host");
-  if (addresses.some(isNonPublicAddress)) throw new ImageLoadError("image URLs on private or local networks are not allowed");
+  if (addresses.some((a) => isNonPublicAddress(a.address))) throw new ImageLoadError("image URLs on private or local networks are not allowed");
+  return addresses;
 }
 
-/** Parses and checks one URL of the fetch chain (the original or a redirect target). */
-async function checkedUrl(raw: string, base?: URL): Promise<URL> {
+/**
+ * DNS lookup for the http(s) agent: validates the addresses at connect time and connects to exactly those,
+ * so a DNS answer can't change between the check and the connection (DNS rebinding).
+ */
+function pinnedLookup(resolve: Resolver): LookupFunction {
+  return (hostname, options, callback) => {
+    publicAddresses(hostname, resolve).then(
+      (addresses) => {
+        if ((options as { all?: boolean }).all) {
+          (callback as unknown as (err: null, addresses: ResolvedAddress[]) => void)(null, addresses);
+        } else {
+          callback(null, addresses[0].address, addresses[0].family);
+        }
+      },
+      (err: Error) => callback(err as NodeJS.ErrnoException, "", 0),
+    );
+  };
+}
+
+/** Parses a URL of the fetch chain (the original or a redirect target) and checks its scheme. */
+function parseUrl(raw: string, base?: URL): URL {
   let url: URL;
   try {
     url = new URL(raw, base);
@@ -48,52 +65,83 @@ async function checkedUrl(raw: string, base?: URL): Promise<URL> {
     throw new ImageLoadError("invalid image URL");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new ImageLoadError("only http and https image URLs are supported");
-  await assertPublicHost(url);
   return url;
 }
 
+/** One GET over a connection pinned to validated public addresses; resolves once response headers arrive. */
+function request(url: URL, resolve: Resolver, signal: AbortSignal): Promise<IncomingMessage> {
+  return new Promise((resolvePromise, reject) => {
+    const client = url.protocol === "https:" ? https : http;
+    const req = client.get(url, {
+      // No keep-alive agent: every request must go through the pinned lookup
+      agent: false,
+      lookup: pinnedLookup(resolve),
+      signal,
+      headers: { accept: "image/*", referer: `${url.origin}/`, "user-agent": "web-ocr" },
+    }, resolvePromise);
+    req.on("error", reject);
+  });
+}
+
+/** Maps transport failures to a client-safe ImageLoadError; the details are only logged. */
+function toLoadError(err: unknown, url: URL, signal: AbortSignal): ImageLoadError {
+  if (err instanceof ImageLoadError) return err;
+  log.warn({ err, url: url.href }, "Image fetch failed");
+  return new ImageLoadError(signal.aborted ? "fetching the image timed out" : "could not fetch the image");
+}
+
 /**
- * Downloads an image for a new page. Only public http(s) hosts are allowed, including after each redirect
- * (at most MAX_REDIRECTS), the body is capped at MAX_IMAGE_BYTES while streaming, and failures throw
- * ImageLoadError with a message fit for the client (network details are only logged). Sends the URL's origin
- * as referer, which many manga image hosts require.
+ * Downloads an image for a new page. Only public http(s) hosts are reachable: every connection (including
+ * each of at most MAX_REDIRECTS redirects) is pinned to addresses validated at connect time. The body is capped
+ * at MAX_IMAGE_BYTES while streaming, the whole download has one deadline, and every failure is an
+ * ImageLoadError with a client-safe message. Sends the URL's origin as referer, which many manga hosts require.
  */
-export async function fetchImage(rawUrl: string): Promise<Buffer> {
-  let url = await checkedUrl(rawUrl);
+export async function fetchImage(rawUrl: string, resolve: Resolver = systemResolver): Promise<Buffer> {
+  let url = parseUrl(rawUrl);
+  // Fail fast with a clear message before opening a connection (the pinned lookup re-checks at connect time)
+  if (isIP(hostOf(url))) await publicAddresses(hostOf(url), resolve);
   const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
 
-  let res: Response | null = null;
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+  let res: IncomingMessage | null = null;
+  for (let hop = 0; ; hop++) {
     try {
-      res = await fetch(url, { signal, redirect: "manual", headers: { accept: "image/*", referer: `${url.origin}/` } });
+      res = await request(url, resolve, signal);
     } catch (err) {
-      log.warn({ err, url: url.href }, "Image fetch failed");
-      throw new ImageLoadError(err instanceof Error && err.name === "TimeoutError" ? "fetching the image timed out" : "could not fetch the image");
+      throw toLoadError(err, url, signal);
     }
-    const location = res.headers.get("location");
-    if (res.status < 300 || res.status >= 400 || !location) break;
+    const status = res.statusCode ?? 0;
+    const location = res.headers.location;
+    if (status < 300 || status >= 400 || !location) break;
+    res.resume();
     if (hop === MAX_REDIRECTS) throw new ImageLoadError("too many redirects");
-    url = await checkedUrl(location, url);
-    res = null;
+    url = parseUrl(location, url);
   }
 
-  if (!res) throw new ImageLoadError("could not fetch the image");
-  if (!res.ok) throw new ImageLoadError(`image URL returned HTTP ${res.status}`);
-  if (Number(res.headers.get("content-length") ?? 0) > MAX_IMAGE_BYTES) throw new ImageLoadError("image too large (max 15 MB)");
-  if (!res.body) throw new ImageLoadError("image URL returned no data");
+  const status = res.statusCode ?? 0;
+  if (status < 200 || status >= 300) {
+    res.resume();
+    throw new ImageLoadError(`image URL returned HTTP ${status}`);
+  }
+  if (Number(res.headers["content-length"] ?? 0) > MAX_IMAGE_BYTES) {
+    res.destroy();
+    throw new ImageLoadError("image too large (max 15 MB)");
+  }
 
-  const chunks: Uint8Array[] = [];
+  const chunks: Buffer[] = [];
   let total = 0;
-  const reader = res.body.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > MAX_IMAGE_BYTES) {
-      await reader.cancel();
-      throw new ImageLoadError("image too large (max 15 MB)");
+  try {
+    for await (const chunk of res) {
+      const piece = chunk as Buffer;
+      total += piece.byteLength;
+      if (total > MAX_IMAGE_BYTES) {
+        res.destroy();
+        throw new ImageLoadError("image too large (max 15 MB)");
+      }
+      chunks.push(piece);
     }
-    chunks.push(value);
+  } catch (err) {
+    throw toLoadError(err, url, signal);
   }
+  if (total === 0) throw new ImageLoadError("image URL returned no data");
   return Buffer.concat(chunks);
 }
