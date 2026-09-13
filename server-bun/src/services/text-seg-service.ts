@@ -90,8 +90,11 @@ export class TextSegmenter {
     return new TextSegmenter(session);
   }
 
-  /** Text-pixel mask at page resolution plus text and SFX blocks. */
-  async segment(image: Buffer): Promise<TextSegResult> {
+  /**
+   * Text-pixel mask at page resolution plus text and SFX blocks. `textBoxes` (e.g. from the bubble
+   * detector) decide how text is grouped; without them the model's own `blk` boxes are used.
+   */
+  async segment(image: Buffer, textBoxes?: Box[]): Promise<TextSegResult> {
     const { data: rgb, info } = await sharp(image).removeAlpha().toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
     const { width, height } = info;
 
@@ -145,8 +148,8 @@ export class TextSegmenter {
     const mask = new Uint8Array(width * height);
     for (let i = 0; i < mask.length; i++) mask[i] = up[i] >= 128 ? 1 : 0;
 
-    const textBoxes = decodeTextBoxes(outputs.blk as ort.Tensor, scale, padLeft, padTop, width, height);
-    return { width, height, mask, blocks: buildBlocks(mask, width, height, textBoxes) };
+    const groups = textBoxes?.length ? textBoxes : decodeTextBoxes(outputs.blk as ort.Tensor, scale, padLeft, padTop, width, height);
+    return { width, height, mask, blocks: buildBlocks(mask, width, height, groups) };
   }
 }
 

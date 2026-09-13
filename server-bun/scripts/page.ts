@@ -4,20 +4,24 @@
  *
  *   bun run page detect <image> [name]            original.png, mask.png, overlay.png, blocks.json
  *   bun run page blocks <name> [--exclude 1,2] [--include 3|all]
- *                                                  list blocks; choose which ones `clean` removes
+ *                                                  list blocks; choose which ones get cleaned
  *   bun run page ocr <name>                       crops/<id>.png + source text (text blocks)
  *   bun run page translate <name>                 translation per text block
- *   bun run page clean <name>                     inpainted.png (included blocks only)
+ *   bun run page clean <name>                     stage 1: clean-text.png — speech bubbles and caption boxes
+ *   bun run page clean-sfx <name>                 stage 2: clean-sfx.png — sound effects and other lettering,
+ *                                                  applied on top of clean-text.png
  *
- * Blocks are "text" (dialogue/captions, cleaned by default) or "sfx" (other lettering, kept by default).
+ * Blocks are "text" (dialogue/captions) or "sfx" (everything else). Each clean stage only touches its own
+ * kind, and only blocks still marked include.
  */
 import sharp from "sharp";
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { env } from "@/env";
 import { inferenceHandlers } from "@/queue/inference-queue";
-import { maskFromImage, maskToPng, selectBlockMask, type BlockKind } from "@/lib/mask";
+import { maskFromImage, maskToPng, selectBlockMask, type BlockKind, type Box } from "@/lib/mask";
 import { TextSegmenter, textSegModelPath } from "@/services/text-seg-service";
+import { BubbleDetector, bubbleModelPath } from "@/services/bubble-service";
 import { MangaInpainter, inpaintModelPath } from "@/services/inpaint-service";
 
 const WORK_DIR = "data/pages/work";
@@ -110,8 +114,16 @@ async function detect([image, nameArg]: string[]): Promise<void> {
   await sharp(image).png().toFile(original);
 
   const started = performance.now();
+  const page = Buffer.from(await Bun.file(original).arrayBuffer());
+  // Group text per bubble when the bubble detector is available; otherwise use the text detector's own boxes.
+  let textBoxes: Box[] | undefined;
+  if (existsSync(bubbleModelPath())) {
+    const detector = await BubbleDetector.load(bubbleModelPath());
+    textBoxes = (await detector.detect(page)).textBoxes;
+  }
+  const grouping = textBoxes?.length ? `grouped by ${textBoxes.length} bubble-detector text boxes` : "grouped by text-detector boxes";
   const segmenter = await TextSegmenter.load(textSegModelPath());
-  const result = await segmenter.segment(Buffer.from(await Bun.file(original).arrayBuffer()));
+  const result = await segmenter.segment(page, textBoxes);
   const ms = Math.round(performance.now() - started);
 
   await Bun.write(join(dir, "mask.png"), await maskToPng(result.mask, result.width, result.height));
@@ -119,17 +131,17 @@ async function detect([image, nameArg]: string[]): Promise<void> {
     source: image,
     width: result.width,
     height: result.height,
-    blocks: result.blocks.map((b, i) => ({ id: i + 1, ...b, include: b.kind === "text", source_text: null, translated_text: null })),
+    blocks: result.blocks.map((b, i) => ({ id: i + 1, ...b, include: true, source_text: null, translated_text: null })),
   };
   await writeJob(name, job);
   await renderOverlay(name, job);
 
   const textCount = job.blocks.filter((b) => b.kind === "text").length;
   const covered = result.mask.reduce((sum, v) => sum + v, 0);
-  console.log(`detect "${name}": ${job.width}x${job.height}, ${textCount} text + ${job.blocks.length - textCount} sfx blocks, mask ${(covered / result.mask.length * 100).toFixed(1)}% (${ms}ms)`);
-  console.log(`  ${dir}/overlay.png  red = text pixels, blue = text, orange = sfx, grey dashed = kept\n`);
+  console.log(`detect "${name}": ${job.width}x${job.height}, ${textCount} text + ${job.blocks.length - textCount} sfx blocks, mask ${(covered / result.mask.length * 100).toFixed(1)}%, ${grouping} (${ms}ms)`);
+  console.log(`  ${dir}/overlay.png  red = text pixels, blue = text, orange = sfx, grey dashed = not cleaned\n`);
   printBlocks(job);
-  console.log(`\nnext: bun run page blocks ${name} --include <ids> (also clean sfx)  |  bun run page ocr ${name}`);
+  console.log(`\nnext: bun run page ocr ${name}  |  bun run page blocks ${name} --exclude <ids> (skip blocks when cleaning)`);
 }
 
 function parseIds(value: string | undefined, job: PageJob): number[] {
@@ -200,35 +212,55 @@ async function translate([name]: string[]): Promise<void> {
     console.log(`${String(b.id).padStart(3)}  [${out.engine}] ${b.source_text} → ${out.translatedText}`);
   }
   await writeJob(name, job);
-  console.log(`\ntranslate done → ${jobDir(name)}/blocks.json\nnext: bun run page clean ${name}`);
+  console.log(`\ntranslate done → ${jobDir(name)}/blocks.json\nnext: bun run page clean ${name}  (stage 1: bubbles and caption boxes)`);
+}
+
+/**
+ * Remove the lettering of included blocks of one kind, reading `input` and writing `output`.
+ * Blob ownership is still decided against all blocks, so the other kind's pixels are never touched.
+ */
+async function cleanKind(name: string, kind: BlockKind, input: string, output: string): Promise<void> {
+  const job = await readJob(name);
+  const dir = jobDir(name);
+  const inputPath = join(dir, input);
+  if (!existsSync(inputPath)) fail(`${input} not found — run: bun run page clean ${name}`);
+
+  const regions = job.blocks.filter((b) => b.kind === kind && b.include);
+  if (regions.length === 0) {
+    console.log(`clean ${kind} "${name}": no included ${kind} blocks — nothing to do`);
+    return;
+  }
+
+  const { data: rgb, info } = await sharp(inputPath).removeAlpha().toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
+  const { mask, width, height } = await maskFromImage(join(dir, "mask.png"));
+  if (width !== info.width || height !== info.height) fail(`mask.png size does not match ${input}`);
+  const selection = job.blocks.map((b) => ({ ...b, include: b.kind === kind && b.include }));
+  const target = selectBlockMask(mask, width, height, selection);
+
+  const started = performance.now();
+  const inpainter = await MangaInpainter.load(inpaintModelPath(), false);
+  const { rgb: cleaned, flat, lama } = await inpainter.inpaintRgb(rgb, width, height, target, regions);
+  const ms = Math.round(performance.now() - started);
+
+  await sharp(cleaned, { raw: { width, height, channels: 3 } }).png().toFile(join(dir, output));
+  const total = job.blocks.filter((b) => b.kind === kind).length;
+  console.log(`clean ${kind} "${name}": ${regions.length}/${total} blocks (${flat} flat fill, ${lama} LaMa) in ${ms}ms → ${dir}/${output}`);
 }
 
 async function clean([name]: string[]): Promise<void> {
   if (!name) fail("Usage: bun run page clean <name>");
-  const job = await readJob(name);
-  const dir = jobDir(name);
-  const regions = job.blocks.filter((b) => b.include);
-  if (regions.length === 0) fail(`No blocks included — use: bun run page blocks ${name} --include all`);
+  await cleanKind(name, "text", "original.png", "clean-text.png");
+  console.log(`next: bun run page clean-sfx ${name}  (optional — exclude SFX to keep with: bun run page blocks ${name} --exclude <ids>)`);
+}
 
-  const { data: rgb, info } = await sharp(join(dir, "original.png")).removeAlpha().toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
-  const { mask, width, height } = await maskFromImage(join(dir, "mask.png"));
-  if (width !== info.width || height !== info.height) fail("mask.png size does not match original.png");
-  const target = selectBlockMask(mask, width, height, job.blocks);
-
-  let started = performance.now();
-  const inpainter = await MangaInpainter.load(inpaintModelPath());
-  const loadMs = Math.round(performance.now() - started);
-  started = performance.now();
-  const cleaned = await inpainter.inpaintRgb(rgb, width, height, target, regions);
-  const ms = Math.round(performance.now() - started);
-
-  await sharp(cleaned, { raw: { width, height, channels: 3 } }).png().toFile(join(dir, "inpainted.png"));
-  console.log(`clean "${name}": ${regions.length}/${job.blocks.length} blocks in ${ms}ms (model load ${loadMs}ms) → ${dir}/inpainted.png`);
+async function cleanSfx([name]: string[]): Promise<void> {
+  if (!name) fail("Usage: bun run page clean-sfx <name>");
+  await cleanKind(name, "sfx", "clean-text.png", "clean-sfx.png");
 }
 
 const [command, ...args] = Bun.argv.slice(2);
-const commands: Record<string, (args: string[]) => Promise<void>> = { detect, blocks, ocr, translate, clean };
+const commands: Record<string, (args: string[]) => Promise<void>> = { detect, blocks, ocr, translate, clean, "clean-sfx": cleanSfx };
 const run = command ? commands[command] : undefined;
-if (!run) fail("Usage: bun run page <detect|blocks|ocr|translate|clean> ...  (see scripts/page.ts)");
+if (!run) fail("Usage: bun run page <detect|blocks|ocr|translate|clean|clean-sfx> ...  (see scripts/page.ts)");
 await run(args);
 process.exit(0);
