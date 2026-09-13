@@ -45,6 +45,12 @@ class EnvConfig {
       || "https://github.com/stephenmk/stephenmk.github.io/releases/latest/download/jitendex-yomitan.zip";
   }
   get DICT_MODEL_ENABLED(): boolean { return Bun.env.DICT_MODEL_ENABLED !== "false"; }
+  /** kuromoji IPADIC tokenizer dictionary (used by /analyze). */
+  get KUROMOJI_DICT_DIR(): string { return Bun.env.KUROMOJI_DICT_DIR ?? "./data/models/kuromoji"; }
+  /** Base URL serving the kuromoji *.dat.gz files; pinned to the installed @patdx/kuromoji version. */
+  get KUROMOJI_DICT_URL(): string {
+    return Bun.env.KUROMOJI_DICT_URL || "https://cdn.jsdelivr.net/npm/@patdx/kuromoji@1.0.4/dict";
+  }
 
   // ── Model repos ──────────────────────────────────────────────────────────
 

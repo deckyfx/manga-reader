@@ -7,6 +7,7 @@ import { loggerPlugin } from "@/plugins/plugin-logger";
 import { routeHealth } from "@/plugins/route-health";
 import { routeOcr } from "@/plugins/route-ocr";
 import { routeTranslate } from "@/plugins/route-translate";
+import { routeAnalyze } from "@/plugins/route-analyze";
 import { routeSettings } from "@/plugins/route-settings";
 import { routeTranslatePage } from "@/plugins/route-translate-page";
 import { portalPlugin } from "@/plugins/portal/index";
@@ -25,6 +26,7 @@ async function loadModels(): Promise<void> {
   bootState.textSegEnabled = env.TEXT_SEG_MODEL_ENABLED;
 
   const { downloadHfModel, downloadFile, printDownloadPlan } = await import("@/services/model-downloader");
+  const { KUROMOJI_DICT_FILES } = await import("@/services/analyze-service");
 
   const entries = [
     env.OCR_MODEL_ENABLED && { repo: env.OCR_MODEL_REPO, dir: env.OCR_MODELS_DIR, files: env.OCR_MODEL_FILES, label: "OCR" },
@@ -41,6 +43,9 @@ async function loadModels(): Promise<void> {
     const { existsSync } = await import("node:fs");
     if (!existsSync(join(env.DICT_DIR, "jitendex-yomitan.zip"))) {
       bootLog.info("  ↓ Dict/jitendex-yomitan.zip");
+    }
+    for (const file of KUROMOJI_DICT_FILES) {
+      if (!existsSync(join(env.KUROMOJI_DICT_DIR, file))) bootLog.info(`  ↓ Kuromoji/${file}`);
     }
   }
 
@@ -74,6 +79,13 @@ async function loadModels(): Promise<void> {
     const zipDest = join(env.DICT_DIR, "jitendex-yomitan.zip");
     await downloadFile(env.JITENDEX_ZIP_URL, zipDest, "Dict/jitendex-yomitan.zip")
       .catch((err: Error) => bootLog.warn({ err }, "Jitendex download failed — dictionary lookups will be unavailable"));
+    try {
+      for (const file of KUROMOJI_DICT_FILES) {
+        await downloadFile(`${env.KUROMOJI_DICT_URL}/${file}`, join(env.KUROMOJI_DICT_DIR, file), `Kuromoji/${file}`);
+      }
+    } catch (err) {
+      bootLog.warn({ err }, "Kuromoji dictionary download failed — /analyze will be unavailable");
+    }
   }
 
   const loadErrors: string[] = [];
@@ -89,6 +101,19 @@ async function loadModels(): Promise<void> {
   if (env.TEXT_SEG_MODEL_ENABLED) {
     const { loadTextSegModel } = await import("@/services/text-seg-service");
     await loadTextSegModel().catch((err: Error) => { loadErrors.push(`TextSeg: ${err.message}`); });
+  }
+
+  // Dictionary is non-fatal (health reports "degraded"); /analyze needs both tokenizer and index.
+  if (env.DICT_MODEL_ENABLED) {
+    const { analyzeService } = await import("@/services/analyze-service");
+    const { dictionaryService } = await import("@/services/dictionary-service");
+    try {
+      await analyzeService.load();
+      await dictionaryService.init();
+      bootState.dictionaryReady = true;
+    } catch (err) {
+      bootLog.warn({ err }, "Dictionary unavailable — /analyze will return 503");
+    }
   }
 
   if (loadErrors.length > 0) {
@@ -112,6 +137,7 @@ const app = new Elysia()
   .use(routeHealth)
   .use(routeOcr)
   .use(routeTranslate)
+  .use(routeAnalyze)
   .use(routeSettings)
   .use(routeTranslatePage)
   .use(portalPlugin)
