@@ -1,5 +1,5 @@
 /**
- * Full-page translation for the browser extension, backed by the shared page pipeline.
+ * Full-page translation for the browser extension, backed by the shared page jobs (see services/page-jobs.ts).
  *
  * POST /api/translate-page             { image, clean_sfx?, force? } → 202 { job_id, cached }
  * GET  /api/translate-page/:id/events  SSE: every event replayed from the start, then live (see PageJobEvent)
@@ -10,41 +10,16 @@
  * The job id is the Studio page id. Stage images stay in data/jobs/<id>/; blocks and stage state are in SQLite.
  */
 import Elysia, { t } from "elysia";
-import sharp from "sharp";
 import { existsSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
-import { runExclusive } from "@/queue/page-queue";
-import { enginesNotReady, pageEngines as engines } from "@/services/page-engines";
-import { pageDir, PageStore, type StageName } from "@/stores/page-store";
+import { decodeBase64Image, ImageLoadError, resultUrl, submitPageJob } from "@/services/page-jobs";
+import { pageDir, PageStore } from "@/stores/page-store";
 import { pageLive } from "@/stores/page-live-channel";
-import { translationJobs, type PageJobEvent } from "@/stores/translation-job-store";
-import {
-  missingPipelineModels,
-  PagePipeline,
-  type PageStage,
-  type ProgressUpdate,
-} from "@/services/page-pipeline";
+import { translationJobs } from "@/stores/translation-job-store";
 
-const log = childLogger("translate-page");
-
-/** ~15 MB decoded. */
-const MAX_BASE64_LENGTH = 20 * 1024 * 1024;
-/** Up to MAX_PENDING_PAGES decodes run at once, each ~4 bytes per pixel raw. 40 MP still fits a 5000×8000 scan. */
-const MAX_INPUT_PIXELS = 40_000_000;
 /** Comment sent on idle live streams so proxies and the browser keep the connection open. */
 const KEEPALIVE_MS = 25_000;
-
-/** Share of overall progress each stage covers. */
-const STAGE_SPAN: Record<PageStage, [number, number]> = {
-  detecting: [0, 0.15],
-  ocr: [0.15, 0.45],
-  translating: [0.45, 0.6],
-  cleaning: [0.6, 0.85],
-  typesetting: [0.85, 1],
-};
 
 const IdParams = t.Object({ id: t.String({ pattern: "^[A-Za-z0-9-]+$" }) });
 
@@ -55,127 +30,23 @@ const SSE_HEADERS = {
   "X-Accel-Buffering": "no",
 };
 
-/** Public URL of a page's result.png; `revision` busts browser caches after a Studio publish. */
-export const resultUrl = (id: string, revision?: number): string =>
-  `/api/translate-page/${id}/result${revision ? `?rev=${revision}` : ""}`;
-
-/** Requests being decoded or waiting in the page queue; each holds a decoded page in memory. */
-const MAX_PENDING_PAGES = 8;
-let pendingPages = 0;
-
-/** Runs every pipeline stage for one page, recording stage state and streaming progress; failures end the job with an error event. */
-async function runJob(id: string, page: Buffer, cleanSfx: boolean): Promise<void> {
-  const started = Date.now();
-  const emit = (event: PageJobEvent): void => translationJobs.emit(id, event);
-  const onProgress = ({ stage, message, fraction, detail }: ProgressUpdate): void => {
-    const [from, to] = STAGE_SPAN[stage];
-    emit({ type: detail ? "progress" : "log", stage, message, progress: Math.round((from + (to - from) * fraction) * 1000) / 1000 });
-  };
-  const pipeline = new PagePipeline(pageDir(id), onProgress, PageStore.repository(id));
-  let current: StageName = "detect";
-  const stage = async (name: StageName, run: () => Promise<unknown>): Promise<void> => {
-    current = name;
-    await run();
-    await PageStore.setStage(id, name, "fresh");
-  };
-
-  try {
-    await PageStore.update(id, { status: "running", cleanSfx, errorMessage: null });
-    await PageStore.clearStages(id);
-    const { job } = await pipeline.detect(page, "upload");
-    await PageStore.setStage(id, "detect", "fresh");
-    await stage("ocr", () => pipeline.ocr(job, engines.ocr));
-    await stage("translate", () => pipeline.translate(job, engines.translate));
-    await stage("clean_text", () => pipeline.clean(job, "text"));
-    if (cleanSfx) await stage("clean_sfx", () => pipeline.clean(job, "sfx"));
-    await stage("render", () => pipeline.render(job));
-    await PageStore.update(id, { status: "done" });
-
-    const result = Buffer.from(await Bun.file(pipeline.path("result.png")).arrayBuffer()).toString("base64");
-    emit({ type: "done", stage: "done", message: "Translation complete", progress: 1, result, result_url: resultUrl(id), elapsed_ms: Date.now() - started });
-    log.info({ jobId: id, ms: Date.now() - started }, "Page translated");
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.error({ err, jobId: id, stage: current }, "Page translation failed");
-    await PageStore.setStage(id, current, "error", message).catch(() => {});
-    await PageStore.update(id, { status: "error", errorMessage: message }).catch(() => {});
-    emit({ type: "error", stage: "error", message, error: message });
-  }
-}
-
 export const routeTranslatePage = new Elysia()
   .post(
     "/api/translate-page",
     async ({ body, status }) => {
-      const notReady = enginesNotReady();
-      if (notReady) return status(503, { error: notReady });
-      const missing = missingPipelineModels();
-      if (missing.length > 0) {
-        return status(503, { error: `Page translation models missing (${missing.join(", ")}) — set TEXT_SEG_MODEL_ENABLED and INPAINT_MODEL_ENABLED so they download at boot` });
-      }
-
-      const base64 = body.image.slice(body.image.indexOf(",") + 1);
-      if (base64.length > MAX_BASE64_LENGTH) return status(400, { error: "image payload too large (max ~15 MB)" });
-      if (base64.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return status(400, { error: "image must be valid base64" });
-
-      // Reserve capacity before decoding so queued jobs can't pile up decoded pages in memory
-      if (pendingPages >= MAX_PENDING_PAGES) return status(429, { error: "Too many pages waiting for translation — try again shortly" });
-      pendingPages++;
-      let queued = false;
+      let bytes: Buffer;
       try {
-        let page: Buffer;
-        try {
-          page = await sharp(Buffer.from(base64, "base64"), { limitInputPixels: MAX_INPUT_PIXELS }).png().toBuffer();
-        } catch {
-          return status(400, { error: "image could not be decoded" });
-        }
-
-        const hasher = new Bun.CryptoHasher("sha256");
-        hasher.update(page);
-        const { page: row } = await PageStore.findOrCreate(hasher.digest("hex"), "upload");
-        const id = row.id;
-        const cleanSfx = body.clean_sfx ?? false;
-
-        // Check and reserve with no await in between, so concurrent requests for one page share a single job
-        const live = translationJobs.get(id);
-        if (live && (live.status === "queued" || live.status === "running")) {
-          // One job directory per page: a run with other options can only start after this one ends
-          if (live.cleanSfx !== cleanSfx) return status(409, { error: "This page is already being translated with different options — try again when it finishes" });
-          return status(202, { job_id: id, cached: false });
-        }
-        translationJobs.create(id, cleanSfx);
-
-        try {
-          // Same page already translated with the same options: replay the stored result (including Studio edits)
-          const resultPath = join(pageDir(id), "result.png");
-          if (!body.force && row.status === "done" && row.cleanSfx === cleanSfx && existsSync(resultPath)) {
-            const result = Buffer.from(await Bun.file(resultPath).arrayBuffer()).toString("base64");
-            translationJobs.emit(id, { type: "done", stage: "done", message: "Loaded previous translation", progress: 1, result, result_url: resultUrl(id, row.revision), elapsed_ms: 0 });
-            return status(202, { job_id: id, cached: true });
-          }
-
-          translationJobs.emit(id, { type: "log", stage: "queued", message: "Queued for translation", progress: 0 });
-          await rm(pageDir(id), { recursive: true, force: true });
-          await mkdir(pageDir(id), { recursive: true });
-          await PageStore.update(id, { status: "queued", errorMessage: null });
-          runExclusive(async () => {
-            try {
-              await runJob(id, page, cleanSfx);
-            } finally {
-              pendingPages--;
-            }
-          });
-          queued = true;
-          return status(202, { job_id: id, cached: false });
-        } catch (err) {
-          // Never leave the reserved job "queued": it would make every later request for this page wait on it
-          const message = err instanceof Error ? err.message : String(err);
-          await PageStore.update(id, { status: "error", errorMessage: message }).catch(() => {});
-          translationJobs.emit(id, { type: "error", stage: "error", message, error: message });
-          throw err;
-        }
-      } finally {
-        if (!queued) pendingPages--;
+        bytes = decodeBase64Image(body.image);
+      } catch (err) {
+        return status(400, { error: err instanceof ImageLoadError ? err.message : "image must be valid base64" });
+      }
+      const result = await submitPageJob(async () => bytes, { source: "upload", cleanSfx: body.clean_sfx ?? false, force: body.force ?? false });
+      if (result.ok) return status(202, { job_id: result.job_id, cached: result.cached });
+      switch (result.code) {
+        case 400: return status(400, { error: result.error });
+        case 409: return status(409, { error: result.error });
+        case 429: return status(429, { error: result.error });
+        case 503: return status(503, { error: result.error });
       }
     },
     {

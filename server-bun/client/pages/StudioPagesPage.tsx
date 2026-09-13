@@ -1,19 +1,30 @@
-import { Link } from "react-router";
-import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, Plus } from "lucide-react";
 import { listPages, pageFileUrl } from "../api";
+import { NewPageDialog } from "../components/NewPageDialog";
 import { StatusBadge } from "../components/StatusBadge";
 
-/** Recently translated pages; open one to review and edit it. */
+/** Recently translated pages; open one to review and edit it, or create one from an upload or image URL. */
 export function StudioPagesPage() {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [creating, setCreating] = useState(false);
   const pagesQ = useQuery({ queryKey: ["studio-pages"], queryFn: listPages, refetchInterval: 5000 });
   const pages = pagesQ.data ?? [];
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-800">
         <h1 className="text-base font-semibold">Studio</h1>
-        <span className="text-xs text-gray-500">Translate a page from the extension, then polish it here</span>
+        <span className="hidden sm:inline text-xs text-gray-500 mr-auto">Translate a page from the extension or here, then polish it</span>
+        <button
+          onClick={() => setCreating(true)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 transition-colors"
+        >
+          <Plus size={14} /> New page
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
@@ -40,13 +51,26 @@ export function StudioPagesPage() {
                 <StatusBadge status={page.status} />
                 <span className="text-xs text-gray-500">rev {page.revision}</span>
               </div>
-              <div className="px-3 pb-2 text-xs text-gray-500 truncate" title={page.updated_at}>
-                {page.width}×{page.height} · {page.updated_at}
+              <div className="px-3 pb-2 text-xs text-gray-500 truncate" title={page.source}>
+                {page.width}×{page.height} · {page.source === "upload" ? "upload" : page.source}
               </div>
             </Link>
           ))}
         </div>
       </div>
+
+      {creating && (
+        <NewPageDialog
+          onClose={() => {
+            setCreating(false);
+            void qc.invalidateQueries({ queryKey: ["studio-pages"] });
+          }}
+          onCreated={(pageId) => {
+            void qc.invalidateQueries({ queryKey: ["studio-pages"] });
+            navigate(`/studio/pages/${pageId}`);
+          }}
+        />
+      )}
     </div>
   );
 }

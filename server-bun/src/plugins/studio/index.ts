@@ -2,6 +2,7 @@
  * Studio API: review and edit translated pages, then publish them to open extension tabs.
  *
  * GET   /studio/api/pages                        recent pages
+ * POST  /studio/api/pages                        new page from an upload or image URL (progress: /api/translate-page/:id/events)
  * GET   /studio/api/pages/:id                    page, stage state and blocks
  * GET   /studio/api/pages/:id/files/:file        a stage image
  * PATCH /studio/api/pages/:id/blocks/:idx        edit source text / translation (marks later stages stale)
@@ -18,12 +19,13 @@ import type { Page, PageStageRow } from "@/db/schema";
 import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
 import { runExclusiveResult } from "@/queue/page-queue";
+import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
 import { historyFile, listHistory, restoreResult, snapshotResult } from "@/services/page-history";
+import { decodeBase64Image, resultUrl, submitPageJob } from "@/services/page-jobs";
 import { PagePipeline, type PageBlock } from "@/services/page-pipeline";
 import { pageLive } from "@/stores/page-live-channel";
 import { pageDir, PageStore, type StageName } from "@/stores/page-store";
-import { resultUrl } from "@/plugins/route-translate-page";
 
 const log = childLogger("studio");
 
@@ -135,6 +137,43 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
   .get("/pages", async () => (await PageStore.list()).map(toSummary), {
     response: { 200: t.Array(PageSummary) },
   })
+
+  .post(
+    "/pages",
+    async ({ body, status }) => {
+      if ((body.image === undefined) === (body.url === undefined)) return status(422, { error: "provide either an image or an image URL" });
+      const options = { cleanSfx: body.clean_sfx ?? false, force: body.force ?? false };
+      const { image, url } = body;
+      const result = image !== undefined
+        ? await submitPageJob(async () => decodeBase64Image(image), { ...options, source: "upload" })
+        : await submitPageJob(() => fetchImage(url ?? ""), { ...options, source: url ?? "" });
+      if (result.ok) return status(202, { job_id: result.job_id, cached: result.cached });
+      switch (result.code) {
+        case 400: return status(400, { error: result.error });
+        case 409: return status(409, { error: result.error });
+        case 429: return status(429, { error: result.error });
+        case 503: return status(503, { error: result.error });
+      }
+    },
+    {
+      body: t.Object({
+        /** Base64 or data URL of the page image. */
+        image: t.Optional(t.String()),
+        /** http(s) URL the server downloads the page from. */
+        url: t.Optional(t.String({ maxLength: 4096 })),
+        clean_sfx: t.Optional(t.Boolean()),
+        force: t.Optional(t.Boolean()),
+      }),
+      response: {
+        202: t.Object({ job_id: t.String(), cached: t.Boolean() }),
+        400: ErrBody,
+        409: ErrBody,
+        422: ErrBody,
+        429: ErrBody,
+        503: ErrBody,
+      },
+    },
+  )
 
   .get(
     "/pages/:id",

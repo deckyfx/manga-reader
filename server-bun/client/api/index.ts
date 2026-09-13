@@ -42,6 +42,15 @@ export const listPages = () => unwrap(api.studio.api.pages.get());
 
 export const getPage = (id: string) => unwrap(api.studio.api.pages({ id }).get());
 
+/** Queue a new page from an upload (base64 / data URL) or an image URL; progress arrives on `pageEventsUrl`. */
+export const createPage = (body: { image?: string; url?: string; clean_sfx?: boolean; force?: boolean }) =>
+  unwrap(api.studio.api.pages.post(body));
+
+/** SSE stream of a page job's progress (Eden doesn't model EventSource). */
+export const pageEventsUrl = (id: string) => `/api/translate-page/${id}/events`;
+
+export type { PageJobEvent } from "../../src/stores/translation-job-store";
+
 export const updateBlockText = (id: string, idx: number, text: { source_text?: string; translated_text?: string }) =>
   unwrap(api.studio.api.pages({ id }).blocks({ idx }).patch(text));
 
