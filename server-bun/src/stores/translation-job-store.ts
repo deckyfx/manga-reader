@@ -54,7 +54,7 @@ class TranslationJobStore {
       job.error = event.error;
       job.completedAt = Date.now();
     } else {
-      job.status = "running";
+      job.status = event.stage === "queued" ? "queued" : "running";
       job.progress = event.progress;
     }
     for (const listener of this.listeners.get(id) ?? []) listener(event);

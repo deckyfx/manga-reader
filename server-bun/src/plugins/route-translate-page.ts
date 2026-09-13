@@ -63,6 +63,21 @@ function runExclusive(task: () => Promise<void>): void {
   pageQueue = pageQueue.then(task, task);
 }
 
+/** Requests being decoded or waiting in `pageQueue`; each holds a decoded page in memory. */
+const MAX_PENDING_PAGES = 8;
+let pendingPages = 0;
+
+/** Options a finished job was produced with, so a cached result is only reused for the same options. */
+const OPTIONS_FILE = "options.json";
+interface PageJobOptions {
+  clean_sfx: boolean;
+}
+
+async function readJobOptions(dir: string): Promise<PageJobOptions | null> {
+  const file = Bun.file(join(dir, OPTIONS_FILE));
+  return (await file.exists()) ? ((await file.json()) as PageJobOptions) : null;
+}
+
 /** Record the page's text blocks for the Studio portal. */
 async function persistBlocks(id: string, job: PageJob): Promise<void> {
   const textBlocks = job.blocks.filter((b) => b.kind === "text");
@@ -113,6 +128,7 @@ async function runJob(id: string, page: Buffer, cleanSfx: boolean): Promise<void
     await pipeline.clean(job, "text");
     if (cleanSfx) await pipeline.clean(job, "sfx");
     await pipeline.render(job);
+    await Bun.write(pipeline.path(OPTIONS_FILE), JSON.stringify({ clean_sfx: cleanSfx } satisfies PageJobOptions));
     await persistBlocks(id, job);
     await JobStore.setStatus(id, "done");
 
@@ -156,38 +172,60 @@ export const routeTranslatePage = new Elysia()
       if (base64.length > MAX_BASE64_LENGTH) return status(400, { error: "image payload too large (max ~15 MB)" });
       if (base64.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return status(400, { error: "image must be valid base64" });
 
-      let page: Buffer;
+      // Reserve capacity before decoding so queued jobs can't pile up decoded pages in memory
+      if (pendingPages >= MAX_PENDING_PAGES) return status(429, { error: "Too many pages waiting for translation — try again shortly" });
+      pendingPages++;
+      let queued = false;
       try {
-        page = await sharp(Buffer.from(base64, "base64"), { limitInputPixels: MAX_INPUT_PIXELS }).png().toBuffer();
-      } catch {
-        return status(400, { error: "image could not be decoded" });
-      }
+        let page: Buffer;
+        try {
+          page = await sharp(Buffer.from(base64, "base64"), { limitInputPixels: MAX_INPUT_PIXELS }).png().toBuffer();
+        } catch {
+          return status(400, { error: "image could not be decoded" });
+        }
 
-      const hasher = new Bun.CryptoHasher("sha256");
-      hasher.update(page);
-      const { id, previousStatus } = await jobIdForImage(hasher.digest("hex"));
-      const cleanSfx = body.clean_sfx ?? false;
+        const hasher = new Bun.CryptoHasher("sha256");
+        hasher.update(page);
+        const { id, previousStatus } = await jobIdForImage(hasher.digest("hex"));
+        const cleanSfx = body.clean_sfx ?? false;
 
-      const live = translationJobs.get(id);
-      if (live && (live.status === "queued" || live.status === "running")) return status(202, { job_id: id, cached: false });
-
-      // Same page already translated with the same options: replay the stored result
-      const dir = join(DATA_DIR, id);
-      const resultPath = join(dir, "result.png");
-      if (!body.force && previousStatus === "done" && existsSync(resultPath) && existsSync(join(dir, "clean-sfx.png")) === cleanSfx) {
+        // Check and reserve with no await in between, so concurrent requests for one page share a single job
+        const live = translationJobs.get(id);
+        if (live && (live.status === "queued" || live.status === "running")) return status(202, { job_id: id, cached: false });
         translationJobs.create(id);
-        const result = Buffer.from(await Bun.file(resultPath).arrayBuffer()).toString("base64");
-        translationJobs.emit(id, { type: "done", stage: "done", message: "Loaded previous translation", progress: 1, result, result_url: resultUrl(id), elapsed_ms: 0 });
-        return status(202, { job_id: id, cached: true });
-      }
 
-      await rm(dir, { recursive: true, force: true });
-      await mkdir(dir, { recursive: true });
-      await JobStore.update(id, { status: "queued", errorMessage: null });
-      translationJobs.create(id);
-      translationJobs.emit(id, { type: "log", stage: "queued", message: "Queued for translation", progress: 0 });
-      runExclusive(() => runJob(id, page, cleanSfx));
-      return status(202, { job_id: id, cached: false });
+        try {
+          // Same page already translated with the same options: replay the stored result
+          const dir = join(DATA_DIR, id);
+          const resultPath = join(dir, "result.png");
+          if (!body.force && previousStatus === "done" && existsSync(resultPath) && (await readJobOptions(dir))?.clean_sfx === cleanSfx) {
+            const result = Buffer.from(await Bun.file(resultPath).arrayBuffer()).toString("base64");
+            translationJobs.emit(id, { type: "done", stage: "done", message: "Loaded previous translation", progress: 1, result, result_url: resultUrl(id), elapsed_ms: 0 });
+            return status(202, { job_id: id, cached: true });
+          }
+
+          translationJobs.emit(id, { type: "log", stage: "queued", message: "Queued for translation", progress: 0 });
+          await rm(dir, { recursive: true, force: true });
+          await mkdir(dir, { recursive: true });
+          await JobStore.update(id, { status: "queued", errorMessage: null });
+          runExclusive(async () => {
+            try {
+              await runJob(id, page, cleanSfx);
+            } finally {
+              pendingPages--;
+            }
+          });
+          queued = true;
+          return status(202, { job_id: id, cached: false });
+        } catch (err) {
+          // Never leave the reserved job "queued": it would make every later request for this page wait on it
+          const message = err instanceof Error ? err.message : String(err);
+          translationJobs.emit(id, { type: "error", stage: "error", message, error: message });
+          throw err;
+        }
+      } finally {
+        if (!queued) pendingPages--;
+      }
     },
     {
       body: t.Object({
@@ -200,6 +238,7 @@ export const routeTranslatePage = new Elysia()
       response: {
         202: t.Object({ job_id: t.String(), cached: t.Boolean() }),
         400: ErrBody,
+        429: ErrBody,
         503: ErrBody,
       },
     },
