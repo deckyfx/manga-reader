@@ -1,6 +1,6 @@
 # Dashboard & Studio — Plan (server-bun)
 
-Status: **phases 0–1 built** (PR #15; see the phase status notes in section 10) · Written 2026-09-13, updated 2026-09-14 · Supersedes `PLAN_studio_v2.md` and `portal-plan.md` (both C#-era: ASP.NET + SolidJS, burn via `window.postMessage`).
+Status: **phases 0–1 built** (PR #15; see the phase status notes in section 10) · Written 2026-09-13, updated 2026-09-14 · Supersedes the C#-era studio and portal plans (ASP.NET + SolidJS, burn via `window.postMessage`), since removed.
 
 Builds on the page pipeline from PR #14 (`bun run page …`, `POST /api/translate-page`, `src/services/page-pipeline.ts`).
 
