@@ -11,6 +11,8 @@ export type PageJobStatus = "queued" | "running" | "done" | "error";
 
 export interface TranslationJob {
   id: string;
+  /** Requested clean_sfx option, so a concurrent request with different options isn't handed this job. */
+  cleanSfx: boolean;
   status: PageJobStatus;
   stage: string;
   progress: number;
@@ -29,8 +31,8 @@ class TranslationJobStore {
   private readonly jobs = new Map<string, TranslationJob>();
   private readonly listeners = new Map<string, Set<Listener>>();
 
-  create(id: string): TranslationJob {
-    const job: TranslationJob = { id, status: "queued", stage: "queued", progress: 0, error: null, events: [], completedAt: null };
+  create(id: string, cleanSfx: boolean): TranslationJob {
+    const job: TranslationJob = { id, cleanSfx, status: "queued", stage: "queued", progress: 0, error: null, events: [], completedAt: null };
     this.jobs.set(id, job);
     return job;
   }

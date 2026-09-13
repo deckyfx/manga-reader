@@ -33,7 +33,8 @@ const log = childLogger("translate-page");
 const DATA_DIR = "./data/jobs";
 /** ~15 MB decoded. */
 const MAX_BASE64_LENGTH = 20 * 1024 * 1024;
-const MAX_INPUT_PIXELS = 100_000_000;
+/** Up to MAX_PENDING_PAGES decodes run at once, each ~4 bytes per pixel raw. 40 MP still fits a 5000×8000 scan. */
+const MAX_INPUT_PIXELS = 40_000_000;
 
 /** Share of overall progress each stage covers. */
 const STAGE_SPAN: Record<PageStage, [number, number]> = {
@@ -191,8 +192,12 @@ export const routeTranslatePage = new Elysia()
 
         // Check and reserve with no await in between, so concurrent requests for one page share a single job
         const live = translationJobs.get(id);
-        if (live && (live.status === "queued" || live.status === "running")) return status(202, { job_id: id, cached: false });
-        translationJobs.create(id);
+        if (live && (live.status === "queued" || live.status === "running")) {
+          // One job directory per page: a run with other options can only start after this one ends
+          if (live.cleanSfx !== cleanSfx) return status(409, { error: "This page is already being translated with different options — try again when it finishes" });
+          return status(202, { job_id: id, cached: false });
+        }
+        translationJobs.create(id, cleanSfx);
 
         try {
           // Same page already translated with the same options: replay the stored result
@@ -220,6 +225,7 @@ export const routeTranslatePage = new Elysia()
         } catch (err) {
           // Never leave the reserved job "queued": it would make every later request for this page wait on it
           const message = err instanceof Error ? err.message : String(err);
+          await JobStore.setStatus(id, "error", message).catch(() => {});
           translationJobs.emit(id, { type: "error", stage: "error", message, error: message });
           throw err;
         }
@@ -238,6 +244,7 @@ export const routeTranslatePage = new Elysia()
       response: {
         202: t.Object({ job_id: t.String(), cached: t.Boolean() }),
         400: ErrBody,
+        409: ErrBody,
         429: ErrBody,
         503: ErrBody,
       },
