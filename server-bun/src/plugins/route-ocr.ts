@@ -42,16 +42,18 @@ export const routeOcr = new Elysia()
       if (!allowedTranslateEngines.includes(rawEngine as typeof allowedTranslateEngines[number]))
         return error(400, { error: `translate_engine must be one of: ${allowedTranslateEngines.join(", ")}` });
 
-      // Resolve translate engine (mirrors route-translate.ts logic).
-      const resolvedTranslateEngine = rawEngine === "none" ? "none"
+      // Resolve translate engine, then coerce to what is actually available.
+      let resolvedTranslateEngine: "none" | "local" | "deepl" = rawEngine === "none" ? "none"
         : rawEngine === "auto"
           ? env.DEEPL_API_KEY ? "deepl" : "local"
           : rawEngine === "local" || rawEngine === "deepl"
             ? rawEngine
-            : runtimeSettings.preferredTranslationEngine;
+            : runtimeSettings.preferredTranslationEngine as "none" | "local" | "deepl";
 
-      if (resolvedTranslateEngine === "deepl" && !env.DEEPL_API_KEY)
-        return error(503, { error: "DeepL API key not configured" });
+      // DeepL requested but key absent → fall back to local (same as "auto" with no key).
+      if (resolvedTranslateEngine === "deepl" && !env.DEEPL_API_KEY) {
+        resolvedTranslateEngine = "local";
+      }
       if (resolvedTranslateEngine === "local" && !bootState.translateReady)
         return error(503, { error: "Translate model not ready" });
 

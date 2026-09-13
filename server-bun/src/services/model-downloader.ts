@@ -1,0 +1,126 @@
+/**
+ * Downloads model files from HuggingFace (or any HTTPS URL) with:
+ *  - streaming + atomic temp-file rename (no partial writes on disk)
+ *  - console progress bar (matches C# ModelDownloader output)
+ *  - skip if destination already exists
+ *  - progress reported into BootState.downloadProgress for /health
+ */
+
+import { mkdirSync, existsSync, renameSync, unlinkSync } from "node:fs";
+import { dirname, join, basename } from "node:path";
+import { bootState } from "@/boot-state";
+
+const HF_BASE = "https://huggingface.co";
+const CHUNK = 65_536;
+
+export interface DownloadEntry {
+  /** HuggingFace repo slug, e.g. "mayocream/manga-ocr-onnx" */
+  repo: string;
+  /** Local directory to store files in */
+  dir: string;
+  /** Relative paths within the repo, e.g. ["onnx/encoder_model.onnx", "tokenizer.json"].
+   *  Files are stored flat (basename only) inside `dir`. */
+  files: string[];
+  /** Human label for console output */
+  label: string;
+}
+
+export interface DirectDownloadEntry {
+  url: string;
+  dest: string;
+  label: string;
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/** Download all files for a HuggingFace model entry. Skips existing files. */
+export async function downloadHfModel(entry: DownloadEntry): Promise<void> {
+  if (!entry.repo) return;
+  mkdirSync(entry.dir, { recursive: true });
+
+  for (const filePath of entry.files) {
+    const url = `${HF_BASE}/${entry.repo}/resolve/main/${filePath}`;
+    const dest = join(entry.dir, basename(filePath));
+    await downloadFile(url, dest, `${entry.label}/${basename(filePath)}`);
+  }
+}
+
+/** Download a single file from any HTTPS URL. Skips if dest already exists. */
+export async function downloadFile(url: string, dest: string, label: string): Promise<void> {
+  if (existsSync(dest)) {
+    console.log(`[Boot] ${label} already present — skipping`);
+    return;
+  }
+
+  mkdirSync(dirname(dest), { recursive: true });
+
+  console.log(`[Boot] Downloading ${label}`);
+  console.log(`[Boot]   → ${dest}`);
+
+  const res = await fetch(url);
+  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} fetching ${url}`);
+
+  const total = Number(res.headers.get("content-length") ?? 0);
+  const tmp = `${dest}.${Math.random().toString(36).slice(2)}.tmp`;
+
+  let done = 0;
+  try {
+    const writer = Bun.file(tmp).writer();
+    const reader = res.body.getReader();
+    for (;;) {
+      const { done: eof, value } = await reader.read();
+      if (eof) break;
+      writer.write(value);
+      done += value.byteLength;
+      printProgress(label, done, total);
+      bootState.setDownloadProgress(label, total > 0 ? Math.round((done / total) * 100) : -1);
+    }
+    await writer.end();
+    process.stdout.write("\n");
+
+    renameSync(tmp, dest);
+    console.log(`[Boot] ${label} done (${formatBytes(total > 0 ? total : done)}).`);
+    bootState.setDownloadProgress(label, 100);
+  } catch (err) {
+    process.stdout.write("\n");
+    try { unlinkSync(tmp); } catch { /* already gone */ }
+    bootState.setDownloadProgress(label, -1);
+    throw err;
+  }
+}
+
+/** Print a download plan summary before starting downloads (like C# PrintDownloadPlan). */
+export function printDownloadPlan(entries: DownloadEntry[]): void {
+  const missing: string[] = [];
+  for (const e of entries) {
+    for (const f of e.files) {
+      const dest = join(e.dir, basename(f));
+      if (!existsSync(dest)) missing.push(`  ↓ ${e.label}/${basename(f)}`);
+    }
+  }
+  if (missing.length === 0) return;
+  console.log("\n[Boot] ─── Models to download ──────────────────────────────────────────────");
+  for (const m of missing) console.log(`[Boot] ${m}`);
+  console.log("[Boot] ─────────────────────────────────────────────────────────────────────\n");
+}
+
+// ── Internals ─────────────────────────────────────────────────────────────────
+
+function printProgress(label: string, done: number, total: number): void {
+  const BAR = 30;
+  if (total > 0) {
+    const pct = done / total;
+    const filled = Math.round(pct * BAR);
+    const bar = "█".repeat(filled) + "░".repeat(BAR - filled);
+    process.stdout.write(`\r[Boot]   [${bar}] ${Math.round(pct * 100).toString().padStart(3)}%  ${formatBytes(done)} / ${formatBytes(total)}  `);
+  } else {
+    process.stdout.write(`\r[Boot]   ${formatBytes(done)} downloaded...  `);
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes >= 1024)      return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}

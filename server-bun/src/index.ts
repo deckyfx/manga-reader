@@ -11,16 +11,53 @@ import { portalPlugin } from "@/plugins/portal/index";
 import { routeSpa } from "@/plugins/route-spa";
 
 async function migrateDb(): Promise<void> {
-  const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
-  const { db } = await import("@/db/index");
-  await migrate(db, { migrationsFolder: "./src/db/migrations" });
-  console.log("DB migrations applied.");
+  const { MigrationManager } = await import("@/db/migration-manager");
+  await MigrationManager.init();
 }
 
 async function loadModels(): Promise<void> {
   bootState.inpaintEnabled = env.INPAINT_MODEL_ENABLED;
   bootState.bubbleEnabled = env.BUBBLE_MODEL_ENABLED;
   bootState.textSegEnabled = env.TEXT_SEG_MODEL_ENABLED;
+
+  const { downloadHfModel, downloadFile, printDownloadPlan } = await import("@/services/model-downloader");
+
+  // Build download entries for enabled models and print plan before starting.
+  const entries = [
+    env.OCR_MODEL_ENABLED && { repo: env.OCR_MODEL_REPO, dir: env.OCR_MODELS_DIR, files: env.OCR_MODEL_FILES, label: "OCR" },
+    env.TRANSLATE_MODEL_ENABLED && { repo: env.TRANSLATE_MODEL_REPO, dir: env.TRANSLATE_MODELS_DIR, files: env.TRANSLATE_MODEL_FILES, label: "Translate" },
+    env.INPAINT_MODEL_ENABLED && { repo: env.INPAINT_MODEL_REPO, dir: env.INPAINT_MODELS_DIR, files: env.INPAINT_MODEL_FILES, label: "Inpaint" },
+    env.BUBBLE_MODEL_ENABLED && { repo: env.BUBBLE_MODEL_REPO, dir: env.BUBBLE_MODELS_DIR, files: env.BUBBLE_MODEL_FILES, label: "Bubble" },
+    env.TEXT_SEG_MODEL_ENABLED && { repo: "", dir: env.TEXT_SEG_MODELS_DIR, files: env.TEXT_SEG_MODEL_FILES, label: "TextSeg" },
+  ].filter(Boolean) as { repo: string; dir: string; files: string[]; label: string }[];
+
+  printDownloadPlan(entries);
+
+  // Download each enabled model from HuggingFace before loading (TextSeg uses a direct URL).
+  if (env.OCR_MODEL_ENABLED) {
+    await downloadHfModel({ repo: env.OCR_MODEL_REPO, dir: env.OCR_MODELS_DIR, files: env.OCR_MODEL_FILES, label: "OCR" })
+      .catch((err: Error) => console.error(`[Boot] OCR download failed — ${err.message}`));
+  }
+  if (env.TRANSLATE_MODEL_ENABLED) {
+    await downloadHfModel({ repo: env.TRANSLATE_MODEL_REPO, dir: env.TRANSLATE_MODELS_DIR, files: env.TRANSLATE_MODEL_FILES, label: "Translate" })
+      .catch((err: Error) => console.error(`[Boot] Translate download failed — ${err.message}`));
+  }
+  if (env.INPAINT_MODEL_ENABLED) {
+    await downloadHfModel({ repo: env.INPAINT_MODEL_REPO, dir: env.INPAINT_MODELS_DIR, files: env.INPAINT_MODEL_FILES, label: "Inpaint" })
+      .catch((err: Error) => console.error(`[Boot] Inpaint download failed — ${err.message}`));
+  }
+  if (env.BUBBLE_MODEL_ENABLED) {
+    await downloadHfModel({ repo: env.BUBBLE_MODEL_REPO, dir: env.BUBBLE_MODELS_DIR, files: env.BUBBLE_MODEL_FILES, label: "Bubble" })
+      .catch((err: Error) => console.error(`[Boot] Bubble download failed — ${err.message}`));
+  }
+  if (env.TEXT_SEG_MODEL_ENABLED) {
+    const textSegUrl = Bun.env.TEXT_SEG_MODEL_URL
+      ?? "https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx";
+    const { join, basename } = await import("node:path");
+    const dest = join(env.TEXT_SEG_MODELS_DIR, basename(env.TEXT_SEG_MODEL_FILES[0]));
+    await downloadFile(textSegUrl, dest, `TextSeg/${basename(env.TEXT_SEG_MODEL_FILES[0])}`)
+      .catch((err: Error) => console.error(`[Boot] TextSeg download failed — ${err.message}`));
+  }
 
   const loadErrors: string[] = [];
 

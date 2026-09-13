@@ -13,5 +13,5 @@
       "@client/*": ["./client/*"]
     }
   },
-  "include": ["src/**/*", "client/**/*", "build.ts", "drizzle.config.ts"]
+  "include": ["src/**/*", "client/**/*", "scripts/**/*", "build.ts", "drizzle.config.ts"]
 }

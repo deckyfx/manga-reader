@@ -23,15 +23,15 @@ export const routeTranslate = new Elysia().post(
       ? env.DEEPL_API_KEY ? "deepl" : "local"
       : effective;
 
-    if (resolvedEngine === "deepl" && !env.DEEPL_API_KEY)
-      return error(503, { error: "DeepL API key not configured" });
-    if (resolvedEngine !== "deepl" && !bootState.translateReady)
+    // DeepL requested but key absent → fall back to local.
+    const finalEngine = (resolvedEngine === "deepl" && !env.DEEPL_API_KEY) ? "local" : resolvedEngine;
+    if (finalEngine !== "deepl" && !bootState.translateReady)
       return error(503, { error: "Translate model not ready" });
 
     const result = await inferenceQueue.enqueue<
       { text: string; engine: string },
       { translatedText: string; engine: string; processingTimeMs: number }
-    >("translate", { text, engine: resolvedEngine });
+    >("translate", { text, engine: finalEngine });
 
     OcrStore.insertTranslateLog({
       sourceText: text,

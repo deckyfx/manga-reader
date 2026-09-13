@@ -32,8 +32,13 @@ let modelEosToken = 0;
 
 export async function loadTranslateModel(): Promise<void> {
   const dir = env.TRANSLATE_MODELS_DIR;
-  const encoderPath = join(dir, "onnx/encoder_model.onnx");
-  const decoderPath = join(dir, "onnx/decoder_model.onnx");
+  // Support both flat layout (C# server downloads) and Xenova onnx/ subdir layout.
+  const encoderPath = existsSync(join(dir, "onnx/encoder_model.onnx"))
+    ? join(dir, "onnx/encoder_model.onnx")
+    : join(dir, "encoder_model.onnx");
+  const decoderPath = existsSync(join(dir, "onnx/decoder_model.onnx"))
+    ? join(dir, "onnx/decoder_model.onnx")
+    : join(dir, "decoder_model.onnx");
   const tokenizerPath = join(dir, "tokenizer.json");
 
   if (!existsSync(encoderPath) || !existsSync(decoderPath) || !existsSync(tokenizerPath)) {
@@ -49,20 +54,32 @@ export async function loadTranslateModel(): Promise<void> {
     graphOptimizationLevel: "all",
   });
 
-  // Load tokenizer.json for BPE encode/decode
-  tokenizer = buildTokenizer(JSON.parse(readFileSync(tokenizerPath, "utf8")));
+  // Load tokenizer.json — also extract BOS/EOS token IDs from added_tokens so
+  // config.json is not required (MarianMT: EOS = </s> id, BOS = <pad> id).
+  const tokenizerJson = JSON.parse(readFileSync(tokenizerPath, "utf8")) as Record<string, unknown>;
+  tokenizer = buildTokenizer(tokenizerJson);
 
-  // config.json is required — it carries the BOS/EOS token IDs needed for greedy decode.
+  const addedTokens = (tokenizerJson["added_tokens"] as { id: number; content: string }[] | undefined) ?? [];
+  const eosEntry = addedTokens.find((t) => t.content === "</s>");
+  const bosEntry = addedTokens.find((t) => t.content === "<pad>");
+
+  // Fall back to config.json only when tokenizer.json doesn't carry the special token IDs.
   const configPath = join(dir, "config.json");
-  if (!existsSync(configPath)) {
-    throw new Error(`Translate model config.json not found in ${dir}.`);
+  if (eosEntry !== undefined && bosEntry !== undefined) {
+    modelEosToken = eosEntry.id;
+    modelBosToken = bosEntry.id;
+  } else if (existsSync(configPath)) {
+    const cfg = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    if (typeof cfg["decoder_start_token_id"] !== "number" || typeof cfg["eos_token_id"] !== "number") {
+      throw new Error(`Translate model config.json is missing decoder_start_token_id or eos_token_id.`);
+    }
+    modelBosToken = cfg["decoder_start_token_id"];
+    modelEosToken = cfg["eos_token_id"];
+  } else {
+    throw new Error(
+      `Cannot determine BOS/EOS token IDs: tokenizer.json has no <pad>/<s> in added_tokens and config.json not found in ${dir}.`
+    );
   }
-  const cfg = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
-  if (typeof cfg["decoder_start_token_id"] !== "number" || typeof cfg["eos_token_id"] !== "number") {
-    throw new Error(`Translate model config.json is missing decoder_start_token_id or eos_token_id.`);
-  }
-  modelBosToken = cfg["decoder_start_token_id"];
-  modelEosToken = cfg["eos_token_id"];
 
   inferenceHandlers.translate = runTranslate as (input: unknown, signal: AbortSignal) => Promise<unknown>;
   bootState.translateReady = true;
@@ -169,10 +186,97 @@ async function runDeepL(text: string, targetLang: string): Promise<TranslateOutp
   };
 }
 
-/** Minimal BPE tokenizer backed by tokenizer.json (HuggingFace format). */
+/**
+ * Build a tokenizer from a HuggingFace tokenizer.json.
+ * Supports both BPE (model.type == "BPE", has model.merges) and
+ * Unigram/SentencePiece (model.type == "Unigram", used by opus-mt-* MarianMT models).
+ */
 function buildTokenizer(json: Record<string, unknown>): Tokenizer {
-  // Build vocab map: token → id
   const model = json["model"] as Record<string, unknown>;
+  const modelType = (model["type"] as string | undefined)?.toLowerCase();
+
+  if (modelType === "unigram") {
+    return buildUnigramTokenizer(model);
+  }
+  return buildBpeTokenizer(model);
+}
+
+/** Unigram (Viterbi / SentencePiece) tokenizer — used by MarianMT opus-mt-* models. */
+function buildUnigramTokenizer(model: Record<string, unknown>): Tokenizer {
+  // vocab is [[token, logprob], ...] ordered by token id
+  const vocabArr = model["vocab"] as [string, number][];
+  const unkId = (model["unk_id"] as number | undefined) ?? 0;
+  const MAX_TOK_LEN = 16;
+  const UNK_PENALTY = -100;
+  const SPACE = "▁";
+
+  const idToToken: string[] = vocabArr.map(([tok]) => tok);
+  const scores: number[] = vocabArr.map(([, s]) => s);
+  const tokenToId = new Map<string, number>();
+  for (let i = 0; i < idToToken.length; i++) {
+    if (!tokenToId.has(idToToken[i])) tokenToId.set(idToToken[i], i);
+  }
+
+  function viterbi(s: string): number[] {
+    const n = s.length;
+    const dp = new Float64Array(n + 1).fill(-Infinity);
+    const from = new Int32Array(n + 1);
+    const tl = new Int32Array(n + 1);
+    dp[0] = 0;
+
+    for (let i = 0; i < n; i++) {
+      if (dp[i] === -Infinity) continue;
+      const maxLen = Math.min(MAX_TOK_LEN, n - i);
+      for (let len = 1; len <= maxLen; len++) {
+        const tok = s.slice(i, i + len);
+        let tokScore: number;
+        if (tokenToId.has(tok)) {
+          tokScore = scores[tokenToId.get(tok)!];
+        } else if (len === 1) {
+          tokScore = UNK_PENALTY;
+        } else {
+          continue;
+        }
+        const cand = dp[i] + tokScore;
+        const end = i + len;
+        if (cand > dp[end]) {
+          dp[end] = cand;
+          from[end] = i;
+          tl[end] = len;
+        }
+      }
+    }
+
+    const ids: number[] = [];
+    let pos = n;
+    while (pos > 0) {
+      const start = from[pos];
+      const tok = s.slice(start, pos);
+      ids.push(tokenToId.has(tok) ? tokenToId.get(tok)! : unkId);
+      pos = start;
+    }
+    ids.reverse();
+    return ids;
+  }
+
+  return {
+    encode(text: string): number[] {
+      // Normalise whitespace to ▁, prepend ▁ for sentence start (Metaspace convention)
+      const normalised = SPACE + text.replace(/\s+/g, SPACE);
+      return viterbi(normalised);
+    },
+    decode(ids: number[]): string {
+      return ids
+        .map((id) => idToToken[id] ?? "")
+        .join("")
+        .replace(/▁/g, " ")
+        .trimStart();
+    },
+  };
+}
+
+/** BPE tokenizer — used by models with model.type == "BPE" and a merges list. */
+function buildBpeTokenizer(model: Record<string, unknown>): Tokenizer {
   const vocabMap = model["vocab"] as Record<string, number>;
   const idToToken = Object.fromEntries(Object.entries(vocabMap).map(([t, id]) => [id, t]));
   const mergeRank = new Map<string, number>(
@@ -204,9 +308,7 @@ function buildTokenizer(json: Record<string, unknown>): Tokenizer {
       const tokens: number[] = [];
       for (const word of text.split(" ")) {
         const bpeTokens = applyBpe("▁" + word);
-        for (const t of bpeTokens) {
-          tokens.push(vocabMap[t] ?? unkId);
-        }
+        for (const t of bpeTokens) tokens.push(vocabMap[t] ?? unkId);
       }
       return tokens;
     },

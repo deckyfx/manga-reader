@@ -36,6 +36,9 @@ Thumbs.db
 # ── Docs (personal workflow notes, not shared via git) ─────────────────────────
 docs/cr-workflow.md
 
+# ── Local task notes ──────────────────────────────────────────────────────────
+TODO.txt
+
 # ── etc ────────────────────────────────────────────────────────────────────────
 server/server
 mighty-wiggling-cascade.md

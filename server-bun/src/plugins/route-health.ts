@@ -9,6 +9,8 @@ const HealthSchema = t.Object({
   inpaint: t.Union([t.Boolean(), t.Literal("disabled")]),
   bubble: t.Union([t.Boolean(), t.Literal("disabled")]),
   text_seg: t.Union([t.Boolean(), t.Literal("disabled")]),
+  /** Active downloads: label → 0-100 (percent), or -1 when size unknown. Empty when nothing downloading. */
+  downloads: t.Record(t.String(), t.Integer()),
 });
 
 export const routeHealth = new Elysia({ prefix: "/health" }).get(
@@ -21,6 +23,7 @@ export const routeHealth = new Elysia({ prefix: "/health" }).get(
     inpaint: bootState.inpaintEnabled ? bootState.inpaintReady : ("disabled" as const),
     bubble: bootState.bubbleEnabled ? bootState.bubbleReady : ("disabled" as const),
     text_seg: bootState.textSegEnabled ? bootState.textSegReady : ("disabled" as const),
+    downloads: bootState.activeDownloads,
   }),
   { response: { 200: HealthSchema } },
 );
