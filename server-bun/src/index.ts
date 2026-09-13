@@ -15,6 +15,10 @@ const bootLog = childLogger("boot");
 async function migrateDb(): Promise<void> {
   const { MigrationManager } = await import("@/db/migration-manager");
   await MigrationManager.init();
+  // Page jobs run in memory: anything still queued or running belonged to the previous process
+  const { PageStore } = await import("@/stores/page-store");
+  const interrupted = await PageStore.failInterrupted();
+  if (interrupted > 0) bootLog.warn(`${interrupted} page job(s) were interrupted by the last shutdown and marked as failed`);
 }
 
 async function loadModels(): Promise<void> {

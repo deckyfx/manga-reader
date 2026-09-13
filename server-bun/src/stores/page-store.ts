@@ -56,6 +56,19 @@ export class PageStore {
     await db.update(pages).set({ ...data, updatedAt: sql`(datetime('now'))` }).where(eq(pages.id, id));
   }
 
+  /**
+   * Marks pages left queued or running by a previous server process as failed (jobs live in memory, so they
+   * can't resume). Call once at boot; returns how many pages were affected.
+   */
+  static async failInterrupted(): Promise<number> {
+    const rows = await db
+      .update(pages)
+      .set({ status: "error", errorMessage: "Interrupted by a server restart — run the page again", updatedAt: sql`(datetime('now'))` })
+      .where(inArray(pages.status, ["queued", "running"]))
+      .returning({ id: pages.id });
+    return rows.length;
+  }
+
   /** Increments the publish revision and returns the new value. */
   static async bumpRevision(id: string): Promise<number> {
     const [row] = await db

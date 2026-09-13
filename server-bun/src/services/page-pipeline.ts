@@ -9,7 +9,7 @@
  *   clean      clean-text.png (bubbles, captions)  ·  clean-sfx.png (sound effects, optional)
  *   render     patches/<id>.png, render-overlay.png, result.png
  */
-import sharp, { type OverlayOptions } from "sharp";
+import sharp, { type OverlayOptions, type Sharp } from "sharp";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { maskFromImage, maskToPng, selectBlockMask, type BlockKind, type Box } from "@/lib/mask";
@@ -92,6 +92,14 @@ export function missingPipelineModels(): string[] {
   return [textSegModelPath(), inpaintModelPath()].filter((path) => !existsSync(path));
 }
 
+/**
+ * Upright, opaque page: applies the EXIF orientation (phone photos, some scans) and flattens transparency onto
+ * white, since the stages drop alpha and transparent pixels often hide black underneath.
+ */
+export function normalisePage(image: Sharp): Sharp {
+  return image.rotate().flatten({ background: "#ffffff" });
+}
+
 /** Bubble covering most of the block, if any. */
 function matchBubble(block: Box, bubbles: Box[]): Box | null {
   let best: Box | null = null, bestShare = 0.5;
@@ -155,7 +163,7 @@ export class PagePipeline {
     // Later stages pick their input by file existence, so outputs from an earlier run would go stale
     for (const stale of DERIVED_OUTPUTS) rmSync(this.path(stale), { recursive: true, force: true });
     this.report({ stage: "detecting", message: "Detecting bubbles and text…", fraction: 0 });
-    await sharp(image).png().toFile(this.path("original.png"));
+    await normalisePage(sharp(image)).png().toFile(this.path("original.png"));
     const page = Buffer.from(await Bun.file(this.path("original.png")).arrayBuffer());
 
     const detector = await getBubbleDetector();

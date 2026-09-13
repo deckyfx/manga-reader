@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { childLogger } from "@/lib/logger";
 import { runExclusive } from "@/queue/page-queue";
 import { enginesNotReady, pageEngines as engines } from "@/services/page-engines";
-import { missingPipelineModels, PagePipeline, type PageStage, type ProgressUpdate } from "@/services/page-pipeline";
+import { missingPipelineModels, normalisePage, PagePipeline, type PageStage, type ProgressUpdate } from "@/services/page-pipeline";
 import { pageDir, PageStore, type StageName } from "@/stores/page-store";
 import { translationJobs, type PageJobEvent } from "@/stores/translation-job-store";
 
@@ -120,7 +120,7 @@ export async function submitPageJob(load: () => Promise<Buffer>, options: Submit
   try {
     let page: Buffer;
     try {
-      page = await sharp(await load(), { limitInputPixels: MAX_INPUT_PIXELS }).png().toBuffer();
+      page = await normalisePage(sharp(await load(), { limitInputPixels: MAX_INPUT_PIXELS })).png().toBuffer();
     } catch (err) {
       return { ok: false, code: 400, error: err instanceof ImageLoadError ? err.message : "image could not be decoded" };
     }
