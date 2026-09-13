@@ -73,8 +73,9 @@ async function loadModels(): Promise<void> {
     const { join } = await import("node:path");
     const zipDest = join(env.DICT_DIR, "jitendex-yomitan.zip");
     try {
+      // Empty keyword → first .zip in latest release (Jitendex may rename assets between releases)
       const url = env.JITENDEX_ZIP_URL
-        ?? await findGitHubReleaseAsset("stephenmk", "Jitendex", "yomitan");
+        ?? await findGitHubReleaseAsset("stephenmk", "Jitendex", "");
       await downloadFile(url, zipDest, "Dict/jitendex-yomitan.zip");
     } catch (err) {
       bootLog.warn({ err }, "Jitendex download failed — dictionary lookups will be unavailable");
@@ -129,5 +130,14 @@ const listen = env.SOCKET_PATH
 app.listen(listen, ({ hostname, port }) => {
   logger.info(`web-ocr-bun listening on http://${hostname}:${port}`);
 });
+
+// Graceful shutdown — one Ctrl+C is enough
+const shutdown = (signal: string) => {
+  logger.info(`${signal} — shutting down`);
+  app.stop();
+  process.exit(0);
+};
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 export type App = typeof app;
