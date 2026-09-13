@@ -134,6 +134,11 @@ export class MangaInpainter {
     return inpainter;
   }
 
+  /** Load LaMa now instead of on the first region that needs it. */
+  async preload(): Promise<void> {
+    await this.getSession();
+  }
+
   private async getSession(): Promise<ort.InferenceSession> {
     this.session ??= await ort.InferenceSession.create(this.modelPath, { executionProviders: ["cpu"], graphOptimizationLevel: "all" });
     return this.session;
@@ -201,8 +206,20 @@ export function inpaintModelPath(): string {
   return join(env.INPAINT_MODELS_DIR, basename(env.INPAINT_MODEL_FILES[0]));
 }
 
+let sharedInpainter: Promise<MangaInpainter> | null = null;
+
+/** Process-wide inpainter shared by the inference queue and the page pipeline; LaMa loads on first need. */
+export function getInpainter(): Promise<MangaInpainter> {
+  sharedInpainter ??= MangaInpainter.load(inpaintModelPath(), false).catch((err: unknown) => {
+    sharedInpainter = null;
+    throw err;
+  });
+  return sharedInpainter;
+}
+
 export async function loadInpaintModel(): Promise<void> {
-  const inpainter = await MangaInpainter.load(inpaintModelPath());
+  const inpainter = await getInpainter();
+  await inpainter.preload();
   inferenceHandlers.inpaint = async (input: unknown, signal: AbortSignal): Promise<InpaintOutput> => {
     const { imageBuffer, mask, regions } = input as InpaintInput;
     const start = Date.now();

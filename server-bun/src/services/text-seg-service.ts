@@ -158,8 +158,19 @@ export function textSegModelPath(): string {
   return join(env.TEXT_SEG_MODELS_DIR, basename(env.TEXT_SEG_MODEL_FILES[0]));
 }
 
+let sharedSegmenter: Promise<TextSegmenter> | null = null;
+
+/** Process-wide segmenter, loaded on first use and shared by the inference queue and the page pipeline. */
+export function getTextSegmenter(): Promise<TextSegmenter> {
+  sharedSegmenter ??= TextSegmenter.load(textSegModelPath()).catch((err: unknown) => {
+    sharedSegmenter = null;
+    throw err;
+  });
+  return sharedSegmenter;
+}
+
 export async function loadTextSegModel(): Promise<void> {
-  const segmenter = await TextSegmenter.load(textSegModelPath());
+  const segmenter = await getTextSegmenter();
   inferenceHandlers["text-seg"] = async (input: unknown, signal: AbortSignal): Promise<TextSegOutput> => {
     if (signal.aborted) throw new Error("Inference aborted (timeout)");
     const start = Date.now();

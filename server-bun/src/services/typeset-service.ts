@@ -26,6 +26,17 @@ const HYPHEN_GAIN = 1.35;
 const SOFT_HYPHEN = "\u00AD";
 /** Pixels left empty on the dividing line between two blocks that share an interior. */
 const AREA_GAP = 6;
+/** ASCII stand-ins for typographic characters, used only when the font lacks the original glyph. */
+const GLYPH_FALLBACKS: Record<string, string> = {
+  "—": "--",
+  "–": "-",
+  "‘": "'",
+  "’": "'",
+  "“": "\"",
+  "”": "\"",
+  "…": "...",
+  "　": " ",
+};
 
 /** Where text may be placed: a mask local to `bound` (1 = allowed). */
 export interface TextArea {
@@ -174,11 +185,33 @@ export function separateAreas(entries: ReadonlyArray<{ area: TextArea; block: Bo
   }
 }
 
+let sharedTypesetter: Promise<Typesetter> | null = null;
+
+/** Process-wide typesetter (parsed font), loaded on first use. */
+export function getTypesetter(): Promise<Typesetter> {
+  sharedTypesetter ??= Typesetter.load();
+  return sharedTypesetter;
+}
+
 export class Typesetter {
   private constructor(private readonly font: Font) {}
 
   static async load(fontPath: string = animeAceBold): Promise<Typesetter> {
     return new Typesetter(parse(await Bun.file(fontPath).arrayBuffer()));
+  }
+
+  /**
+   * Replace characters the font has no glyph for with ASCII look-alikes. Translations often contain
+   * typographic punctuation (DeepL's em dash, curly quotes) that comic fonts like Anime Ace lack, which
+   * would otherwise render as empty boxes.
+   */
+  private withAvailableGlyphs(text: string): string {
+    let result = "";
+    for (const ch of text) {
+      const fallback = GLYPH_FALLBACKS[ch];
+      result += fallback !== undefined && this.font.charToGlyphIndex(ch) === 0 ? fallback : ch;
+    }
+    return result;
   }
 
   private get capHeightRatio(): number {
@@ -221,7 +254,7 @@ export class Typesetter {
    * are always allowed; hyphenation only when it buys a clearly larger font.
    */
   layout(text: string, area: TextArea, maxFontSize: number): TextLayout {
-    const tokens = tokenize(text);
+    const tokens = tokenize(this.withAvailableGlyphs(text));
     const geometry = this.geometry(area);
     if (tokens.length === 0 || !geometry) return { fontSize: 0, lines: [], fits: tokens.length === 0 };
 

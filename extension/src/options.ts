@@ -1,5 +1,6 @@
 import type { Settings, OcrEngine, ServerTranslation, ClientTranslation, DictMode, TesseractQuality } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
+import { errorMessage, serverApi } from "./api";
 
 // ── Elements ──────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,7 @@ const deeplTargetLangSel         = document.getElementById("deeplTargetLang")   
 const serverUrlInput             = document.getElementById("serverUrl")               as HTMLInputElement;
 const serverTranslationSel       = document.getElementById("serverTranslation")       as HTMLSelectElement;
 const dictModeSelect             = document.getElementById("dictMode")                as HTMLSelectElement;
+const pageCleanSfxInput          = document.getElementById("pageCleanSfx")            as HTMLInputElement;
 const testBtn                    = document.getElementById("testBtn")                 as HTMLButtonElement;
 const testBtnStatus              = document.getElementById("testBtnStatus")!;
 
@@ -144,17 +146,15 @@ async function testConnection(): Promise<void> {
   setInlineStatus(testBtnStatus, "", "");
 
   try {
-    const res = await fetch(`${url.replace(/\/$/, "")}/health`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (res.ok) {
-      const data = await res.json() as { version?: string; deepl_available?: boolean };
-      const deepl = data.deepl_available ? " · DeepL ✅" : " · DeepL ✗";
-      serverVerified = true;
-      setInlineStatus(testBtnStatus, `✅ Connected — v${data.version ?? "?"}${deepl}`, "ok");
-    } else {
+    const { data, error } = await serverApi(url).health.get({ fetch: { signal: AbortSignal.timeout(5000) } });
+    if (error) {
       serverVerified = false;
-      setInlineStatus(testBtnStatus, `❌ HTTP ${res.status}`, "err");
+      setInlineStatus(testBtnStatus, `❌ ${errorMessage(error)}`, "err");
+    } else {
+      const mark = (ready: boolean | "disabled"): string => (ready === true ? "✓" : ready === "disabled" ? "off" : "✗");
+      const models = `OCR ${mark(data.ocr)} · Translate ${mark(data.translate)} · Dictionary ${mark(data.dictionary)} · Text detection ${mark(data.text_seg)} · Inpaint ${mark(data.inpaint)}`;
+      serverVerified = true;
+      setInlineStatus(testBtnStatus, data.status === "starting" ? `⏳ Connected, models still loading — ${models}` : `✅ Connected — ${models}`, "ok");
     }
   } catch (e) {
     serverVerified = false;
@@ -224,6 +224,7 @@ chrome.storage.sync
     serverUrlInput.value        = s.serverUrl;
     serverTranslationSel.value  = s.serverTranslation;
     dictModeSelect.value        = s.dictMode;
+    pageCleanSfxInput.checked   = s.pageCleanSfx;
 
     clientTranslationServerSel.value = s.clientTranslation;
     deeplApiKeyServerInput.value     = s.deeplApiKey;
@@ -288,6 +289,7 @@ async function saveSettings(): Promise<void> {
     serverUrl:         serverUrlInput.value.trim(),
     serverTranslation: serverTranslationSel.value as ServerTranslation,
     dictMode:          dictModeSelect.value as DictMode,
+    pageCleanSfx:      pageCleanSfxInput.checked,
     tesseractLang:     tesseractLangInput.value,
     tesseractQuality:  tesseractQualitySel.value as TesseractQuality,
     clientTranslation,

@@ -1,235 +1,292 @@
 /**
- * POST /api/translate-page — full pipeline: upload image → detect text →
- * OCR each bubble → translate → persist job.
+ * Full-page translation for the browser extension, backed by the shared page pipeline.
  *
- * GET  /api/translate-page/:id        — fetch job status + result
- * GET  /api/translate-page/:id/events — SSE progress stream
+ * POST /api/translate-page             { image, clean_sfx?, force? } → 202 { job_id, cached }
+ * GET  /api/translate-page/:id/events  SSE: every event replayed from the start, then live (see PageJobEvent)
+ * GET  /api/translate-page/:id         status snapshot
+ * GET  /api/translate-page/:id/result  result.png
+ *
+ * Stage files stay in data/jobs/<id>/ (original, mask, crops, clean-text, patches, result) for review in the Studio.
  */
 import Elysia, { t } from "elysia";
-import { JobStore } from "@/stores/job-store";
-import { inferenceQueue } from "@/queue/inference-queue";
-import { bootState } from "@/boot-state";
-import { JobSchema, BubbleSchema } from "@/lib/schemas";
-import { join } from "path";
-import { mkdir } from "fs/promises";
 import sharp from "sharp";
+import { existsSync } from "node:fs";
+import { mkdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { bootState } from "@/boot-state";
+import { childLogger } from "@/lib/logger";
+import { ErrBody } from "@/lib/schemas";
+import { inferenceQueue } from "@/queue/inference-queue";
+import { JobStore } from "@/stores/job-store";
+import { translationJobs, type PageJobEvent } from "@/stores/translation-job-store";
+import {
+  missingPipelineModels,
+  PagePipeline,
+  type PageJob,
+  type PageStage,
+  type PipelineEngines,
+  type ProgressUpdate,
+} from "@/services/page-pipeline";
+
+const log = childLogger("translate-page");
 
 const DATA_DIR = "./data/jobs";
+/** ~15 MB decoded. */
+const MAX_BASE64_LENGTH = 20 * 1024 * 1024;
+const MAX_INPUT_PIXELS = 100_000_000;
 
-const sseStreams = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
+/** Share of overall progress each stage covers. */
+const STAGE_SPAN: Record<PageStage, [number, number]> = {
+  detecting: [0, 0.15],
+  ocr: [0.15, 0.45],
+  translating: [0.45, 0.6],
+  cleaning: [0.6, 0.85],
+  typesetting: [0.85, 1],
+};
 
-function sendSse(jobId: string, event: string, data: unknown): void {
-  const ctrl = sseStreams.get(jobId);
-  if (!ctrl) return;
-  const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+const IdParams = t.Object({ id: t.String({ pattern: "^[A-Za-z0-9-]+$" }) });
+
+const resultUrl = (id: string): string => `/api/translate-page/${id}/result`;
+
+/** OCR and translation go through the inference queue so page jobs don't race single bubble requests. */
+const engines: PipelineEngines = {
+  ocr: async (image) => (await inferenceQueue.enqueue<{ imageBuffer: Buffer }, { text: string }>("ocr", { imageBuffer: image })).text,
+  translate: async (text) => {
+    const out = await inferenceQueue.enqueue<{ text: string }, { translatedText: string; engine: string }>("translate", { text });
+    return { text: out.translatedText, engine: out.engine };
+  },
+};
+
+/** Page jobs run one at a time: every stage is CPU-bound and shares the same models. */
+let pageQueue: Promise<void> = Promise.resolve();
+function runExclusive(task: () => Promise<void>): void {
+  pageQueue = pageQueue.then(task, task);
+}
+
+/** Record the page's text blocks for the Studio portal. */
+async function persistBlocks(id: string, job: PageJob): Promise<void> {
+  const textBlocks = job.blocks.filter((b) => b.kind === "text");
+  await JobStore.deleteAllBubbles(id);
+  for (const b of textBlocks) {
+    await JobStore.insertBubble({
+      jobId: id,
+      bubbleIndex: b.id,
+      x: b.x,
+      y: b.y,
+      width: b.w,
+      height: b.h,
+      rotation: 0,
+      sourceText: b.source_text,
+      translatedText: b.translated_text,
+      patchImagePath: b.render ? `patches/${b.id}.png` : null,
+    });
+  }
+  await JobStore.update(id, {
+    totalBubbles: textBlocks.length,
+    processedBubbles: textBlocks.length,
+    textSegBlocks: JSON.stringify(job.blocks.map((b) => ({
+      id: String(b.id),
+      x: b.x,
+      y: b.y,
+      w: b.w,
+      h: b.h,
+      source_text: b.source_text,
+      translated_text: b.translated_text,
+    }))),
+  });
+}
+
+async function runJob(id: string, page: Buffer, cleanSfx: boolean): Promise<void> {
+  const started = Date.now();
+  const emit = (event: PageJobEvent): void => translationJobs.emit(id, event);
+  const onProgress = ({ stage, message, fraction, detail }: ProgressUpdate): void => {
+    const [from, to] = STAGE_SPAN[stage];
+    emit({ type: detail ? "progress" : "log", stage, message, progress: Math.round((from + (to - from) * fraction) * 1000) / 1000 });
+  };
+  const pipeline = new PagePipeline(join(DATA_DIR, id), onProgress);
+
   try {
-    ctrl.enqueue(new TextEncoder().encode(msg));
+    await JobStore.setStatus(id, "processing");
+    const { job } = await pipeline.detect(page, "upload");
+    await pipeline.ocr(job, engines.ocr);
+    await pipeline.translate(job, engines.translate);
+    await pipeline.clean(job, "text");
+    if (cleanSfx) await pipeline.clean(job, "sfx");
+    await pipeline.render(job);
+    await persistBlocks(id, job);
+    await JobStore.setStatus(id, "done");
+
+    const result = Buffer.from(await Bun.file(pipeline.path("result.png")).arrayBuffer()).toString("base64");
+    emit({ type: "done", stage: "done", message: "Translation complete", progress: 1, result, result_url: resultUrl(id), elapsed_ms: Date.now() - started });
+    log.info({ jobId: id, ms: Date.now() - started }, "Page translated");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ err, jobId: id }, "Page translation failed");
+    await JobStore.setStatus(id, "error", message).catch(() => {});
+    emit({ type: "error", stage: "error", message, error: message });
+  }
+}
+
+/** DB row for this page: reuses the row of a page seen before (its files are regenerated). */
+async function jobIdForImage(imageHash: string): Promise<{ id: string; previousStatus: string | null }> {
+  const existing = await JobStore.findByImageHash(imageHash);
+  if (existing) return { id: existing.id, previousStatus: existing.status };
+  try {
+    const row = await JobStore.insert({ imageHash, sourcePath: "upload", status: "queued", inpaintEnabled: true, bubbleEnabled: true });
+    return { id: row.id, previousStatus: null };
   } catch {
-    /* client disconnected */
+    // Unique constraint: a concurrent request just inserted this page
+    const raced = await JobStore.findByImageHash(imageHash);
+    if (!raced) throw new Error("failed to create job");
+    return { id: raced.id, previousStatus: raced.status };
   }
 }
 
 export const routeTranslatePage = new Elysia()
-  // ── POST /api/translate-page ───────────────────────────────────────────────
   .post(
     "/api/translate-page",
-    async ({ body, status: error }) => {
-      if (!bootState.isReady) return error(503, { error: "Server not ready" });
+    async ({ body, status }) => {
+      if (!bootState.ocrReady || !bootState.translateReady) return status(503, { error: "Server not ready — models still loading" });
+      const missing = missingPipelineModels();
+      if (missing.length > 0) {
+        return status(503, { error: `Page translation models missing (${missing.join(", ")}) — set TEXT_SEG_MODEL_ENABLED and INPAINT_MODEL_ENABLED so they download at boot` });
+      }
 
-      const raw = body.image;
-      // Bound raw payload before any parsing to avoid expensive indexOf on huge strings.
-      if (raw.length > 22 * 1024 * 1024)
-        return error(400, { error: "image payload too large (max ~15 MB)" });
-      const commaIdx = raw.indexOf(",");
-      const base64 = commaIdx >= 0 ? raw.slice(commaIdx + 1) : raw;
+      const base64 = body.image.slice(body.image.indexOf(",") + 1);
+      if (base64.length > MAX_BASE64_LENGTH) return status(400, { error: "image payload too large (max ~15 MB)" });
+      if (base64.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return status(400, { error: "image must be valid base64" });
 
-      // Also bound the base64 portion after stripping the data-URI prefix.
-      if (base64.length > 20 * 1024 * 1024)
-        return error(400, { error: "image payload too large (max ~15 MB)" });
-
-      // Reject structurally invalid base64 (length%4===1 cannot arise from valid encoding).
-      if (base64.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64))
-        return error(400, { error: "image must be valid base64" });
-
-      const imageBytes = Buffer.from(base64, "base64");
-
-      // Limit input pixels to prevent decompression bombs (100 MP).
-      const pngBytes = await sharp(imageBytes, { limitInputPixels: 100_000_000 }).png().toBuffer();
-      const { width = 1, height = 1 } = await sharp(pngBytes).metadata();
+      let page: Buffer;
+      try {
+        page = await sharp(Buffer.from(base64, "base64"), { limitInputPixels: MAX_INPUT_PIXELS }).png().toBuffer();
+      } catch {
+        return status(400, { error: "image could not be decoded" });
+      }
 
       const hasher = new Bun.CryptoHasher("sha256");
-      hasher.update(pngBytes);
-      const imageHash = hasher.digest("hex");
+      hasher.update(page);
+      const { id, previousStatus } = await jobIdForImage(hasher.digest("hex"));
+      const cleanSfx = body.clean_sfx ?? false;
 
-      const existing = await JobStore.findByImageHash(imageHash);
-      if (existing && existing.status === "done") {
-        return { job_id: existing.id, cached: true };
+      const live = translationJobs.get(id);
+      if (live && (live.status === "queued" || live.status === "running")) return status(202, { job_id: id, cached: false });
+
+      // Same page already translated with the same options: replay the stored result
+      const dir = join(DATA_DIR, id);
+      const resultPath = join(dir, "result.png");
+      if (!body.force && previousStatus === "done" && existsSync(resultPath) && existsSync(join(dir, "clean-sfx.png")) === cleanSfx) {
+        translationJobs.create(id);
+        const result = Buffer.from(await Bun.file(resultPath).arrayBuffer()).toString("base64");
+        translationJobs.emit(id, { type: "done", stage: "done", message: "Loaded previous translation", progress: 1, result, result_url: resultUrl(id), elapsed_ms: 0 });
+        return status(202, { job_id: id, cached: true });
       }
 
-      let job;
-      try {
-        job = await JobStore.insert({
-          imageHash,
-          sourcePath: "upload",
-          status: "processing",
-          inpaintEnabled: bootState.inpaintEnabled,
-          bubbleEnabled: bootState.bubbleEnabled,
-        });
-      } catch {
-        // Unique constraint: a concurrent request already inserted a job for this image.
-        const race = await JobStore.findByImageHash(imageHash);
-        if (race) return { job_id: race.id, cached: race.status === "done" };
-        return error(500, { error: "failed to create job" });
-      }
-
-      const jobDir = join(DATA_DIR, job.id);
-      try {
-        await mkdir(jobDir, { recursive: true });
-        await Bun.write(join(jobDir, "original.png"), pngBytes);
-      } catch (err) {
-        await JobStore.setStatus(job.id, "error", String(err));
-        return error(500, { error: "failed to write job files" });
-      }
-
-      runPipeline(job.id, pngBytes, width, height).catch(async (err) => {
-        await JobStore.setStatus(job.id, "error", String(err));
-        sendSse(job.id, "error", { message: String(err) });
-        sseStreams.get(job.id)?.close();
-        sseStreams.delete(job.id);
-      });
-
-      return { job_id: job.id, cached: false };
+      await rm(dir, { recursive: true, force: true });
+      await mkdir(dir, { recursive: true });
+      await JobStore.update(id, { status: "queued", errorMessage: null });
+      translationJobs.create(id);
+      translationJobs.emit(id, { type: "log", stage: "queued", message: "Queued for translation", progress: 0 });
+      runExclusive(() => runJob(id, page, cleanSfx));
+      return status(202, { job_id: id, cached: false });
     },
     {
-      body: t.Object({ image: t.String() }),
+      body: t.Object({
+        image: t.String(),
+        /** Also remove sound effects (can soften detailed artwork). */
+        clean_sfx: t.Optional(t.Boolean()),
+        /** Re-run even when this page was translated before. */
+        force: t.Optional(t.Boolean()),
+      }),
+      response: {
+        202: t.Object({ job_id: t.String(), cached: t.Boolean() }),
+        400: ErrBody,
+        503: ErrBody,
+      },
     },
   )
 
-  // ── GET /api/translate-page/:id ──────────────────────────────────────────
   .get(
     "/api/translate-page/:id",
-    async ({ params, status: error }) => {
-      const job = await JobStore.findById(params.id);
-      if (!job) return error(404, { error: "not found" });
-      const bubbles = await JobStore.listBubbles(params.id);
-      return { job, bubbles };
+    async ({ params, status }) => {
+      const live = translationJobs.get(params.id);
+      if (live) {
+        return {
+          job_id: live.id,
+          status: live.status,
+          stage: live.stage,
+          progress: live.progress,
+          error: live.error,
+          result_url: live.status === "done" ? resultUrl(live.id) : null,
+        };
+      }
+      const row = await JobStore.findById(params.id);
+      if (!row) return status(404, { error: "not found" });
+      const done = row.status === "done" && existsSync(join(DATA_DIR, row.id, "result.png"));
+      return {
+        job_id: row.id,
+        status: done ? "done" : row.status === "error" ? "error" : "unknown",
+        stage: done ? "done" : row.status,
+        progress: done ? 1 : 0,
+        error: row.errorMessage,
+        result_url: done ? resultUrl(row.id) : null,
+      };
+    },
+    {
+      params: IdParams,
+      response: {
+        200: t.Object({
+          job_id: t.String(),
+          status: t.String(),
+          stage: t.String(),
+          progress: t.Number(),
+          error: t.Nullable(t.String()),
+          result_url: t.Nullable(t.String()),
+        }),
+        404: ErrBody,
+      },
     },
   )
 
-  // ── GET /api/translate-page/:id/events (SSE) ─────────────────────────────
-  .get("/api/translate-page/:id/events", async ({ params, set }) => {
-    set.headers["Content-Type"] = "text/event-stream";
-    set.headers["Cache-Control"] = "no-cache";
-    set.headers["Connection"] = "keep-alive";
+  .get(
+    "/api/translate-page/:id/result",
+    async ({ params, status, set }) => {
+      const file = Bun.file(join(DATA_DIR, params.id, "result.png"));
+      if (!(await file.exists())) return status(404, { error: "result not found" });
+      set.headers["Cache-Control"] = "no-cache";
+      return file;
+    },
+    { params: IdParams },
+  )
 
-    const jobId = params.id;
-    let myController: ReadableStreamDefaultController<Uint8Array> | undefined;
-    return new ReadableStream<Uint8Array>({
-      start(controller) {
-        myController = controller;
-        // Close the previous subscriber for this job (only one live stream per job).
-        const prev = sseStreams.get(jobId);
-        if (prev) {
-          try { prev.close(); } catch { /* already closed */ }
-        }
-        sseStreams.set(jobId, controller);
-        JobStore.findById(jobId).then((job) => {
-          if (job) {
-            const msg = `event: status\ndata: ${JSON.stringify({ status: job.status })}\n\n`;
-            controller.enqueue(new TextEncoder().encode(msg));
-          }
-        });
-      },
-      cancel() {
-        if (myController && sseStreams.get(jobId) === myController) sseStreams.delete(jobId);
-      },
-    });
-  });
-
-// ── Background pipeline ─────────────────────────────────────────────────────
-
-async function runPipeline(
-  jobId: string,
-  pngBytes: Buffer,
-  width: number,
-  height: number,
-): Promise<void> {
-  sendSse(jobId, "status", { status: "detecting" });
-
-  let boxes: { x: number; y: number; w: number; h: number }[] = [];
-  if (bootState.textSegEnabled && bootState.textSegReady) {
-    const seg = await inferenceQueue.enqueue<
-      { imageBuffer: Buffer; origWidth: number; origHeight: number },
-      { boxes: { x: number; y: number; w: number; h: number }[] }
-    >("text-seg", { imageBuffer: pngBytes, origWidth: width, origHeight: height });
-    boxes = seg.boxes;
-  }
-
-  await JobStore.update(jobId, { totalBubbles: boxes.length });
-  sendSse(jobId, "detected", { count: boxes.length });
-
-  const jobDir = join(DATA_DIR, jobId);
-  for (let i = 0; i < boxes.length; i++) {
-    const box = boxes[i];
-    sendSse(jobId, "progress", { index: i, total: boxes.length });
-
-    // Clamp crop rectangle to image bounds to prevent sharp.extract errors
-    const left = Math.max(0, Math.min(box.x, width - 1));
-    const top = Math.max(0, Math.min(box.y, height - 1));
-    const cropW = Math.max(1, Math.min(box.w, width - left));
-    const cropH = Math.max(1, Math.min(box.h, height - top));
-    const cropBuffer = await sharp(pngBytes)
-      .extract({ left, top, width: cropW, height: cropH })
-      .png()
-      .toBuffer();
-    await Bun.write(join(jobDir, `crop_${i}.png`), cropBuffer);
-
-    let sourceText: string | null = null;
-    let translatedText: string | null = null;
-
-    if (bootState.ocrReady) {
-      const ocrResult = await inferenceQueue.enqueue<
-        { imageBuffer: Buffer },
-        { text: string }
-      >("ocr", { imageBuffer: cropBuffer });
-      sourceText = ocrResult.text;
-    }
-
-    if (sourceText && bootState.translateReady) {
-      const trResult = await inferenceQueue.enqueue<
-        { text: string },
-        { translatedText: string }
-      >("translate", { text: sourceText });
-      translatedText = trResult.translatedText;
-    }
-
-    await JobStore.insertBubble({
-      jobId,
-      bubbleIndex: i,
-      x: box.x,
-      y: box.y,
-      width: box.w,
-      height: box.h,
-      rotation: 0,
-      sourceText,
-      translatedText,
-    });
-
-    await JobStore.incrementProcessed(jobId);
-  }
-
-  const blocks = boxes.map((b) => ({
-    id: crypto.randomUUID(),
-    ...b,
-    source_text: null,
-    translated_text: null,
-  }));
-  await JobStore.update(jobId, {
-    status: "done",
-    textSegBlocks: JSON.stringify(blocks),
-  });
-
-  sendSse(jobId, "done", { job_id: jobId });
-  sseStreams.get(jobId)?.close();
-  sseStreams.delete(jobId);
-}
+  .get(
+    "/api/translate-page/:id/events",
+    ({ params, status }) => {
+      if (!translationJobs.get(params.id)) return status(404, { error: "job not found or expired" });
+      const encoder = new TextEncoder();
+      let unsubscribe = (): void => {};
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          unsubscribe = translationJobs.subscribe(params.id, (event) => {
+            try {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+              if (event.type === "done" || event.type === "error") controller.close();
+            } catch {
+              // Client already disconnected
+            }
+          });
+        },
+        cancel() {
+          unsubscribe();
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    },
+    { params: IdParams },
+  );

@@ -73,3 +73,16 @@ export class BubbleDetector {
 export function bubbleModelPath(): string {
   return join(env.BUBBLE_MODELS_DIR, basename(env.BUBBLE_MODEL_FILES[0]));
 }
+
+let sharedDetector: Promise<BubbleDetector | null> | null = null;
+
+/** Process-wide detector, loaded on first use; null when the model file is not downloaded. */
+export function getBubbleDetector(): Promise<BubbleDetector | null> {
+  sharedDetector ??= existsSync(bubbleModelPath())
+    ? BubbleDetector.load(bubbleModelPath()).catch((err: unknown) => {
+        sharedDetector = null;
+        throw err;
+      })
+    : Promise.resolve(null);
+  return sharedDetector;
+}

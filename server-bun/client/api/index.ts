@@ -161,7 +161,7 @@ export const submitTranslatePage = (imageBase64: string) =>
   );
 
 export const getTranslatePageJob = (jobId: string) =>
-  unwrap<{ job: PageTranslationJob; bubbles: TranslationBubble[] }>(
+  unwrap<{ job_id: string; status: string; stage: string; progress: number; error: string | null; result_url: string | null }>(
     api.api["translate-page"]({ id: jobId }).get(),
   );
 
