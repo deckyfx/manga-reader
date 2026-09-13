@@ -31,16 +31,19 @@ class TranslationJobStore {
   private readonly jobs = new Map<string, TranslationJob>();
   private readonly listeners = new Map<string, Set<Listener>>();
 
+  /** Registers a fresh queued job, replacing any finished one with the same id. */
   create(id: string, cleanSfx: boolean): TranslationJob {
     const job: TranslationJob = { id, cleanSfx, status: "queued", stage: "queued", progress: 0, error: null, events: [], completedAt: null };
     this.jobs.set(id, job);
     return job;
   }
 
+  /** Live or recently finished job, if still retained. */
   get(id: string): TranslationJob | undefined {
     return this.jobs.get(id);
   }
 
+  /** Records an event, updates the job's state and notifies subscribers. */
   emit(id: string, event: PageJobEvent): void {
     const job = this.jobs.get(id);
     if (!job) return;

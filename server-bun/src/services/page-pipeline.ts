@@ -113,15 +113,18 @@ export class PagePipeline {
     private readonly report: ProgressReporter = () => {},
   ) {}
 
+  /** Path of a file inside the job directory. */
   path(file: string): string {
     return join(this.dir, file);
   }
 
+  /** Blocks and metadata from blocks.json, or null before `detect` has run. */
   async readJob(): Promise<PageJob | null> {
     const file = Bun.file(this.path("blocks.json"));
     return (await file.exists()) ? ((await file.json()) as PageJob) : null;
   }
 
+  /** Saves blocks and metadata to blocks.json. */
   async writeJob(job: PageJob): Promise<void> {
     await Bun.write(this.path("blocks.json"), JSON.stringify(job, null, 2));
   }
@@ -183,6 +186,7 @@ export class PagePipeline {
       .toFile(this.path("overlay.png"));
   }
 
+  /** Crops each text block from original.png and reads its source text. */
   async ocr(job: PageJob, readText: PipelineEngines["ocr"]): Promise<void> {
     mkdirSync(this.path("crops"), { recursive: true });
     const targets = job.blocks.filter((b) => b.kind === "text");

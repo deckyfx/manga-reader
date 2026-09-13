@@ -29,12 +29,14 @@ export interface BubbleDetection {
 export class BubbleDetector {
   private constructor(private readonly session: ort.InferenceSession) {}
 
+  /** Creates an ONNX session for the model; throws when the file is missing or invalid. */
   static async load(modelPath: string): Promise<BubbleDetector> {
     if (!existsSync(modelPath)) throw new Error(`Bubble detector model not found at ${modelPath}`);
     const session = await ort.InferenceSession.create(modelPath, { executionProviders: ["cpu"], graphOptimizationLevel: "all" });
     return new BubbleDetector(session);
   }
 
+  /** Bubbles and text groups on the page, in page pixel coordinates. */
   async detect(image: Buffer): Promise<BubbleDetection> {
     const { width = 0, height = 0 } = await sharp(image).metadata();
     const { data } = await sharp(image)

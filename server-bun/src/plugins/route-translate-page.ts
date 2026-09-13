@@ -47,6 +47,7 @@ const STAGE_SPAN: Record<PageStage, [number, number]> = {
 
 const IdParams = t.Object({ id: t.String({ pattern: "^[A-Za-z0-9-]+$" }) });
 
+/** Public URL of a job's result.png. */
 const resultUrl = (id: string): string => `/api/translate-page/${id}/result`;
 
 /** OCR and translation go through the inference queue so page jobs don't race single bubble requests. */
@@ -60,6 +61,7 @@ const engines: PipelineEngines = {
 
 /** Page jobs run one at a time: every stage is CPU-bound and shares the same models. */
 let pageQueue: Promise<void> = Promise.resolve();
+/** Appends a task to `pageQueue`; it runs after the previous task settles, whether it succeeded or not. */
 function runExclusive(task: () => Promise<void>): void {
   pageQueue = pageQueue.then(task, task);
 }
@@ -74,6 +76,7 @@ interface PageJobOptions {
   clean_sfx: boolean;
 }
 
+/** Options stored with a finished job, or null when the job never completed. */
 async function readJobOptions(dir: string): Promise<PageJobOptions | null> {
   const file = Bun.file(join(dir, OPTIONS_FILE));
   return (await file.exists()) ? ((await file.json()) as PageJobOptions) : null;
@@ -112,6 +115,7 @@ async function persistBlocks(id: string, job: PageJob): Promise<void> {
   });
 }
 
+/** Runs every pipeline stage for one page, streaming progress; failures end the job with an error event. */
 async function runJob(id: string, page: Buffer, cleanSfx: boolean): Promise<void> {
   const started = Date.now();
   const emit = (event: PageJobEvent): void => translationJobs.emit(id, event);
