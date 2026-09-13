@@ -270,6 +270,9 @@ export class PagePipeline {
     const bubbles = detector ? (await detector.detect(page)).bubbles : [];
     const typesetter = await getTypesetter();
     const maxFontSize = Math.round(height / 40);
+    // A block this run doesn't typeset (skipped, or no translation any more) must not keep an older patch
+    for (const b of job.blocks) delete b.render;
+    rmSync(this.path("patches"), { recursive: true, force: true });
     mkdirSync(this.path("patches"), { recursive: true });
 
     const entries: { block: PageBlock; area: TextArea }[] = [];
