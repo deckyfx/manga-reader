@@ -1,6 +1,6 @@
 # Dashboard & Studio — Plan (server-bun)
 
-Status: **planned, not started** · Written 2026-09-13 · Supersedes `PLAN_studio_v2.md` and `portal-plan.md` (both C#-era: ASP.NET + SolidJS, burn via `window.postMessage`).
+Status: **phases 0–1 built** (PR #15; see the phase status notes in section 10) · Written 2026-09-13, updated 2026-09-14 · Supersedes `PLAN_studio_v2.md` and `portal-plan.md` (both C#-era: ASP.NET + SolidJS, burn via `window.postMessage`).
 
 Builds on the page pipeline from PR #14 (`bun run page …`, `POST /api/translate-page`, `src/services/page-pipeline.ts`).
 
@@ -70,7 +70,7 @@ Stages in order (each writes into `data/pages/<page_id>/`):
 | `layout` | layout per block in DB (font size, lines, area) | Text placed, **not burned** (D2) |
 | `burn` | `patches/<block>.png`, `result.png` | Server render |
 
-Each page stores per-stage state: `status` (`missing` · `ready` · `stale` · `running` · `error`), `updated_at`, and the page revision it was produced at.
+Each page stores per-stage state: `status` (`fresh` · `stale` · `error`) and `updated_at`. A stage with no row hasn't run yet; a page being processed shows `queued` / `running` on the page itself. (Recording the page revision each stage was produced at is still planned.)
 
 **Invalidation:** an edit marks downstream stages `stale`. Nothing is deleted, so the last outputs stay viewable and comparable until the user re-runs.
 
@@ -138,13 +138,13 @@ The current `/api/portal/*` routes and the `/`, `/library`, `/studio/:id` client
 - `GET /studio/api/pages/:id/stages/:stage` — stage image (original, mask, overlay, clean-text, clean-sfx, result); `…/history/:rev`
 - `POST/PUT/DELETE /studio/api/pages/:id/blocks[/:blockId]`
 - `PUT /studio/api/pages/:id/mask` — add/erase layers
-- `POST /studio/api/pages/:id/run` — `{ stage | "auto", blockIds? }` → `{ job_id }`; progress via `GET /studio/api/jobs/:job/events` (same `PageJobEvent`)
+- `POST /studio/api/pages/:id/run` — `{ stage: "ocr" | "translate" | "render", block_ids? }` → page detail (synchronous for now). Planned: `stage: "auto"` returning `{ job_id }` with progress via the same `PageJobEvent` stream
 - `POST /studio/api/pages/:id/publish` — revision++, snapshot, notify live listeners
 - `POST /studio/api/chapters/:id/run` — batch auto-run a chapter's pages
 
 **Extension API** (`/api`, exported in `src/api.ts` for Eden):
-- `POST /api/translate-page` — add `page_url`, `image_src`; response includes `page_id`
-- `GET /api/pages/:id/live` — SSE, stays open while the tab is on the page; emits `{ type: "page-updated", page_id, revision, result_url }`
+- `POST /api/translate-page` — response `{ job_id, cached }`; the job id is the Studio page id. Planned: send `page_url` and `image_src` with the job
+- `GET /api/translate-page/:id/live` — SSE, stays open while the tab is on the page; emits `{ type: "page-updated", page_id, revision, result_url }`
 
 ---
 
@@ -178,8 +178,8 @@ Layout: left page list (chapter thumbnails / Inbox) · centre canvas with viewpo
 
 ## 9. Extension live replace (in-page)
 
-1. User translates an image; the extension sends `page_url` and `image_src` with the job and receives `page_id`.
-2. After swapping the image, the content script tags the `<img>` with `data-socr-page-id` (and keeps the original src) and opens `GET /api/pages/:id/live`. One stream per translated image; all close on page unload (D6).
+1. User translates an image; the extension receives `job_id`, which is the page id (sending `page_url` and `image_src` with the job is planned).
+2. After swapping the image, the content script tags the `<img>` with `data-socr-job-id` and opens `GET /api/translate-page/:id/live`. One stream per translated page; it closes when the image leaves the document or the page unloads (D6).
 3. Studio publish → server emits `page-updated` to that page's live listeners → the content script sets `img.src = <server>/<result_url>?rev=N`.
 4. The extension's result panel gets an **Open in Studio** link (`<server>/studio/pages/:id`).
 5. Remove the dead `postMessage` relay (`web-ocr:image-updated`, `ImageUpdatedMsg`, `ImageUpdatedRelayMsg`, `replacePageImages`).
@@ -190,7 +190,7 @@ Layout: left page list (chapter thumbnails / Inbox) · centre canvas with viewpo
 
 | # | Deliverable | Done when |
 |---|---|---|
-| **0** | **Framework slice** (D5). Server: `/studio` and `/read` plugin skeletons (D8) replacing `/api/portal`; `pages` + `page_stages` + `page_blocks` minimal schema; pipeline writes to DB; stage image routes; `publish`; live SSE channel. Extension: tag image, live channel, `page-updated` swap, Open in Studio link. Studio: open a page, stage viewer + compare, edit a block's translation, re-run layout + burn, publish. | Translate a page in the browser → edit one translation in the studio → publish → the open tab shows the new image without reloading. |
+| **0** | **Framework slice** (D5). Server: `/studio` and `/read` plugin skeletons (D8) replacing `/api/portal`; `pages` + `page_stages` + `page_blocks` minimal schema; pipeline writes to DB; stage image routes; `publish`; live SSE channel. Extension: tag image, live channel, `page-updated` swap, Open in Studio link. Studio: open a page, stage viewer + compare, edit a block's translation, re-run render (splitting it into layout and burn is phase 4), publish. | Translate a page in the browser → edit one translation in the studio → publish → the open tab shows the new image without reloading. |
 | 1 | Stage state & partial re-runs: per-block OCR / translate / clean / layout / burn, stale marking, revision history + rollback. | Editing any block re-runs only what's needed; stale stages visible. |
 | 2 | Canvas studio: Fabric wrapper, region tools, block editing, undo / redo, zoom / pan. | Draw, resize, delete regions; OCR + translate a new region. |
 | 3 | Mask editing & re-clean selection; SFX include toggles. | Paint a missed area and re-clean just that area. |
@@ -211,14 +211,14 @@ Start after PR #14 (and its CodeRabbit fixes) is merged; branch `feat/studio-fra
 **Server**
 - `src/stores/page-store.ts`: a repository over the three tables (`upsertPage`, `setStage`, `markStale(from)`, `saveBlocks`, `updateBlock`, `bumpRevision`).
 - `page-pipeline.ts`: every stage writes through `PageStore`, and `render` is split into `layout` (saved to `page_blocks.layout`) and `burn` (reads the saved layout). `route-translate-page.ts` stops calling `persistBlocks`.
-- `src/stores/live-channel.ts`: per-page subscribers with a typed `LiveEvent` (`page-updated {page_id, revision}`).
+- `src/stores/page-live-channel.ts`: per-page subscribers with a typed `PageLiveEvent` (`page-updated {page_id, revision, result_url}`).
 - `src/plugins/studio/`, prefix `/studio/api`:
   - `GET /pages`, `GET /pages/:id` (page, stages, blocks)
   - `GET /pages/:id/stages/:stage/image`
-  - `PATCH /pages/:id/blocks/:idx` (translation) → re-run layout + burn
+  - `PATCH /pages/:id/blocks/:idx` (translation) → marks render stale; re-render with `POST /pages/:id/run { stage: "render" }`
   - `POST /pages/:id/publish` → bump revision, emit `page-updated`
 - `src/plugins/read/`: `/read/api` skeleton only.
-- Extension API (`src/api.ts`): `GET /api/live/:pageId` (SSE); `GET /api/translate-page/:id/result` accepts `?rev=` so the extension bypasses the cache.
+- Extension API (`src/api.ts`): `GET /api/translate-page/:id/live` (SSE); `GET /api/translate-page/:id/result` accepts `?rev=` so the extension bypasses the cache.
 - `index.ts`: drop `portalPlugin`, use `studioPlugin` and `readPlugin`. `route-spa.ts`: exclude `/studio/api` and `/read/api`, but still serve the SPA for `/studio/*` and `/read/*`.
 
 **Studio UI** (`client/`)
@@ -231,7 +231,7 @@ Start after PR #14 (and its CodeRabbit fixes) is merged; branch `feat/studio-fra
   - Publish button showing the current revision
 
 **Extension**
-- `content.ts`: tag the translated `<img>` with `data-webocr-page`, then open `EventSource(/api/live/:pageId)` while the tab stays open. On `page-updated`, swap `src` to `/result?rev=N`.
+- `content.ts`: tag the translated `<img>` with `data-socr-job-id`, then open `EventSource(/api/translate-page/:id/live)` while the tab stays open. On `page-updated`, swap `src` to `/result?rev=N`.
 - Add an "Open in Studio" action on the translated image (`${serverUrl}/studio/pages/:id`).
 - Regenerate Eden types (`bun run typecheck`) and bump the minor version.
 

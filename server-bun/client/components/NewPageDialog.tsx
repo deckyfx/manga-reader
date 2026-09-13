@@ -46,7 +46,12 @@ export function NewPageDialog({ onClose, onCreated }: { onClose: () => void; onC
       const body = source === "upload" && file
         ? { image: await fileToDataUrl(file), clean_sfx: cleanSfx, force }
         : { url: url.trim(), clean_sfx: cleanSfx, force };
-      const { job_id } = await createPage(body);
+      const { job_id, cached } = await createPage(body);
+      // Already translated with these options: nothing to wait for
+      if (cached) {
+        onCreated(job_id);
+        return;
+      }
       setJobId(job_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

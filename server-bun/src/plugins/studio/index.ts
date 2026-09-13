@@ -11,6 +11,8 @@
  * GET   /studio/api/pages/:id/history            published snapshots, newest first
  * GET   /studio/api/pages/:id/history/:revision  a snapshot image
  * POST  /studio/api/pages/:id/rollback           publish an earlier snapshot again
+ *
+ * Mutations of one page (edit, run, publish, rollback) run under a per-page lock so their steps never interleave.
  */
 import Elysia, { t } from "elysia";
 import { existsSync } from "node:fs";
@@ -18,7 +20,7 @@ import { join } from "node:path";
 import type { Page, PageStageRow } from "@/db/schema";
 import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
-import { runExclusiveResult } from "@/queue/page-queue";
+import { runExclusiveResult, withPageLock } from "@/queue/page-queue";
 import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
 import { historyFile, listHistory, restoreResult, snapshotResult } from "@/services/page-history";
@@ -124,7 +126,7 @@ async function editablePage(id: string): Promise<{ page: Page } | { code: 404 | 
   return { page };
 }
 
-/** Bumps the revision, snapshots result.png under it and tells open extension tabs. */
+/** Bumps the revision, snapshots result.png under it and tells open extension tabs. Call under the page lock. */
 async function publish(id: string): Promise<{ revision: number; notified: number }> {
   const revision = await PageStore.bumpRevision(id);
   await snapshotResult(id, revision);
@@ -194,7 +196,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .patch(
     "/pages/:id/blocks/:idx",
-    async ({ params, body, status }) => {
+    ({ params, body, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
       if (body.source_text === undefined && body.translated_text === undefined) return status(422, { error: "nothing to update" });
@@ -204,7 +206,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       // A new source text makes its translation stale too; a new translation only needs typesetting again
       await PageStore.markStale(params.id, body.source_text !== undefined ? ["translate", "render"] : ["render"]);
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
-    },
+    }),
     {
       params: t.Object({ id: IdParam, idx: t.Integer({ minimum: 1 }) }),
       body: t.Object({
@@ -217,7 +219,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .post(
     "/pages/:id/run",
-    async ({ params, body, status }) => {
+    ({ params, body, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
       const stage: RunnableStage = body.stage;
@@ -227,6 +229,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       }
 
       try {
+        // The page lock keeps edits out while this reads, processes and writes the blocks; the global queue shares the CPU
         await runExclusiveResult(async () => {
           const pipeline = new PagePipeline(pageDir(params.id), () => {}, PageStore.repository(params.id));
           const job = await pipeline.readJob();
@@ -246,7 +249,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
         return status(422, { error: message });
       }
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
-    },
+    }),
     {
       params: IdParams,
       body: t.Object({
@@ -260,7 +263,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .post(
     "/pages/:id/publish",
-    async ({ params, status }) => {
+    ({ params, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
       if (!existsSync(join(pageDir(params.id), "result.png"))) return status(409, { error: "page has no result to publish" });
@@ -270,7 +273,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
         return status(409, { error: "the page changed since it was last rendered — re-render before publishing" });
       }
       return publish(params.id);
-    },
+    }),
     { params: IdParams, response: { 200: PublishResult, 404: ErrBody, 409: ErrBody } },
   )
 
@@ -300,14 +303,15 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .post(
     "/pages/:id/rollback",
-    async ({ params, body, status }) => {
+    ({ params, body, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
       if (!(await restoreResult(params.id, body.revision))) return status(404, { error: "revision not found" });
-      // The restored image no longer matches the blocks: a later re-render would replace it with the current text
+      // The restored image no longer matches the blocks: a later re-render would replace it with the current text.
+      // Rollback publishes on purpose despite the stale render (the one exception to the publish check).
       await PageStore.markStale(params.id, ["render"]);
       return publish(params.id);
-    },
+    }),
     {
       params: IdParams,
       body: t.Object({ revision: t.Integer({ minimum: 1 }) }),

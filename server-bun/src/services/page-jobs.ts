@@ -4,7 +4,7 @@
  */
 import sharp from "sharp";
 import { existsSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { childLogger } from "@/lib/logger";
 import { runExclusive } from "@/queue/page-queue";
@@ -59,6 +59,15 @@ export interface SubmitPageOptions {
 export type SubmitPageResult =
   | { ok: true; job_id: string; cached: boolean }
   | { ok: false; code: 400 | 409 | 429 | 503; error: string };
+
+/** Removes a page's pipeline files before a fresh run; its publish history (`history/`) is kept. */
+async function clearPipelineFiles(id: string): Promise<void> {
+  const dir = pageDir(id);
+  await mkdir(dir, { recursive: true });
+  for (const entry of await readdir(dir)) {
+    if (entry !== "history") await rm(join(dir, entry), { recursive: true, force: true });
+  }
+}
 
 /** Runs every pipeline stage for one page, recording stage state and streaming progress; failures end the job with an error event. */
 async function runJob(id: string, page: Buffer, options: SubmitPageOptions): Promise<void> {
@@ -149,8 +158,7 @@ export async function submitPageJob(load: () => Promise<Buffer>, options: Submit
       }
 
       translationJobs.emit(id, { type: "log", stage: "queued", message: "Queued for translation", progress: 0 });
-      await rm(pageDir(id), { recursive: true, force: true });
-      await mkdir(pageDir(id), { recursive: true });
+      await clearPipelineFiles(id);
       await PageStore.update(id, { status: "queued", errorMessage: null });
       runExclusive(async () => {
         try {

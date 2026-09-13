@@ -217,8 +217,9 @@ function StageCompare({ pageId, version }: { pageId: string; version: string }) 
   const [right, setRight] = useState<PageImage>("result.png");
   const [split, setSplit] = useState(50);
 
-  const select = (value: PageImage, onChange: (file: PageImage) => void) => (
+  const select = (value: PageImage, onChange: (file: PageImage) => void, label: string) => (
     <select
+      aria-label={label}
       value={value}
       onChange={(e) => onChange(PAGE_IMAGES.find((img) => img.file === e.target.value)?.file ?? value)}
       className="bg-gray-900 border border-gray-700 rounded-md px-2 py-1 text-xs"
@@ -232,9 +233,17 @@ function StageCompare({ pageId, version }: { pageId: string; version: string }) 
   return (
     <section className="flex-1 min-w-0 min-h-0 flex flex-col">
       <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-800">
-        {select(left, setLeft)}
-        <input type="range" min={0} max={100} value={split} onChange={(e) => setSplit(Number(e.target.value))} className="flex-1" />
-        {select(right, setRight)}
+        {select(left, setLeft, "Left image")}
+        <input
+          type="range"
+          aria-label="Comparison split between the left and right image"
+          min={0}
+          max={100}
+          value={split}
+          onChange={(e) => setSplit(Number(e.target.value))}
+          className="flex-1"
+        />
+        {select(right, setRight, "Right image")}
       </div>
       <div className="flex-1 min-h-0 overflow-auto p-4">
         <div className="relative mx-auto w-fit">
