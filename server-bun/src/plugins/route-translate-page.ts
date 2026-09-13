@@ -14,11 +14,10 @@ import sharp from "sharp";
 import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { bootState } from "@/boot-state";
 import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
-import { inferenceQueue } from "@/queue/inference-queue";
 import { runExclusive } from "@/queue/page-queue";
+import { enginesNotReady, pageEngines as engines } from "@/services/page-engines";
 import { pageDir, PageStore, type StageName } from "@/stores/page-store";
 import { pageLive } from "@/stores/page-live-channel";
 import { translationJobs, type PageJobEvent } from "@/stores/translation-job-store";
@@ -26,7 +25,6 @@ import {
   missingPipelineModels,
   PagePipeline,
   type PageStage,
-  type PipelineEngines,
   type ProgressUpdate,
 } from "@/services/page-pipeline";
 
@@ -60,15 +58,6 @@ const SSE_HEADERS = {
 /** Public URL of a page's result.png; `revision` busts browser caches after a Studio publish. */
 export const resultUrl = (id: string, revision?: number): string =>
   `/api/translate-page/${id}/result${revision ? `?rev=${revision}` : ""}`;
-
-/** OCR and translation go through the inference queue so page jobs don't race single bubble requests. */
-const engines: PipelineEngines = {
-  ocr: async (image) => (await inferenceQueue.enqueue<{ imageBuffer: Buffer }, { text: string }>("ocr", { imageBuffer: image })).text,
-  translate: async (text) => {
-    const out = await inferenceQueue.enqueue<{ text: string }, { translatedText: string; engine: string }>("translate", { text });
-    return { text: out.translatedText, engine: out.engine };
-  },
-};
 
 /** Requests being decoded or waiting in the page queue; each holds a decoded page in memory. */
 const MAX_PENDING_PAGES = 8;
@@ -118,7 +107,8 @@ export const routeTranslatePage = new Elysia()
   .post(
     "/api/translate-page",
     async ({ body, status }) => {
-      if (!bootState.ocrReady || !bootState.translateReady) return status(503, { error: "Server not ready — models still loading" });
+      const notReady = enginesNotReady();
+      if (notReady) return status(503, { error: notReady });
       const missing = missingPipelineModels();
       if (missing.length > 0) {
         return status(503, { error: `Page translation models missing (${missing.join(", ")}) — set TEXT_SEG_MODEL_ENABLED and INPAINT_MODEL_ENABLED so they download at boot` });

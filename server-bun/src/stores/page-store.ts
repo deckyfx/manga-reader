@@ -147,11 +147,11 @@ export class PageStore {
     });
   }
 
-  /** Sets one block's translation; false when the block doesn't exist. */
-  static async updateTranslation(pageId: string, idx: number, translatedText: string): Promise<boolean> {
+  /** Sets one block's source text and/or translation; false when the block doesn't exist. */
+  static async updateBlockText(pageId: string, idx: number, text: { sourceText?: string; translatedText?: string }): Promise<boolean> {
     const rows = await db
       .update(pageBlocks)
-      .set({ translatedText, updatedAt: sql`(datetime('now'))` })
+      .set({ ...text, updatedAt: sql`(datetime('now'))` })
       .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))
       .returning({ idx: pageBlocks.idx });
     return rows.length > 0;

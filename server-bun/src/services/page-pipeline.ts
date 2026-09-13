@@ -206,10 +206,10 @@ export class PagePipeline {
       .toFile(this.path("overlay.png"));
   }
 
-  /** Crops each text block from original.png and reads its source text. */
-  async ocr(job: PageJob, readText: PipelineEngines["ocr"]): Promise<void> {
+  /** Crops each text block (or only `blockIds`) from original.png and reads its source text. */
+  async ocr(job: PageJob, readText: PipelineEngines["ocr"], blockIds?: number[]): Promise<void> {
     mkdirSync(this.path("crops"), { recursive: true });
-    const targets = job.blocks.filter((b) => b.kind === "text");
+    const targets = job.blocks.filter((b) => b.kind === "text" && (!blockIds || blockIds.includes(b.id)));
     this.report({ stage: "ocr", message: `Reading ${targets.length} text blocks…`, fraction: 0 });
     for (const [i, b] of targets.entries()) {
       this.report({ stage: "ocr", message: `Reading text ${i + 1}/${targets.length}`, fraction: i / targets.length, detail: true });
@@ -221,9 +221,9 @@ export class PagePipeline {
     this.report({ stage: "ocr", message: `Read ${targets.length} text blocks`, fraction: 1 });
   }
 
-  /** Returns the translation engine used (e.g. "deepl"), or null when there was nothing to translate. */
-  async translate(job: PageJob, translateText: PipelineEngines["translate"]): Promise<string | null> {
-    const targets = job.blocks.filter((b) => b.kind === "text" && b.source_text?.trim());
+  /** Translates text blocks with source text (or only `blockIds`); returns the engine used (e.g. "deepl"), or null when there was nothing to translate. */
+  async translate(job: PageJob, translateText: PipelineEngines["translate"], blockIds?: number[]): Promise<string | null> {
+    const targets = job.blocks.filter((b) => b.kind === "text" && b.source_text?.trim() && (!blockIds || blockIds.includes(b.id)));
     this.report({ stage: "translating", message: `Translating ${targets.length} text blocks…`, fraction: 0 });
     let engine: string | null = null;
     for (const [i, b] of targets.entries()) {

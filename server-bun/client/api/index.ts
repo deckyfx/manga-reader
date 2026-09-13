@@ -42,12 +42,21 @@ export const listPages = () => unwrap(api.studio.api.pages.get());
 
 export const getPage = (id: string) => unwrap(api.studio.api.pages({ id }).get());
 
-export const updateTranslation = (id: string, idx: number, translatedText: string) =>
-  unwrap(api.studio.api.pages({ id }).blocks({ idx }).patch({ translated_text: translatedText }));
+export const updateBlockText = (id: string, idx: number, text: { source_text?: string; translated_text?: string }) =>
+  unwrap(api.studio.api.pages({ id }).blocks({ idx }).patch(text));
 
-export const renderPage = (id: string) => unwrap(api.studio.api.pages({ id }).render.post());
+/** Re-run OCR or translation (for `blockIds`, or every text block) or typeset the page again. */
+export const runStage = (id: string, stage: "ocr" | "translate" | "render", blockIds?: number[]) =>
+  unwrap(api.studio.api.pages({ id }).run.post({ stage, block_ids: blockIds }));
 
 export const publishPage = (id: string) => unwrap(api.studio.api.pages({ id }).publish.post());
+
+export const listHistory = (id: string) => unwrap(api.studio.api.pages({ id }).history.get());
+
+export const rollbackPage = (id: string, revision: number) =>
+  unwrap(api.studio.api.pages({ id }).rollback.post({ revision }));
+
+export const historyImageUrl = (id: string, revision: number) => `/studio/api/pages/${id}/history/${revision}`;
 
 export type StudioPageSummary = Awaited<ReturnType<typeof listPages>>[number];
 export type StudioPageDetail = Awaited<ReturnType<typeof getPage>>;

@@ -1,21 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, RefreshCw, Send, TriangleAlert } from "lucide-react";
+import { ArrowLeft, History, Languages, Loader2, RefreshCw, RotateCcw, ScanText, Send, TriangleAlert } from "lucide-react";
 import {
   getPage,
+  historyImageUrl,
+  listHistory,
   PAGE_IMAGES,
   pageFileUrl,
   publishPage,
-  renderPage,
-  updateTranslation,
+  rollbackPage,
+  runStage,
+  updateBlockText,
   type PageImage,
   type StudioBlock,
   type StudioPageDetail,
 } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
 
-/** Studio editor for one page: compare stage images, edit translations, re-render and publish. */
+/** Studio editor for one page: compare stage images, edit and re-run blocks, re-render, publish and roll back. */
 export function StudioPageEditor() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
@@ -23,19 +26,27 @@ export function StudioPageEditor() {
   const setDetail = (detail: StudioPageDetail) => qc.setQueryData(["studio-page", id], detail);
 
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);
-  const renderM = useMutation({ mutationFn: () => renderPage(id), onSuccess: setDetail });
-  const publishM = useMutation({ mutationFn: () => publishPage(id), onSuccess: setPublished });
+  const onPublished = (result: { revision: number; notified: number }) => {
+    setPublished(result);
+    void qc.invalidateQueries({ queryKey: ["studio-page", id] });
+    void qc.invalidateQueries({ queryKey: ["studio-history", id] });
+  };
+  const renderM = useMutation({ mutationFn: () => runStage(id, "render"), onSuccess: setDetail });
+  const translateAllM = useMutation({ mutationFn: () => runStage(id, "translate"), onSuccess: setDetail });
+  const publishM = useMutation({ mutationFn: () => publishPage(id), onSuccess: onPublished });
 
   const detail = pageQ.data;
   if (pageQ.isLoading) return <Loader2 className="m-4 animate-spin text-gray-500" />;
   if (!detail) return <p className="m-4 text-sm text-red-400">{pageQ.error?.message ?? "Page not found"}</p>;
 
   const { page, stages, blocks } = detail;
+  const stageStatus = (name: string) => stages.find((s) => s.stage === name)?.status;
   const renderStage = stages.find((s) => s.stage === "render");
   const busy = page.status === "queued" || page.status === "running";
   const textBlocks = blocks.filter((b) => b.kind === "text");
   const sfxCount = blocks.length - textBlocks.length;
-  const version = `${page.updated_at}-${renderStage?.updated_at ?? ""}`;
+  const version = `${page.updated_at}-${page.revision}-${renderStage?.updated_at ?? ""}`;
+  const actionError = renderM.error ?? translateAllM.error ?? publishM.error;
 
   return (
     <div className="flex flex-col h-full">
@@ -54,25 +65,29 @@ export function StudioPageEditor() {
           ))}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          {(renderM.error ?? publishM.error) && (
-            <span className="text-xs text-red-400">{(renderM.error ?? publishM.error)?.message}</span>
-          )}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {actionError && <span className="text-xs text-red-400">{actionError.message}</span>}
           {published && !publishM.isPending && (
             <span className="text-xs text-emerald-400">
               Published rev {published.revision} · {published.notified} open tab{published.notified === 1 ? "" : "s"} updated
             </span>
           )}
-          <button
+          <ActionButton
+            onClick={() => translateAllM.mutate()}
+            disabled={busy || translateAllM.isPending}
+            pending={translateAllM.isPending}
+            highlight={stageStatus("translate") === "stale"}
+            icon={<Languages size={14} />}
+            label="Translate all"
+          />
+          <ActionButton
             onClick={() => renderM.mutate()}
             disabled={busy || renderM.isPending}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors ${
-              renderStage?.status === "stale" ? "bg-amber-600 hover:bg-amber-500" : "bg-gray-800 hover:bg-gray-700"
-            }`}
-          >
-            {renderM.isPending ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            Re-render
-          </button>
+            pending={renderM.isPending}
+            highlight={stageStatus("render") === "stale"}
+            icon={<RefreshCw size={14} />}
+            label="Re-render"
+          />
           <button
             onClick={() => publishM.mutate()}
             disabled={busy || publishM.isPending || !page.has_result || renderStage?.status === "stale"}
@@ -93,11 +108,35 @@ export function StudioPageEditor() {
             {textBlocks.length} text block{textBlocks.length === 1 ? "" : "s"} · {sfxCount} sound effect{sfxCount === 1 ? "" : "s"}
           </div>
           {textBlocks.map((block) => (
-            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onSaved={setDetail} />
+            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} />
           ))}
+          <HistoryPanel pageId={page.id} currentRevision={page.revision} disabled={busy} onRolledBack={onPublished} />
         </aside>
       </div>
     </div>
+  );
+}
+
+function ActionButton({ onClick, disabled, pending, highlight, icon, label }: {
+  onClick: () => void;
+  disabled: boolean;
+  pending: boolean;
+  /** Stage is stale: draw attention to the button that refreshes it. */
+  highlight: boolean;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors ${
+        highlight ? "bg-amber-600 hover:bg-amber-500" : "bg-gray-800 hover:bg-gray-700"
+      }`}
+    >
+      {pending ? <Loader2 size={14} className="animate-spin" /> : icon}
+      {label}
+    </button>
   );
 }
 
@@ -142,18 +181,32 @@ function StageCompare({ pageId, version }: { pageId: string; version: string }) 
   );
 }
 
-/** One text block: source text and an editable translation, saved when the field loses focus. */
-function BlockEditor({ pageId, block, disabled, onSaved }: {
+/** A textarea that saves when it loses focus, and follows the server value when that changes. */
+function useSavedText(saved: string) {
+  const [text, setText] = useState(saved);
+  useEffect(() => setText(saved), [saved]);
+  return { text, setText, dirty: text !== saved };
+}
+
+/** One text block: editable source text and translation, plus per-block OCR and translation re-runs. */
+function BlockEditor({ pageId, block, disabled, onChanged }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
-  onSaved: (detail: StudioPageDetail) => void;
+  onChanged: (detail: StudioPageDetail) => void;
 }) {
-  const saved = block.translated_text ?? "";
-  const [text, setText] = useState(saved);
-  useEffect(() => setText(saved), [saved]);
-  const saveM = useMutation({ mutationFn: (value: string) => updateTranslation(pageId, block.id, value), onSuccess: onSaved });
-  const dirty = useMemo(() => text !== saved, [text, saved]);
+  const source = useSavedText(block.source_text ?? "");
+  const translation = useSavedText(block.translated_text ?? "");
+  const saveM = useMutation({
+    mutationFn: (text: { source_text?: string; translated_text?: string }) => updateBlockText(pageId, block.id, text),
+    onSuccess: onChanged,
+  });
+  const runM = useMutation({
+    mutationFn: (stage: "ocr" | "translate") => runStage(pageId, stage, [block.id]),
+    onSuccess: onChanged,
+  });
+  const locked = disabled || runM.isPending;
+  const error = saveM.error ?? runM.error;
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-2.5 space-y-1.5">
@@ -165,19 +218,95 @@ function BlockEditor({ pageId, block, disabled, onSaved }: {
           </span>
         )}
         {block.render && <span className="text-gray-500">{block.render.font_size}px</span>}
-        {saveM.isPending && <Loader2 size={12} className="animate-spin text-gray-500" />}
-        {dirty && !saveM.isPending && <span className="text-amber-400">unsaved</span>}
+        {(saveM.isPending || runM.isPending) && <Loader2 size={12} className="animate-spin text-gray-500" />}
+        {(source.dirty || translation.dirty) && !saveM.isPending && <span className="text-amber-400">unsaved</span>}
+        <span className="ml-auto flex gap-1">
+          <IconButton title="Read the text again (OCR)" disabled={locked} onClick={() => runM.mutate("ocr")}>
+            <ScanText size={13} />
+          </IconButton>
+          <IconButton title="Translate again" disabled={locked || !block.source_text?.trim()} onClick={() => runM.mutate("translate")}>
+            <Languages size={13} />
+          </IconButton>
+        </span>
       </div>
-      {block.source_text && <p className="text-sm text-gray-400 whitespace-pre-wrap">{block.source_text}</p>}
       <textarea
-        value={text}
-        disabled={disabled}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={() => dirty && saveM.mutate(text)}
-        rows={Math.min(6, Math.max(2, Math.ceil(text.length / 40)))}
+        value={source.text}
+        disabled={locked}
+        onChange={(e) => source.setText(e.target.value)}
+        onBlur={() => source.dirty && saveM.mutate({ source_text: source.text })}
+        rows={Math.min(4, Math.max(1, Math.ceil(source.text.length / 20)))}
+        placeholder="Source text"
+        className="w-full resize-y bg-gray-950/60 border border-gray-800 rounded-md px-2 py-1 text-sm text-gray-400 focus:outline-none focus:border-indigo-500"
+      />
+      <textarea
+        value={translation.text}
+        disabled={locked}
+        onChange={(e) => translation.setText(e.target.value)}
+        onBlur={() => translation.dirty && saveM.mutate({ translated_text: translation.text })}
+        rows={Math.min(6, Math.max(2, Math.ceil(translation.text.length / 40)))}
+        placeholder="Translation"
         className="w-full resize-y bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-indigo-500"
       />
-      {saveM.error && <p className="text-xs text-red-400">{saveM.error.message}</p>}
+      {error && <p className="text-xs text-red-400">{error.message}</p>}
+    </div>
+  );
+}
+
+function IconButton({ title, disabled, onClick, children }: { title: string; disabled: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      className="p-1 rounded text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Earlier publishes with thumbnails; restoring one publishes it again as a new revision. */
+function HistoryPanel({ pageId, currentRevision, disabled, onRolledBack }: {
+  pageId: string;
+  currentRevision: number;
+  disabled: boolean;
+  onRolledBack: (result: { revision: number; notified: number }) => void;
+}) {
+  const historyQ = useQuery({ queryKey: ["studio-history", pageId], queryFn: () => listHistory(pageId) });
+  const rollbackM = useMutation({ mutationFn: (revision: number) => rollbackPage(pageId, revision), onSuccess: onRolledBack });
+  const entries = historyQ.data ?? [];
+
+  return (
+    <div className="pt-2 border-t border-gray-800 space-y-2">
+      <div className="flex items-center gap-2 text-xs text-gray-400">
+        <History size={13} /> Published revisions
+      </div>
+      {entries.length === 0 && <p className="text-xs text-gray-600">Nothing published yet.</p>}
+      {rollbackM.error && <p className="text-xs text-red-400">{rollbackM.error.message}</p>}
+      <div className="grid grid-cols-3 gap-2">
+        {entries.map((entry) => (
+          <div key={entry.revision} className="flex flex-col gap-1">
+            <a href={historyImageUrl(pageId, entry.revision)} target="_blank" rel="noreferrer" className="block aspect-[2/3] bg-gray-950 rounded overflow-hidden border border-gray-800 hover:border-indigo-500">
+              <img src={historyImageUrl(pageId, entry.revision)} alt={`Revision ${entry.revision}`} loading="lazy" className="w-full h-full object-contain" />
+            </a>
+            <div className="flex items-center justify-between text-xs">
+              <span className={entry.revision === currentRevision ? "text-emerald-400" : "text-gray-500"} title={entry.published_at}>
+                rev {entry.revision}
+              </span>
+              {entry.revision !== currentRevision && (
+                <button
+                  title="Publish this revision again"
+                  disabled={disabled || rollbackM.isPending}
+                  onClick={() => rollbackM.mutate(entry.revision)}
+                  className="text-gray-400 hover:text-white disabled:opacity-40"
+                >
+                  <RotateCcw size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

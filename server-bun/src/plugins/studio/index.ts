@@ -1,12 +1,15 @@
 /**
  * Studio API: review and edit translated pages, then publish them to open extension tabs.
  *
- * GET   /studio/api/pages                    recent pages
- * GET   /studio/api/pages/:id                page, stage state and blocks
- * GET   /studio/api/pages/:id/files/:file    a stage image
- * PATCH /studio/api/pages/:id/blocks/:idx    edit a translation (marks render stale)
- * POST  /studio/api/pages/:id/render         typeset the current translations again
- * POST  /studio/api/pages/:id/publish        push the result to extension tabs showing the page
+ * GET   /studio/api/pages                        recent pages
+ * GET   /studio/api/pages/:id                    page, stage state and blocks
+ * GET   /studio/api/pages/:id/files/:file        a stage image
+ * PATCH /studio/api/pages/:id/blocks/:idx        edit source text / translation (marks later stages stale)
+ * POST  /studio/api/pages/:id/run                re-run ocr / translate (all or some blocks) or render
+ * POST  /studio/api/pages/:id/publish            snapshot the result and push it to extension tabs showing the page
+ * GET   /studio/api/pages/:id/history            published snapshots, newest first
+ * GET   /studio/api/pages/:id/history/:revision  a snapshot image
+ * POST  /studio/api/pages/:id/rollback           publish an earlier snapshot again
  */
 import Elysia, { t } from "elysia";
 import { existsSync } from "node:fs";
@@ -15,9 +18,11 @@ import type { Page, PageStageRow } from "@/db/schema";
 import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
 import { runExclusiveResult } from "@/queue/page-queue";
+import { enginesNotReady, pageEngines } from "@/services/page-engines";
+import { historyFile, listHistory, restoreResult, snapshotResult } from "@/services/page-history";
 import { PagePipeline, type PageBlock } from "@/services/page-pipeline";
 import { pageLive } from "@/stores/page-live-channel";
-import { pageDir, PageStore } from "@/stores/page-store";
+import { pageDir, PageStore, type StageName } from "@/stores/page-store";
 import { resultUrl } from "@/plugins/route-translate-page";
 
 const log = childLogger("studio");
@@ -25,7 +30,16 @@ const log = childLogger("studio");
 /** Images a page folder may hold; anything else is refused. */
 const PAGE_FILES = ["original.png", "overlay.png", "mask.png", "clean-text.png", "clean-sfx.png", "render-overlay.png", "result.png"] as const;
 
-const IdParams = t.Object({ id: t.String({ pattern: "^[A-Za-z0-9-]+$" }) });
+/** Stages the Studio can re-run, and the stages each run makes stale. */
+const RUNNABLE = {
+  ocr: ["translate", "render"],
+  translate: ["render"],
+  render: [],
+} as const satisfies Record<string, readonly StageName[]>;
+type RunnableStage = keyof typeof RUNNABLE;
+
+const IdParam = t.String({ pattern: "^[A-Za-z0-9-]+$" });
+const IdParams = t.Object({ id: IdParam });
 
 const BoxSchema = t.Object({ x: t.Number(), y: t.Number(), w: t.Number(), h: t.Number() });
 
@@ -66,6 +80,8 @@ const BlockSchema = t.Object({
 
 const PageDetail = t.Object({ page: PageSummary, stages: t.Array(StageSchema), blocks: t.Array(BlockSchema) });
 
+const PublishResult = t.Object({ revision: t.Integer(), notified: t.Integer() });
+
 function toSummary(page: Page) {
   return {
     id: page.id,
@@ -98,6 +114,23 @@ async function pageDetail(id: string) {
   return { page: toSummary(page), stages: stages.map(toStage), blocks: (job?.blocks ?? []).map(toBlock) };
 }
 
+/** Why a page can't be edited right now (missing, or still running in the pipeline), as a status + message. */
+async function editablePage(id: string): Promise<{ page: Page } | { code: 404 | 409; error: string }> {
+  const page = await PageStore.findById(id);
+  if (!page) return { code: 404, error: "page not found" };
+  if (page.status === "queued" || page.status === "running") return { code: 409, error: "page is still being translated" };
+  return { page };
+}
+
+/** Bumps the revision, snapshots result.png under it and tells open extension tabs. */
+async function publish(id: string): Promise<{ revision: number; notified: number }> {
+  const revision = await PageStore.bumpRevision(id);
+  await snapshotResult(id, revision);
+  const notified = pageLive.publish({ type: "page-updated", page_id: id, revision, result_url: resultUrl(id, revision) });
+  log.info({ pageId: id, revision, notified }, "Page published");
+  return { revision, notified };
+}
+
 export const studioPlugin = new Elysia({ prefix: "/studio/api" })
   .get("/pages", async () => (await PageStore.list()).map(toSummary), {
     response: { 200: t.Array(PageSummary) },
@@ -117,61 +150,123 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       set.headers["Cache-Control"] = "no-cache";
       return file;
     },
-    { params: t.Object({ id: IdParams.properties.id, file: t.UnionEnum(PAGE_FILES) }) },
+    { params: t.Object({ id: IdParam, file: t.UnionEnum(PAGE_FILES) }) },
   )
 
   .patch(
     "/pages/:id/blocks/:idx",
     async ({ params, body, status }) => {
-      const page = await PageStore.findById(params.id);
-      if (!page) return status(404, { error: "page not found" });
-      if (page.status === "queued" || page.status === "running") return status(409, { error: "page is still being translated" });
-      if (!(await PageStore.updateTranslation(params.id, params.idx, body.translated_text))) return status(404, { error: "block not found" });
-      await PageStore.markStale(params.id, ["render"]);
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      if (body.source_text === undefined && body.translated_text === undefined) return status(422, { error: "nothing to update" });
+      if (!(await PageStore.updateBlockText(params.id, params.idx, { sourceText: body.source_text, translatedText: body.translated_text }))) {
+        return status(404, { error: "block not found" });
+      }
+      // A new source text makes its translation stale too; a new translation only needs typesetting again
+      await PageStore.markStale(params.id, body.source_text !== undefined ? ["translate", "render"] : ["render"]);
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     },
     {
-      params: t.Object({ id: IdParams.properties.id, idx: t.Integer({ minimum: 1 }) }),
-      body: t.Object({ translated_text: t.String({ maxLength: 2000 }) }),
-      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody },
+      params: t.Object({ id: IdParam, idx: t.Integer({ minimum: 1 }) }),
+      body: t.Object({
+        source_text: t.Optional(t.String({ maxLength: 2000 })),
+        translated_text: t.Optional(t.String({ maxLength: 2000 })),
+      }),
+      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
     },
   )
 
   .post(
-    "/pages/:id/render",
-    async ({ params, status }) => {
-      const page = await PageStore.findById(params.id);
-      if (!page) return status(404, { error: "page not found" });
-      if (page.status === "queued" || page.status === "running") return status(409, { error: "page is still being translated" });
+    "/pages/:id/run",
+    async ({ params, body, status }) => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      const stage: RunnableStage = body.stage;
+      if (stage !== "render") {
+        const notReady = enginesNotReady();
+        if (notReady) return status(503, { error: notReady });
+      }
+
       try {
         await runExclusiveResult(async () => {
           const pipeline = new PagePipeline(pageDir(params.id), () => {}, PageStore.repository(params.id));
           const job = await pipeline.readJob();
           if (!job) throw new Error("page has no detected blocks");
-          await pipeline.render(job);
+          const ids = body.block_ids;
+          if (ids?.some((id) => !job.blocks.some((b) => b.id === id))) throw new Error("unknown block id");
+          if (stage === "ocr") await pipeline.ocr(job, pageEngines.ocr, ids);
+          else if (stage === "translate") await pipeline.translate(job, pageEngines.translate, ids);
+          else await pipeline.render(job);
         });
-        await PageStore.setStage(params.id, "render", "fresh");
+        await PageStore.setStage(params.id, stage, "fresh");
+        if (RUNNABLE[stage].length > 0) await PageStore.markStale(params.id, [...RUNNABLE[stage]]);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        log.error({ err, pageId: params.id }, "Studio render failed");
-        await PageStore.setStage(params.id, "render", "error", message).catch(() => {});
+        log.error({ err, pageId: params.id, stage }, "Studio run failed");
+        await PageStore.setStage(params.id, stage, "error", message).catch(() => {});
         return status(422, { error: message });
       }
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     },
-    { params: IdParams, response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody } },
+    {
+      params: IdParams,
+      body: t.Object({
+        stage: t.UnionEnum(["ocr", "translate", "render"]),
+        /** Only these blocks (ocr / translate); render always typesets the whole page. */
+        block_ids: t.Optional(t.Array(t.Integer({ minimum: 1 }), { minItems: 1, maxItems: 500 })),
+      }),
+      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody, 503: ErrBody },
+    },
   )
 
   .post(
     "/pages/:id/publish",
     async ({ params, status }) => {
-      const page = await PageStore.findById(params.id);
-      if (!page) return status(404, { error: "page not found" });
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
       if (!existsSync(join(pageDir(params.id), "result.png"))) return status(409, { error: "page has no result to publish" });
-      const revision = await PageStore.bumpRevision(params.id);
-      const notified = pageLive.publish({ type: "page-updated", page_id: params.id, revision, result_url: resultUrl(params.id, revision) });
-      log.info({ pageId: params.id, revision, notified }, "Page published");
-      return { revision, notified };
+      return publish(params.id);
     },
-    { params: IdParams, response: { 200: t.Object({ revision: t.Integer(), notified: t.Integer() }), 404: ErrBody, 409: ErrBody } },
+    { params: IdParams, response: { 200: PublishResult, 404: ErrBody, 409: ErrBody } },
+  )
+
+  .get(
+    "/pages/:id/history",
+    async ({ params, status }) => {
+      if (!(await PageStore.findById(params.id))) return status(404, { error: "page not found" });
+      return listHistory(params.id);
+    },
+    {
+      params: IdParams,
+      response: { 200: t.Array(t.Object({ revision: t.Integer(), published_at: t.String() })), 404: ErrBody },
+    },
+  )
+
+  .get(
+    "/pages/:id/history/:revision",
+    async ({ params, status, set }) => {
+      const file = Bun.file(historyFile(params.id, params.revision));
+      if (!(await file.exists())) return status(404, { error: "revision not found" });
+      // A revision's snapshot never changes
+      set.headers["Cache-Control"] = "private, max-age=31536000, immutable";
+      return file;
+    },
+    { params: t.Object({ id: IdParam, revision: t.Integer({ minimum: 1 }) }) },
+  )
+
+  .post(
+    "/pages/:id/rollback",
+    async ({ params, body, status }) => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      if (!(await restoreResult(params.id, body.revision))) return status(404, { error: "revision not found" });
+      // The restored image no longer matches the blocks: a later re-render would replace it with the current text
+      await PageStore.markStale(params.id, ["render"]);
+      return publish(params.id);
+    },
+    {
+      params: IdParams,
+      body: t.Object({ revision: t.Integer({ minimum: 1 }) }),
+      response: { 200: PublishResult, 404: ErrBody, 409: ErrBody },
+    },
   );

@@ -244,6 +244,27 @@ Start after PR #14 (and its CodeRabbit fixes) is merged; branch `feat/studio-fra
 - `PagePipeline` takes a `JobRepository`: the CLI keeps `blocks.json` and the server writes blocks to SQLite.
 - The `/read` UI is a placeholder page; `/read/api/volumes` is the only reader route.
 
+### Phase 1 status (2026-09-14, same branch)
+
+Built:
+- **Runs:** `POST /studio/api/pages/:id/run { stage: "ocr" | "translate" | "render", block_ids? }`. OCR and translate can target single blocks; render always does the whole page. A run marks its stage fresh and the stages after it stale (ocr → translate + render, translate → render).
+- **Edits:** `PATCH …/blocks/:idx` takes `source_text` and/or `translated_text`. A source edit marks translate and render stale; a translation edit marks render stale.
+- **History:** every publish snapshots `result.png` to `history/<rev>.png` and keeps the last 10. `GET …/history` and `GET …/history/:revision` read them. `POST …/rollback { revision }` restores a snapshot, publishes it as a new revision and marks render stale.
+- **Editor:**
+  - editable source text
+  - per-block Re-OCR and Re-translate
+  - Translate all
+  - buttons highlighted when their stage is stale
+  - a history strip with thumbnails and restore
+
+Differences from the plan:
+- Runs are synchronous JSON calls, with no job id or event stream yet.
+- Staleness is tracked per stage, not per block.
+- Rollback restores only the image; blocks keep their current text.
+- Per-block clean, layout and burn wait for phases 3–4.
+
+Verified: the in-process route checks pass, including a real re-render, history pruning and rollback. Per-block OCR and translate against loaded models haven't been exercised yet; they need the running server.
+
 ---
 
 ## 11. Adopt from manga-reader / avoid
