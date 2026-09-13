@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, History, Languages, Loader2, RefreshCw, RotateCcw, ScanText, Send, TriangleAlert } from "lucide-react";
@@ -34,6 +34,16 @@ export function StudioPageEditor() {
     refetchInterval: (query) => (isBusy(query.state.data?.page.status) ? 2000 : 5000),
   });
   const setDetail = (detail: StudioPageDetail) => qc.setQueryData(["studio-page", id], detail);
+
+  // Text saves run on blur, which fires just before a button's click: actions wait for them so they see the new text
+  const pendingSaves = useRef(new Set<Promise<unknown>>());
+  const trackSave = useCallback((save: Promise<unknown>) => {
+    const tracked = save.catch(() => {}).finally(() => pendingSaves.current.delete(tracked));
+    pendingSaves.current.add(tracked);
+  }, []);
+  const afterSaves = useCallback((action: () => void) => {
+    void Promise.all([...pendingSaves.current]).then(action);
+  }, []);
 
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);
   const onPublished = (result: { revision: number; notified: number }) => {
@@ -89,7 +99,7 @@ export function StudioPageEditor() {
             </span>
           )}
           <ActionButton
-            onClick={() => translateAllM.mutate()}
+            onClick={() => afterSaves(() => translateAllM.mutate())}
             disabled={busy || translateAllM.isPending}
             pending={translateAllM.isPending}
             highlight={stageStatus("translate") === "stale"}
@@ -97,7 +107,7 @@ export function StudioPageEditor() {
             label="Translate all"
           />
           <ActionButton
-            onClick={() => renderM.mutate()}
+            onClick={() => afterSaves(() => renderM.mutate())}
             disabled={busy || renderM.isPending}
             pending={renderM.isPending}
             highlight={stageStatus("render") === "stale"}
@@ -105,7 +115,7 @@ export function StudioPageEditor() {
             label="Re-render"
           />
           <button
-            onClick={() => publishM.mutate()}
+            onClick={() => afterSaves(() => publishM.mutate())}
             disabled={busy || publishM.isPending || !page.has_result || renderStage?.status === "stale"}
             title={renderStage?.status === "stale" ? "Re-render before publishing" : "Replace the image in open extension tabs"}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors"
@@ -127,7 +137,7 @@ export function StudioPageEditor() {
             {textBlocks.length} text block{textBlocks.length === 1 ? "" : "s"} · {sfxCount} sound effect{sfxCount === 1 ? "" : "s"}
           </div>
           {textBlocks.map((block) => (
-            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} />
+            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} />
           ))}
           <HistoryPanel pageId={page.id} currentRevision={page.revision} disabled={busy} onRolledBack={onPublished} />
         </aside>
@@ -250,11 +260,15 @@ function useSavedText(saved: string) {
 }
 
 /** One text block: editable source text and translation, plus per-block OCR and translation re-runs. */
-function BlockEditor({ pageId, block, disabled, onChanged }: {
+function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
   onChanged: (detail: StudioPageDetail) => void;
+  /** Registers an in-flight save so page actions wait for it. */
+  trackSave: (save: Promise<unknown>) => void;
+  /** Runs the action once every pending save has settled. */
+  afterSaves: (action: () => void) => void;
 }) {
   const source = useSavedText(block.source_text ?? "");
   const translation = useSavedText(block.translated_text ?? "");
@@ -282,10 +296,10 @@ function BlockEditor({ pageId, block, disabled, onChanged }: {
         {(saveM.isPending || runM.isPending) && <Loader2 size={12} className="animate-spin text-gray-500" />}
         {(source.dirty || translation.dirty) && !saveM.isPending && <span className="text-amber-400">unsaved</span>}
         <span className="ml-auto flex gap-1">
-          <IconButton title="Read the text again (OCR)" disabled={locked} onClick={() => runM.mutate("ocr")}>
+          <IconButton title="Read the text again (OCR)" disabled={locked} onClick={() => afterSaves(() => runM.mutate("ocr"))}>
             <ScanText size={13} />
           </IconButton>
-          <IconButton title="Translate again" disabled={locked || !block.source_text?.trim()} onClick={() => runM.mutate("translate")}>
+          <IconButton title="Translate again" disabled={locked || !block.source_text?.trim()} onClick={() => afterSaves(() => runM.mutate("translate"))}>
             <Languages size={13} />
           </IconButton>
         </span>
@@ -294,7 +308,7 @@ function BlockEditor({ pageId, block, disabled, onChanged }: {
         value={source.text}
         disabled={locked}
         onChange={(e) => source.setText(e.target.value)}
-        onBlur={() => source.dirty && saveM.mutate({ source_text: source.text })}
+        onBlur={() => source.dirty && trackSave(saveM.mutateAsync({ source_text: source.text }))}
         rows={Math.min(4, Math.max(1, Math.ceil(source.text.length / 20)))}
         placeholder="Source text"
         className="w-full resize-y bg-gray-950/60 border border-gray-800 rounded-md px-2 py-1 text-sm text-gray-400 focus:outline-none focus:border-indigo-500"
@@ -303,7 +317,7 @@ function BlockEditor({ pageId, block, disabled, onChanged }: {
         value={translation.text}
         disabled={locked}
         onChange={(e) => translation.setText(e.target.value)}
-        onBlur={() => translation.dirty && saveM.mutate({ translated_text: translation.text })}
+        onBlur={() => translation.dirty && trackSave(saveM.mutateAsync({ translated_text: translation.text }))}
         rows={Math.min(6, Math.max(2, Math.ceil(translation.text.length / 40)))}
         placeholder="Translation"
         className="w-full resize-y bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-indigo-500"

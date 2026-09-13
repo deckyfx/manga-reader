@@ -699,12 +699,40 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
 
 /** Live streams per translated page; they stay open while this tab shows the page. */
 const pageWatchers = new Map<string, EventSource>();
+let watcherObserver: MutationObserver | null = null;
+let watcherCheckQueued = false;
+
+/** Close the streams whose translated image left the page (e.g. a reader swapped pages). */
+function closeDetachedWatchers(): void {
+  watcherCheckQueued = false;
+  for (const [jobId, es] of pageWatchers) {
+    if (document.querySelector(`img[data-socr-job-id="${CSS.escape(jobId)}"]`)) continue;
+    es.close();
+    pageWatchers.delete(jobId);
+  }
+  if (pageWatchers.size === 0) {
+    watcherObserver?.disconnect();
+    watcherObserver = null;
+  }
+}
+
+/** Watches DOM removals while any live stream is open; checks are batched per animation frame. */
+function observeWatchedImages(): void {
+  if (watcherObserver) return;
+  watcherObserver = new MutationObserver((mutations) => {
+    if (watcherCheckQueued || !mutations.some((m) => m.removedNodes.length > 0)) return;
+    watcherCheckQueued = true;
+    requestAnimationFrame(closeDetachedWatchers);
+  });
+  watcherObserver.observe(document.body, { childList: true, subtree: true });
+}
 
 /** Swap in the new result whenever the page is published from the Studio. */
 function watchPageUpdates(serverUrl: string, jobId: string): void {
   if (pageWatchers.has(jobId)) return;
   const es = new EventSource(`${serverUrl}/api/translate-page/${jobId}/live`);
   pageWatchers.set(jobId, es);
+  observeWatchedImages();
 
   es.onmessage = (event: MessageEvent<string>) => {
     const update = JSON.parse(event.data) as PageLiveEvent;

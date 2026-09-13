@@ -264,6 +264,11 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
       if (!existsSync(join(pageDir(params.id), "result.png"))) return status(409, { error: "page has no result to publish" });
+      // An edit saved after the last render would otherwise publish an image without it
+      const stages = await PageStore.listStages(params.id);
+      if (stages.some((s) => s.stage === "render" && s.status === "stale")) {
+        return status(409, { error: "the page changed since it was last rendered — re-render before publishing" });
+      }
       return publish(params.id);
     },
     { params: IdParams, response: { 200: PublishResult, 404: ErrBody, 409: ErrBody } },
