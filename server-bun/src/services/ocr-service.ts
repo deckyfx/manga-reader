@@ -61,32 +61,50 @@ async function runOcr(input: unknown, signal?: AbortSignal): Promise<OcrOutput> 
   const start = Date.now();
   const tag = start.toString(36); // short unique tag per request
 
-  // Pre-process: resize to 224×224, normalise to [-1, 1] float32
   const sharp = (await import("sharp")).default;
+  const SIZE = 224;
 
   if (env.OCR_DEBUG) {
     mkdirSync(DEBUG_DIR, { recursive: true });
-    // Save raw input
     await sharp(imageBuffer).png().toFile(`${DEBUG_DIR}/${tag}_raw.png`);
   }
 
-  const { data, info } = await sharp(imageBuffer)
-    .resize(224, 224)
-    .removeAlpha()
-    .toColourspace("srgb")
+  // Mirrors C# OcrEngine: grayscale → invert dark backgrounds → fit inside 224² keeping
+  // aspect ratio → centre on white. A plain square resize crops tall bubbles and drops characters.
+  const gray = await sharp(imageBuffer)
+    .flatten({ background: "#ffffff" })
+    .toColourspace("b-w")
     .raw()
     .toBuffer({ resolveWithObject: true });
+  if (gray.info.channels !== 1) throw new Error(`Expected 1 channel, got ${gray.info.channels}`);
 
-  if (info.channels !== 3) throw new Error(`Expected 3 channels, got ${info.channels}`);
+  let brightness = 0;
+  for (let i = 0; i < gray.data.length; i++) brightness += gray.data[i];
 
-  const float32 = new Float32Array(3 * 224 * 224);
-  for (let i = 0; i < 224 * 224; i++) {
-    float32[i]               = (data[i * 3]     / 127.5) - 1;      // R
-    float32[i + 224 * 224]   = (data[i * 3 + 1] / 127.5) - 1;      // G
-    float32[i + 2 * 224 * 224] = (data[i * 3 + 2] / 127.5) - 1;    // B
+  let pipeline = sharp(gray.data, { raw: { width: gray.info.width, height: gray.info.height, channels: 1 } });
+  if (brightness / gray.data.length < 127) pipeline = pipeline.negate();
+
+  const { data, info } = await pipeline
+    .resize(SIZE, SIZE, { fit: "contain", background: "#ffffff", kernel: "mitchell" })
+    .removeAlpha()
+    .toColourspace("b-w")
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  if (info.channels !== 1 || info.width !== SIZE || info.height !== SIZE) {
+    throw new Error(`Unexpected preprocessed shape ${info.width}x${info.height}x${info.channels}`);
   }
 
-  const pixelTensor = new ort.Tensor("float32", float32, [1, 3, 224, 224]);
+  // Normalise to [-1, 1] and replicate the gray plane into all 3 CHW channels
+  const plane = SIZE * SIZE;
+  const float32 = new Float32Array(3 * plane);
+  for (let i = 0; i < plane; i++) {
+    const v = data[i] / 127.5 - 1;
+    float32[i] = v;
+    float32[i + plane] = v;
+    float32[i + 2 * plane] = v;
+  }
+
+  const pixelTensor = new ort.Tensor("float32", float32, [1, 3, SIZE, SIZE]);
 
   // Encoder
   const encOut = await encoderSession.run({ pixel_values: pixelTensor });
@@ -131,9 +149,8 @@ async function runOcr(input: unknown, signal?: AbortSignal): Promise<OcrOutput> 
     .trim();
 
   if (env.OCR_DEBUG) {
-    // Save the 224×224 image the model actually saw (reconstructed from float32 data)
-    const uint8 = Buffer.from(float32.map((v) => Math.round((v + 1) * 127.5)));
-    await sharp(uint8, { raw: { width: 224, height: 224, channels: 3 } })
+    // Exact pixels fed to the encoder
+    await sharp(data, { raw: { width: SIZE, height: SIZE, channels: 1 } })
       .png()
       .toFile(`${DEBUG_DIR}/${tag}_224x224.png`);
     log.debug({ tag, tokens: decoded, text }, `OCR debug — "${text}"`);
