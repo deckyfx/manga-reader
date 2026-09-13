@@ -24,7 +24,7 @@ async function loadModels(): Promise<void> {
   bootState.bubbleEnabled = env.BUBBLE_MODEL_ENABLED;
   bootState.textSegEnabled = env.TEXT_SEG_MODEL_ENABLED;
 
-  const { downloadHfModel, downloadFile, findGitHubReleaseAsset, printDownloadPlan } = await import("@/services/model-downloader");
+  const { downloadHfModel, downloadFile, printDownloadPlan } = await import("@/services/model-downloader");
 
   const entries = [
     env.OCR_MODEL_ENABLED && { repo: env.OCR_MODEL_REPO, dir: env.OCR_MODELS_DIR, files: env.OCR_MODEL_FILES, label: "OCR" },
@@ -40,7 +40,7 @@ async function loadModels(): Promise<void> {
     const { join } = await import("node:path");
     const { existsSync } = await import("node:fs");
     if (!existsSync(join(env.DICT_DIR, "jitendex-yomitan.zip"))) {
-      bootLog.info("  ↓ Dict/jitendex-yomitan.zip (latest GitHub release)");
+      bootLog.info("  ↓ Dict/jitendex-yomitan.zip");
     }
   }
 
@@ -72,14 +72,8 @@ async function loadModels(): Promise<void> {
   if (env.DICT_MODEL_ENABLED) {
     const { join } = await import("node:path");
     const zipDest = join(env.DICT_DIR, "jitendex-yomitan.zip");
-    try {
-      // Empty keyword → first .zip in latest release (Jitendex may rename assets between releases)
-      const url = env.JITENDEX_ZIP_URL
-        ?? await findGitHubReleaseAsset("stephenmk", "Jitendex", "");
-      await downloadFile(url, zipDest, "Dict/jitendex-yomitan.zip");
-    } catch (err) {
-      bootLog.warn({ err }, "Jitendex download failed — dictionary lookups will be unavailable");
-    }
+    await downloadFile(env.JITENDEX_ZIP_URL, zipDest, "Dict/jitendex-yomitan.zip")
+      .catch((err: Error) => bootLog.warn({ err }, "Jitendex download failed — dictionary lookups will be unavailable"));
   }
 
   const loadErrors: string[] = [];
