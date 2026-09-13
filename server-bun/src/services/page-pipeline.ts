@@ -216,7 +216,8 @@ export class PagePipeline {
   /**
    * Remove the lettering of included blocks of one kind: "text" reads original.png → clean-text.png,
    * "sfx" reads clean-text.png → clean-sfx.png. Blob ownership is decided against all blocks, so the
-   * other kind's pixels are never touched. Returns null when no block of that kind is included.
+   * other kind's pixels are never touched. Returns null when no block of that kind is included (the
+   * output is then a copy of the input).
    */
   async clean(job: PageJob, kind: BlockKind): Promise<CleanResult | null> {
     const input = kind === "text" ? "original.png" : "clean-text.png";
@@ -229,6 +230,8 @@ export class PagePipeline {
     const regions = job.blocks.filter((b) => b.kind === kind && b.include);
     const total = job.blocks.filter((b) => b.kind === kind).length;
     if (regions.length === 0) {
+      // Still write the output: later stages choose their input by file existence
+      await sharp(this.path(input)).png().toFile(this.path(output));
       this.report({ stage: "cleaning", message: `No ${label} to clean`, fraction: 1 });
       return null;
     }

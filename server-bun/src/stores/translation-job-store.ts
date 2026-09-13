@@ -30,7 +30,6 @@ class TranslationJobStore {
   private readonly listeners = new Map<string, Set<Listener>>();
 
   create(id: string): TranslationJob {
-    this.evict();
     const job: TranslationJob = { id, status: "queued", stage: "queued", progress: 0, error: null, events: [], completedAt: null };
     this.jobs.set(id, job);
     return job;
@@ -58,7 +57,13 @@ class TranslationJobStore {
       job.progress = event.progress;
     }
     for (const listener of this.listeners.get(id) ?? []) listener(event);
-    if (job.completedAt !== null) this.listeners.delete(id);
+    if (job.completedAt !== null) {
+      this.listeners.delete(id);
+      // Drop the finished job (and its base64 result) unless the page was resubmitted meanwhile
+      setTimeout(() => {
+        if (this.jobs.get(id) === job) this.jobs.delete(id);
+      }, RETENTION_MS).unref();
+    }
   }
 
   /** Replays past events, then streams new ones until the job finishes. Returns an unsubscribe function. */
@@ -71,13 +76,6 @@ class TranslationJobStore {
     set.add(listener);
     this.listeners.set(id, set);
     return () => set.delete(listener);
-  }
-
-  private evict(): void {
-    const cutoff = Date.now() - RETENTION_MS;
-    for (const [id, job] of this.jobs) {
-      if (job.completedAt !== null && job.completedAt < cutoff) this.jobs.delete(id);
-    }
   }
 }
 
