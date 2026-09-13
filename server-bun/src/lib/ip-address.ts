@@ -94,7 +94,8 @@ function isNonPublicV6(bytes: Uint8Array): boolean {
   if (bytes[0] === 0xff) return true; // ff00::/8 multicast
   if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8) return true; // 2001:db8::/32 documentation
   if (bytes[0] === 0x01 && bytes[1] === 0x00 && allZero(bytes, 2, 8)) return true; // 100::/64 discard
-  return false;
+  // Everything else must be global unicast (2000::/3); other prefixes are reserved or unassigned
+  return (bytes[0] & 0xe0) !== 0x20;
 }
 
 /** True unless the address is a valid public unicast IPv4 or IPv6 address; anything unparseable counts as non-public. */

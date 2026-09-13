@@ -1,9 +1,34 @@
-/** Page work (full runs and Studio re-renders) runs one task at a time: every stage is CPU-bound and shares the same models. */
+import { childLogger } from "@/lib/logger";
+
+const log = childLogger("page-queue");
+
+/** Tail of the page work queue; always settles successfully so a failed task never breaks the chain. */
 let pageQueue: Promise<void> = Promise.resolve();
 
-/** Appends a task that runs after the previous one settles, whether it succeeded or not. */
+/**
+ * Page work (full runs and Studio re-runs) runs one task at a time: every stage is CPU-bound and shares the
+ * same models. The task starts after the previous one settles; if it fails, the error is logged here (callers
+ * that need the outcome use `runExclusiveResult`).
+ */
 export function runExclusive(task: () => Promise<void>): void {
-  pageQueue = pageQueue.then(task, task);
+  pageQueue = pageQueue
+    .then(async () => {
+      await task();
+    })
+    .catch((err: unknown) => log.error({ err }, "Page queue task failed"));
+}
+
+/** Like `runExclusive`, but resolves with the task's result, or rejects with its error (including a synchronous throw). */
+export function runExclusiveResult<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    runExclusive(async () => {
+      try {
+        resolve(await task());
+      } catch (err) {
+        reject(err);
+      }
+    });
+  });
 }
 
 /** Tail of each page's lock chain; removed once the page has no pending work. */
@@ -15,18 +40,11 @@ const pageLocks = new Map<string, Promise<void>>();
  */
 export function withPageLock<T>(pageId: string, task: () => Promise<T>): Promise<T> {
   const previous = pageLocks.get(pageId) ?? Promise.resolve();
-  const result = previous.then(task, task);
+  const result = previous.then(() => task());
   const settled = result.then(() => {}, () => {});
   pageLocks.set(pageId, settled);
   void settled.then(() => {
     if (pageLocks.get(pageId) === settled) pageLocks.delete(pageId);
   });
   return result;
-}
-
-/** Like `runExclusive`, but resolves with the task's result (or rejects with its error). */
-export function runExclusiveResult<T>(task: () => Promise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    runExclusive(() => task().then(resolve, reject));
-  });
 }

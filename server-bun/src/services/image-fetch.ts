@@ -69,7 +69,9 @@ function parseUrl(raw: string, base?: URL): URL {
 }
 
 /** One GET over a connection pinned to validated public addresses; resolves once response headers arrive. */
-function request(url: URL, resolve: Resolver, signal: AbortSignal): Promise<IncomingMessage> {
+async function request(url: URL, resolve: Resolver, signal: AbortSignal): Promise<IncomingMessage> {
+  // IP literals skip DNS, so the pinned lookup never sees them: check them here, for the first URL and every redirect
+  if (isIP(hostOf(url))) await publicAddresses(hostOf(url), resolve);
   return new Promise((resolvePromise, reject) => {
     const client = url.protocol === "https:" ? https : http;
     const req = client.get(url, {
@@ -98,8 +100,6 @@ function toLoadError(err: unknown, url: URL, signal: AbortSignal): ImageLoadErro
  */
 export async function fetchImage(rawUrl: string, resolve: Resolver = systemResolver): Promise<Buffer> {
   let url = parseUrl(rawUrl);
-  // Fail fast with a clear message before opening a connection (the pinned lookup re-checks at connect time)
-  if (isIP(hostOf(url))) await publicAddresses(hostOf(url), resolve);
   const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
 
   let res: IncomingMessage | null = null;
