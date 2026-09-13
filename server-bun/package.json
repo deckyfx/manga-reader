@@ -10,11 +10,13 @@
     "start": "./app",
     "build": "bun run embed:migrations && bun run typecheck && bun run build.ts",
     "typecheck": "tsc --noEmit",
+    "types:api": "tsc -p tsconfig.api.json",
     "db:generate": "drizzle-kit generate && bun run embed:migrations",
     "db:migrate": "bun run src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "embed:migrations": "bun run scripts/embed-migrations.ts",
-    "ocr:compare": "bun run scripts/ocr-compare.ts"
+    "ocr:compare": "bun run scripts/ocr-compare.ts",
+    "page": "bun run scripts/page.ts"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.2",
@@ -27,8 +29,10 @@
     "drizzle-orm": "^0.45.2",
     "elysia": "^1.4.30",
     "fflate": "^0.8.3",
+    "hyphen": "^1.14.1",
     "lucide-react": "^1.45.0",
     "onnxruntime-node": "^1.29.0",
+    "opentype.js": "^2.0.0",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",
     "pino-roll": "^4.0.0",
@@ -40,6 +44,8 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/hyphen": "^1.14.0",
+    "@types/opentype.js": "1.3.10",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "bun-plugin-tailwind": "^0.1.2",

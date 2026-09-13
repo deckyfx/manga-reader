@@ -1,0 +1,14 @@
+{
+  // Emits declarations for src/api.ts into types/ so the browser extension can import `Api` for Eden Treaty
+  // without type-checking server sources under its own compiler settings. Run: bun run types:api
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": ".",
+    "outDir": "./types"
+  },
+  "include": [],
+  "files": ["src/api.ts", "src/types/sql.d.ts", "src/types/font.d.ts"]
+}

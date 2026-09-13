@@ -2,10 +2,11 @@ import { $ } from "bun";
 import path from "node:path";
 
 const DEV = process.argv.includes("--dev");
+const MINOR = process.argv.includes("--minor");
 
-// ── Version bump (patch) ───────────────────────────────────────────────────────
-// Read current version from package.json, bump patch, write back to both
-// package.json and static/manifest.json so they stay in sync.
+// ── Version bump ───────────────────────────────────────────────────────────────
+// Read current version from package.json, bump patch (or minor with --minor, resetting patch),
+// write back to both package.json and static/manifest.json so they stay in sync.
 
 const pkgFile      = Bun.file("./package.json");
 const manifestFile = Bun.file("./static/manifest.json");
@@ -14,7 +15,9 @@ const pkg      = await pkgFile.json()      as { version: string; [k: string]: un
 const manifest = await manifestFile.json() as { version: string; [k: string]: unknown };
 
 const [major, minor, patch] = (pkg.version ?? "1.0.0").split(".").map(Number);
-const newVersion = `${major}.${minor}.${(patch ?? 0) + 1}`;
+const newVersion = MINOR
+  ? `${major}.${(minor ?? 0) + 1}.0`
+  : `${major}.${minor}.${(patch ?? 0) + 1}`;
 
 pkg.version      = newVersion;
 manifest.version = newVersion;

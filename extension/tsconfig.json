@@ -14,6 +14,14 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
+    // Server declarations (types:api) keep the server's "@/" imports; resolve them to the emitted types.
+    // "elysia" must resolve to the server's copy: Elysia's classes have private members, so types from two
+    // installed copies are incompatible and treaty<Api> would reject the server app.
+    "paths": {
+      "@/*": ["../server-bun/types/src/*"],
+      "elysia": ["../server-bun/node_modules/elysia"],
+      "elysia/*": ["../server-bun/node_modules/elysia/*"]
+    },
 
     // Best practices
     "strict": true,

@@ -14,6 +14,8 @@ export interface Settings {
   serverUrl: string;
   serverTranslation: ServerTranslation;
   dictMode: DictMode;
+  /** Page translation also removes sound effects (can soften detailed artwork). */
+  pageCleanSfx: boolean;
 
   // Tesseract-mode settings
   tesseractLang: string;
@@ -30,6 +32,7 @@ export const DEFAULT_SETTINGS: Settings = {
   serverUrl: "",
   serverTranslation: "auto",
   dictMode: "jisho",
+  pageCleanSfx: false,
   tesseractLang: "jpn",
   tesseractQuality: "4.0.0",
   clientTranslation: "none",
@@ -78,8 +81,6 @@ export interface ExplainResultMsg   { type: "explain-result"; tokens: TokenInfo[
 export interface ExplainErrorMsg    { type: "explain-error"; message: string }
 
 export interface StartImageModeMsg  { type: "start-image-mode" }
-export interface JobResultReadyMsg  { type: "job-result-ready"; jobId: string; resultImageDataUrl: string }
-export interface JobResultErrorMsg  { type: "job-result-error"; jobId: string; reason: "timeout" | "server-error" | "network-error" }
 /** Sent to content tabs when Studio burns text and the result image is updated. */
 export interface ImageUpdatedMsg    { type: "image-updated"; jobId: string; resultUrl: string }
 
@@ -91,8 +92,6 @@ export type ToContentMsg =
   | ExplainResultMsg
   | ExplainErrorMsg
   | StartImageModeMsg
-  | JobResultReadyMsg
-  | JobResultErrorMsg
   | ImageUpdatedMsg;
 
 // ── Messages: content → background ───────────────────────────────────────────

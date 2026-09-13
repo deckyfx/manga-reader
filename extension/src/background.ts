@@ -7,12 +7,11 @@ import type {
   JishoEntry,
   PopupModeMsg,
   FetchImageMsg,
-  JobResultReadyMsg,
-  JobResultErrorMsg,
   ImageUpdatedRelayMsg,
   ImageUpdatedMsg,
 } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
+import { errorMessage, serverApi } from "./api";
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -168,155 +167,25 @@ async function runServerFlow(
   const start = Date.now();
 
   try {
-    const res = await fetch(`${settings.serverUrl.replace(/\/$/, "")}/ocr`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        image: `data:image/jpeg;base64,${imageB64}`,
-        translate_engine: settings.serverTranslation,
-        track_job: true,
-      }),
+    const { data, error } = await serverApi(settings.serverUrl).ocr.post({
+      image: `data:image/jpeg;base64,${imageB64}`,
+      translate_engine: settings.serverTranslation,
     });
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => String(res.status));
-      sendToTab(tabId, { type: "ocr-error", message: `Server ${res.status}: ${errText.slice(0, 200)}` });
+    if (error) {
+      sendToTab(tabId, { type: "ocr-error", message: errorMessage(error) });
       return;
     }
-
-    const data = await res.json() as { text: string; translation?: string; elapsed_ms: number; job_id?: string };
 
     sendToTab(tabId, {
       type: "ocr-result",
       text: data.text,
-      translation: data.translation ?? null,
+      translation: data.translation,
       elapsed_ms: Date.now() - start,
     } satisfies ToContentMsg);
-
-    // If the server started a background page-translation job, schedule alarm-based polling
-    if (data.job_id) {
-      void schedulePollJob(data.job_id, settings.serverUrl, tabId);
-    }
   } catch (e) {
     sendToTab(tabId, { type: "ocr-error", message: errMsg(e) });
   }
-}
-
-// ── Job result polling via chrome.alarms (MV3-safe) ──────────────────────────
-
-interface PendingJob {
-  jobId: string;
-  serverUrl: string;
-  tabId: number;
-  deadline: number; // epoch ms — abandon after 3 min
-  errorCount: number;
-}
-
-const ALARM_PREFIX = "poll:";
-const POLL_INTERVAL_SECONDS = 3;
-const POLL_DEADLINE_MS = 3 * 60 * 1000;
-const MAX_CONSECUTIVE_ERRORS = 3;
-
-function alarmName(jobId: string): string {
-  return `${ALARM_PREFIX}${jobId}`;
-}
-
-async function schedulePollJob(jobId: string, serverUrl: string, tabId: number): Promise<void> {
-  const job: PendingJob = {
-    jobId,
-    serverUrl,
-    tabId,
-    deadline: Date.now() + POLL_DEADLINE_MS,
-    errorCount: 0,
-  };
-  await chrome.storage.session.set({ [alarmName(jobId)]: job });
-  chrome.alarms.create(alarmName(jobId), { delayInMinutes: POLL_INTERVAL_SECONDS / 60 });
-}
-
-async function handlePollAlarm(name: string): Promise<void> {
-  const key = name;
-  const stored = await chrome.storage.session.get(key);
-  const job = stored[key] as PendingJob | undefined;
-  if (!job) return; // already cleared
-
-  if (Date.now() > job.deadline) {
-    sendToTab(job.tabId, {
-      type: "job-result-error",
-      jobId: job.jobId,
-      reason: "timeout",
-    } satisfies JobResultErrorMsg);
-    await chrome.storage.session.remove(key);
-    return;
-  }
-
-  const base = job.serverUrl.replace(/\/$/, "");
-  try {
-    const res = await fetch(`${base}/jobs/${job.jobId}/status`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const data = await res.json() as { status: string };
-
-    if (data.status === "done") {
-      const imgRes = await fetch(`${base}/jobs/${job.jobId}/result-image`);
-      if (imgRes.ok) {
-        const blob    = await imgRes.blob();
-        const dataUrl = await blobToDataUrl(blob);
-        sendToTab(job.tabId, {
-          type: "job-result-ready",
-          jobId: job.jobId,
-          resultImageDataUrl: dataUrl,
-        } satisfies JobResultReadyMsg);
-      }
-      await chrome.storage.session.remove(key);
-      return;
-    }
-
-    if (data.status === "error") {
-      sendToTab(job.tabId, {
-        type: "job-result-error",
-        jobId: job.jobId,
-        reason: "server-error",
-      } satisfies JobResultErrorMsg);
-      await chrome.storage.session.remove(key);
-      return;
-    }
-
-    // Still pending — reschedule and reset error count
-    const updated: PendingJob = { ...job, errorCount: 0 };
-    await chrome.storage.session.set({ [key]: updated });
-    chrome.alarms.create(name, { delayInMinutes: POLL_INTERVAL_SECONDS / 60 });
-  } catch {
-    const newCount = job.errorCount + 1;
-    if (newCount >= MAX_CONSECUTIVE_ERRORS) {
-      sendToTab(job.tabId, {
-        type: "job-result-error",
-        jobId: job.jobId,
-        reason: "network-error",
-      } satisfies JobResultErrorMsg);
-      await chrome.storage.session.remove(key);
-      return;
-    }
-    const updated: PendingJob = { ...job, errorCount: newCount };
-    await chrome.storage.session.set({ [key]: updated });
-    chrome.alarms.create(name, { delayInMinutes: POLL_INTERVAL_SECONDS / 60 });
-  }
-}
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name.startsWith(ALARM_PREFIX)) {
-    void handlePollAlarm(alarm.name);
-  }
-});
-
-async function blobToDataUrl(blob: Blob): Promise<string> {
-  const buf   = await blob.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  let binary  = "";
-  const chunk = 8192;
-  for (let i = 0; i < bytes.byteLength; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return `data:${blob.type || "image/png"};base64,${btoa(binary)}`;
 }
 
 // ── Explain flow (server-only) ────────────────────────────────────────────────
@@ -329,19 +198,12 @@ async function handleExplain(text: string, tabId: number): Promise<void> {
   }
 
   try {
-    const res = await fetch(`${settings.serverUrl.replace(/\/$/, "")}/analyze`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, sanitize: true, mode: settings.dictMode }),
-    });
+    const { data, error } = await serverApi(settings.serverUrl).analyze.post({ text, sanitize: true, mode: settings.dictMode });
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => String(res.status));
-      sendToTab(tabId, { type: "explain-error", message: `Server ${res.status}: ${errText.slice(0, 200)}` });
+    if (error) {
+      sendToTab(tabId, { type: "explain-error", message: errorMessage(error) });
       return;
     }
-
-    const data = await res.json() as { tokens: TokenInfo[]; definitions: (JishoEntry | null)[] };
 
     sendToTab(tabId, {
       type: "explain-result",

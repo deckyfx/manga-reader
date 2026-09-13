@@ -7,12 +7,12 @@ import type {
   TokenInfo,
   JishoEntry,
   OcrResultMsg,
-  JobResultReadyMsg,
   ImageUpdatedRelayMsg,
   ToEngineMsg,
   FromEngineMsg,
   FetchImageMsg,
 } from "./types";
+import { errorMessage, serverApi, type PageJobEvent } from "./api";
 
 // ── Guard ─────────────────────────────────────────────────────────────────────
 
@@ -55,7 +55,6 @@ function init(): void {
     else if (msg.type === "ocr-error")        showError(msg.message);
     else if (msg.type === "explain-result")   showExplain(msg.tokens, msg.definitions, msg.mode);
     else if (msg.type === "explain-error")    showExplainError(msg.message);
-    else if (msg.type === "job-result-ready") appendJobImage(msg.resultImageDataUrl);
     else if (msg.type === "image-updated") replacePageImages(msg.jobId, msg.resultUrl);
   });
 
@@ -322,20 +321,6 @@ function showResult(msg: OcrResultMsg): void {
   wirePanelButtons(resultPanelEl);
 }
 
-function appendJobImage(resultImageDataUrl: string): void {
-  if (!resultPanelEl) return;
-  const inner = resultPanelEl.querySelector<HTMLElement>(".socr-panel-inner");
-  if (!inner) return;
-  inner.querySelector(".socr-job-image")?.remove();
-  const section = document.createElement("div");
-  section.className = "socr-job-image";
-  section.innerHTML = `
-    <div class="socr-text-label">Translated Page</div>
-    <img class="socr-result-image" src="${escAttr(resultImageDataUrl)}" alt="Translated page" />
-  `;
-  inner.appendChild(section);
-}
-
 /** Replace all <img> tags on the page whose src matches the server result URL for this job. */
 function replacePageImages(jobId: string, resultUrl: string): void {
   if (!resultUrl) return;
@@ -559,6 +544,7 @@ let hoveredImg: HTMLImageElement | null = null;
 let imagePickerHint: HTMLElement | null = null;
 let imageTranslateOverlay: HTMLElement | null = null;
 let imageTranslateLogList: HTMLElement | null = null;
+let imageTranslateTitle: HTMLElement | null = null;
 let activeEventSource: EventSource | null = null;
 
 function startImageMode(): void {
@@ -654,45 +640,46 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
       base64 = result.base64;
     }
 
-    // Get server URL from settings
-    const stored = await chrome.storage.sync.get(["serverUrl"]) as { serverUrl?: string };
+    const stored = await chrome.storage.sync.get(["serverUrl", "pageCleanSfx"]) as { serverUrl?: string; pageCleanSfx?: boolean };
     const serverUrl = stored.serverUrl?.replace(/\/$/, "") ?? "";
     if (!serverUrl) throw new Error("No server URL configured. Open extension settings.");
 
-    // Submit translate-page job
-    const submitRes = await fetch(`${serverUrl}/api/translate-page`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image: base64 }),
+    const { data, error } = await serverApi(serverUrl).api["translate-page"].post({
+      image: base64,
+      clean_sfx: stored.pageCleanSfx ?? false,
     });
-    if (!submitRes.ok) throw new Error(`Server ${submitRes.status}: ${await submitRes.text()}`);
-    const { job_id } = await submitRes.json() as { job_id: string };
+    if (error) throw new Error(errorMessage(error));
+    appendLogEntry(data.cached ? "Found a previous translation ✓" : "Uploaded ✓", "uploaded");
 
-    // Close the "Uploading…" entry and open SSE stream
-    appendLogEntry("Uploaded ✓", "uploaded");
-
+    // Server-sent events replay the job's whole history, so nothing is missed between submit and connect
     activeEventSource?.close();
-    const es = new EventSource(`${serverUrl}/api/translate-page/${job_id}/events`);
+    const es = new EventSource(`${serverUrl}/api/translate-page/${data.job_id}/events`);
     activeEventSource = es;
 
-    es.onmessage = (event: MessageEvent) => {
-      const data = JSON.parse(event.data as string) as JobSseEvent;
-
-      if (data.type === "log") {
-        appendLogEntry(data.message ?? "", data.stage);
-      } else if (data.type === "done") {
-        es.close();
-        activeEventSource = null;
-        if (data.result) {
-          img.src = `data:image/png;base64,${data.result}`;
+    es.onmessage = (event: MessageEvent<string>) => {
+      const update = JSON.parse(event.data) as PageJobEvent;
+      switch (update.type) {
+        case "log":
+          appendLogEntry(update.message, update.stage);
+          setImageTranslateProgress(update.progress);
+          break;
+        case "progress":
+          setImageTranslateProgress(update.progress, update.message);
+          break;
+        case "done":
+          es.close();
+          activeEventSource = null;
+          img.src = `data:image/png;base64,${update.result}`;
           img.srcset = "";
-        }
-        appendLogEntry("Image replaced ✓", "done");
-        setTimeout(() => hideImageTranslateLoading(true), 1500);
-      } else if (data.type === "error") {
-        es.close();
-        activeEventSource = null;
-        hideImageTranslateLoading(false, data.error ?? data.message ?? "Unknown error");
+          setImageTranslateProgress(1);
+          appendLogEntry(`Image replaced ✓ (${(update.elapsed_ms / 1000).toFixed(1)} s)`, "done");
+          setTimeout(() => hideImageTranslateLoading(true), 1500);
+          break;
+        case "error":
+          es.close();
+          activeEventSource = null;
+          hideImageTranslateLoading(false, update.error);
+          break;
       }
     };
 
@@ -707,14 +694,11 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
   }
 }
 
-interface JobSseEvent {
-  type: "log" | "done" | "error";
-  message?: string;
-  stage?: string;
-  progress?: number;
-  count?: number;
-  result?: string;
-  error?: string;
+/** Show overall progress (and the current step) in the loading panel's title. */
+function setImageTranslateProgress(progress: number, step?: string): void {
+  if (!imageTranslateTitle) return;
+  const percent = `${Math.round(progress * 100)}%`;
+  imageTranslateTitle.textContent = step ? `Translating page… ${percent} — ${step}` : `Translating page… ${percent}`;
 }
 
 async function imageElementToBase64(img: HTMLImageElement): Promise<string> {
@@ -760,6 +744,7 @@ function showImageTranslateLoading(): void {
 
   imageTranslateOverlay = panel;
   imageTranslateLogList  = logList;
+  imageTranslateTitle    = title;
 
   // First entry — pending while upload is in flight
   appendLogEntry("Uploading image…", "upload");
@@ -805,6 +790,7 @@ function hideImageTranslateLoading(success: boolean, errorMsg?: string): void {
     imageTranslateOverlay.remove();
     imageTranslateOverlay = null;
     imageTranslateLogList  = null;
+    imageTranslateTitle    = null;
   } else {
     appendLogEntry(`✗ ${errorMsg ?? "Failed"}`, "error");
     const overlay = imageTranslateOverlay;
@@ -813,6 +799,7 @@ function hideImageTranslateLoading(success: boolean, errorMsg?: string): void {
       if (imageTranslateOverlay === overlay) {
         imageTranslateOverlay = null;
         imageTranslateLogList  = null;
+        imageTranslateTitle    = null;
       }
     }, 5000);
   }

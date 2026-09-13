@@ -4,12 +4,8 @@ import { env } from "@/env";
 import { bootState } from "@/boot-state";
 import { logger, childLogger } from "@/lib/logger";
 import { loggerPlugin } from "@/plugins/plugin-logger";
-import { routeHealth } from "@/plugins/route-health";
-import { routeOcr } from "@/plugins/route-ocr";
-import { routeTranslate } from "@/plugins/route-translate";
-import { routeAnalyze } from "@/plugins/route-analyze";
+import { api } from "@/api";
 import { routeSettings } from "@/plugins/route-settings";
-import { routeTranslatePage } from "@/plugins/route-translate-page";
 import { portalPlugin } from "@/plugins/portal/index";
 import { routeSpa } from "@/plugins/route-spa";
 
@@ -105,6 +101,11 @@ async function loadModels(): Promise<void> {
     await loadTextSegModel().catch((err: Error) => { loadErrors.push(`TextSeg: ${err.message}`); });
   }
 
+  if (env.INPAINT_MODEL_ENABLED) {
+    const { loadInpaintModel } = await import("@/services/inpaint-service");
+    await loadInpaintModel().catch((err: Error) => bootLog.warn({ err }, "Inpaint model unavailable"));
+  }
+
   // Dictionary is non-fatal (health reports "degraded"); /analyze needs both tokenizer and index.
   if (env.DICT_MODEL_ENABLED) {
     const { analyzeService } = await import("@/services/analyze-service");
@@ -136,12 +137,8 @@ await loadModels().catch((err) => {
 const app = new Elysia()
   .use(loggerPlugin)
   .use(cors())
-  .use(routeHealth)
-  .use(routeOcr)
-  .use(routeTranslate)
-  .use(routeAnalyze)
+  .use(api)
   .use(routeSettings)
-  .use(routeTranslatePage)
   .use(portalPlugin)
   .use(routeSpa);
 
