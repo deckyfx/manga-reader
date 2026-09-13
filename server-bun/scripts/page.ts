@@ -10,11 +10,13 @@
  *   bun run page clean <name>                     stage 1: clean-text.png — speech bubbles and caption boxes
  *   bun run page clean-sfx <name>                 stage 2: clean-sfx.png — sound effects and other lettering,
  *                                                  applied on top of clean-text.png
+ *   bun run page render <name>                    patches/<id>.png, render-overlay.png, result.png — translations
+ *                                                  typeset inside each bubble on the latest cleaned page
  *
  * Blocks are "text" (dialogue/captions) or "sfx" (everything else). Each clean stage only touches its own
  * kind, and only blocks still marked include.
  */
-import sharp from "sharp";
+import sharp, { type OverlayOptions } from "sharp";
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { env } from "@/env";
@@ -22,6 +24,7 @@ import { inferenceHandlers } from "@/queue/inference-queue";
 import { maskFromImage, maskToPng, selectBlockMask, type BlockKind, type Box } from "@/lib/mask";
 import { TextSegmenter, textSegModelPath } from "@/services/text-seg-service";
 import { BubbleDetector, bubbleModelPath } from "@/services/bubble-service";
+import { findTextArea, separateAreas, Typesetter, type TextArea } from "@/services/typeset-service";
 import { MangaInpainter, inpaintModelPath } from "@/services/inpaint-service";
 
 const WORK_DIR = "data/pages/work";
@@ -37,6 +40,8 @@ interface PageBlock {
   include: boolean;
   source_text: string | null;
   translated_text: string | null;
+  /** Filled by `render`: the typeset result, kept for review and later manual overrides. */
+  render?: { font_size: number; lines: string[]; area: Box; fits: boolean };
 }
 
 interface PageJob {
@@ -258,9 +263,98 @@ async function cleanSfx([name]: string[]): Promise<void> {
   await cleanKind(name, "sfx", "clean-text.png", "clean-sfx.png");
 }
 
+/** Bubble covering most of the block, if any. */
+function matchBubble(block: Box, bubbles: Box[]): Box | null {
+  let best: Box | null = null, bestShare = 0.5;
+  for (const bubble of bubbles) {
+    const ix = Math.max(0, Math.min(block.x + block.w, bubble.x + bubble.w) - Math.max(block.x, bubble.x));
+    const iy = Math.max(0, Math.min(block.y + block.h, bubble.y + bubble.h) - Math.max(block.y, bubble.y));
+    const share = (ix * iy) / (block.w * block.h);
+    if (share >= bestShare) {
+      best = bubble;
+      bestShare = share;
+    }
+  }
+  return best;
+}
+
+async function render([name]: string[]): Promise<void> {
+  if (!name) fail("Usage: bun run page render <name>");
+  const job = await readJob(name);
+  const dir = jobDir(name);
+  const input = existsSync(join(dir, "clean-sfx.png")) ? "clean-sfx.png" : "clean-text.png";
+  const base = join(dir, input);
+  if (!existsSync(base)) fail(`No cleaned page yet — run: bun run page clean ${name}`);
+  const targets = job.blocks.filter((b) => b.kind === "text" && b.translated_text?.trim());
+  if (targets.length === 0) fail(`No translations yet — run: bun run page translate ${name}`);
+
+  const started = performance.now();
+  const page = Buffer.from(await Bun.file(base).arrayBuffer());
+  const { data: rgb, info } = await sharp(page).removeAlpha().toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+
+  // Bubbles are detected again on the cleaned page: without the original lettering the outlines are unambiguous.
+  const bubbles = existsSync(bubbleModelPath()) ? (await (await BubbleDetector.load(bubbleModelPath())).detect(page)).bubbles : [];
+  const typesetter = await Typesetter.load();
+  const maxFontSize = Math.round(height / 40);
+  mkdirSync(join(dir, "patches"), { recursive: true });
+
+  const entries: { block: PageBlock; area: TextArea }[] = [];
+  for (const b of targets) {
+    const area = findTextArea(rgb, width, height, b, matchBubble(b, bubbles));
+    if (area) entries.push({ block: b, area });
+    else console.log(`${String(b.id).padStart(3)}  no usable space inside the bubble — skipped`);
+  }
+  separateAreas(entries);
+
+  // Largest size each block could take, then a shared page size so the lettering looks consistent
+  const bestSizes = entries.map(({ block, area }) => typesetter.layout(block.translated_text ?? "", area, maxFontSize).fontSize);
+  const sortedSizes = [...bestSizes].sort((a, b) => a - b);
+  const pageFontSize = sortedSizes[Math.floor((sortedSizes.length - 1) / 2)] ?? maxFontSize;
+
+  const patches: OverlayOptions[] = [];
+  const areas: TextArea[] = [];
+  console.log(" id  size  best  lines  fit   text");
+  for (const [i, { block: b, area }] of entries.entries()) {
+    const layout = typesetter.layout(b.translated_text ?? "", area, Math.min(pageFontSize, bestSizes[i]));
+    const patch = await sharp(Buffer.from(typesetter.renderSvg(layout, area))).png().toBuffer();
+    await Bun.write(join(dir, "patches", `${b.id}.png`), patch);
+    patches.push({ input: patch, left: area.bound.x, top: area.bound.y });
+    areas.push(area);
+    b.render = { font_size: layout.fontSize, lines: layout.lines.map((l) => l.text), area: area.bound, fits: layout.fits };
+    console.log(`${String(b.id).padStart(3)}  ${String(layout.fontSize).padStart(4)}  ${String(bestSizes[i]).padStart(4)}  ${String(layout.lines.length).padStart(5)}  ${(layout.fits ? "yes" : "NO").padEnd(4)}  ${layout.lines.map((l) => l.text).join(" / ")}`);
+  }
+  console.log(`page font size ${pageFontSize}px (median of best fits)`);
+
+  await sharp(page).composite(patches).png().toFile(join(dir, "result.png"));
+
+  // Where text was allowed (green) and the area bounds — for reviewing placement
+  const tinted = Buffer.from(rgb);
+  for (const area of areas) {
+    for (let y = 0; y < area.bound.h; y++) {
+      for (let x = 0; x < area.bound.w; x++) {
+        if (!area.mask[y * area.bound.w + x]) continue;
+        const p = ((y + area.bound.y) * width + x + area.bound.x) * 3;
+        tinted[p] = Math.round(tinted[p] * 0.6);
+        tinted[p + 1] = Math.round(tinted[p + 1] * 0.6 + 100);
+        tinted[p + 2] = Math.round(tinted[p + 2] * 0.6);
+      }
+    }
+  }
+  const outlines = areas.map((a) => `<rect x="${a.bound.x}" y="${a.bound.y}" width="${a.bound.w}" height="${a.bound.h}" fill="none" stroke="#00a000" stroke-width="2"/>`).join("");
+  await sharp(tinted, { raw: { width, height, channels: 3 } })
+    .composite([...patches, { input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${outlines}</svg>`) }])
+    .png()
+    .toFile(join(dir, "render-overlay.png"));
+
+  await writeJob(name, job);
+  console.log(`\nrender "${name}": ${areas.length}/${targets.length} blocks on ${input} in ${Math.round(performance.now() - started)}ms`);
+  console.log(`  ${dir}/result.png  |  ${dir}/render-overlay.png (green = allowed text area)  |  ${dir}/patches/`);
+}
+
 const [command, ...args] = Bun.argv.slice(2);
-const commands: Record<string, (args: string[]) => Promise<void>> = { detect, blocks, ocr, translate, clean, "clean-sfx": cleanSfx };
+const commands: Record<string, (args: string[]) => Promise<void>> = { detect, blocks, ocr, translate, clean, "clean-sfx": cleanSfx, render };
 const run = command ? commands[command] : undefined;
-if (!run) fail("Usage: bun run page <detect|blocks|ocr|translate|clean|clean-sfx> ...  (see scripts/page.ts)");
+if (!run) fail("Usage: bun run page <detect|blocks|ocr|translate|clean|clean-sfx|render> ...  (see scripts/page.ts)");
 await run(args);
 process.exit(0);
