@@ -16,13 +16,23 @@ import {
   type StudioBlock,
   type StudioPageDetail,
 } from "../api";
+import { JobProgress } from "../components/JobProgress";
 import { StatusBadge } from "../components/StatusBadge";
+import { usePageJobEvents } from "../hooks/usePageJobEvents";
+
+const isBusy = (status: string | undefined) => status === "queued" || status === "running";
 
 /** Studio editor for one page: compare stage images, edit and re-run blocks, re-render, publish and roll back. */
 export function StudioPageEditor() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
-  const pageQ = useQuery({ queryKey: ["studio-page", id], queryFn: () => getPage(id), enabled: id !== "" });
+  const pageQ = useQuery({
+    queryKey: ["studio-page", id],
+    queryFn: () => getPage(id),
+    enabled: id !== "",
+    // The page can be re-run from elsewhere (extension, New page): poll so the editor notices, faster while it runs
+    refetchInterval: (query) => (isBusy(query.state.data?.page.status) ? 2000 : 5000),
+  });
   const setDetail = (detail: StudioPageDetail) => qc.setQueryData(["studio-page", id], detail);
 
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);
@@ -35,6 +45,12 @@ export function StudioPageEditor() {
   const translateAllM = useMutation({ mutationFn: () => runStage(id, "translate"), onSuccess: setDetail });
   const publishM = useMutation({ mutationFn: () => publishPage(id), onSuccess: onPublished });
 
+  // While the page runs in the pipeline its files are being rewritten: follow the job and reload when it ends
+  const job = usePageJobEvents(isBusy(pageQ.data?.page.status) ? id : null, () => {
+    void qc.invalidateQueries({ queryKey: ["studio-page", id] });
+    void qc.invalidateQueries({ queryKey: ["studio-history", id] });
+  });
+
   const detail = pageQ.data;
   if (pageQ.isLoading) return <Loader2 className="m-4 animate-spin text-gray-500" />;
   if (!detail) return <p className="m-4 text-sm text-red-400">{pageQ.error?.message ?? "Page not found"}</p>;
@@ -42,7 +58,7 @@ export function StudioPageEditor() {
   const { page, stages, blocks } = detail;
   const stageStatus = (name: string) => stages.find((s) => s.stage === name)?.status;
   const renderStage = stages.find((s) => s.stage === "render");
-  const busy = page.status === "queued" || page.status === "running";
+  const busy = isBusy(page.status);
   const textBlocks = blocks.filter((b) => b.kind === "text");
   const sfxCount = blocks.length - textBlocks.length;
   const version = `${page.updated_at}-${page.revision}-${renderStage?.updated_at ?? ""}`;
@@ -100,6 +116,9 @@ export function StudioPageEditor() {
         </div>
       </div>
 
+      {busy ? (
+        <ProcessingView pageId={page.id} status={page.status} version={version} job={job} />
+      ) : (
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
         <StageCompare pageId={page.id} version={version} />
 
@@ -113,6 +132,48 @@ export function StudioPageEditor() {
           <HistoryPanel pageId={page.id} currentRevision={page.revision} disabled={busy} onRolledBack={onPublished} />
         </aside>
       </div>
+      )}
+    </div>
+  );
+}
+
+/** Shown while the page runs in the pipeline (e.g. re-submitted from the extension): the original dimmed, with live progress. */
+function ProcessingView({ pageId, status, version, job }: {
+  pageId: string;
+  status: string;
+  version: string;
+  job: ReturnType<typeof usePageJobEvents>;
+}) {
+  const [originalLoaded, setOriginalLoaded] = useState(true);
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+      <section className="flex-1 min-w-0 min-h-0 overflow-auto p-4 flex items-start justify-center">
+        {originalLoaded ? (
+          <img
+            src={pageFileUrl(pageId, "original.png", version)}
+            alt=""
+            onError={() => setOriginalLoaded(false)}
+            className="block max-h-[calc(100vh-8rem)] w-auto opacity-40"
+          />
+        ) : (
+          <Loader2 className="mt-8 animate-spin text-gray-600" />
+        )}
+      </section>
+      <aside className="lg:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-gray-800 overflow-y-auto p-4 space-y-3">
+        <div className="flex items-center gap-2 text-sm">
+          <Loader2 size={14} className="animate-spin text-indigo-400" />
+          <span className="font-medium">{status === "queued" ? "Waiting in the queue…" : "Translating this page…"}</span>
+        </div>
+        <p className="text-xs text-gray-500">
+          This page was submitted again. Editing is paused and the editor reloads when the run finishes.
+        </p>
+        {job.status === "idle" && job.lines.length === 0 ? (
+          <p className="text-xs text-gray-600">Waiting for progress…</p>
+        ) : (
+          <JobProgress job={job} maxLogHeight="max-h-[60vh]" />
+        )}
+      </aside>
     </div>
   );
 }

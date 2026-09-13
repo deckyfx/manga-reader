@@ -1,13 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, ImageUp, Link2, Loader2, X, XCircle } from "lucide-react";
-import { createPage, pageEventsUrl, type PageJobEvent } from "../api";
+import { useRef, useState } from "react";
+import { ImageUp, Link2, Loader2, X } from "lucide-react";
+import { createPage } from "../api";
+import { usePageJobEvents } from "../hooks/usePageJobEvents";
+import { JobProgress } from "./JobProgress";
 
 type Source = "upload" | "url";
-
-interface LogLine {
-  message: string;
-  kind: "log" | "done" | "error";
-}
 
 /** Reads a file as a data URL (the server accepts base64 with or without the prefix). */
 function fileToDataUrl(file: File): Promise<string> {
@@ -30,62 +27,27 @@ export function NewPageDialog({ onClose, onCreated }: { onClose: () => void; onC
   const [cleanSfx, setCleanSfx] = useState(false);
   const [force, setForce] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState<{ value: number; step: string } | null>(null);
-  const [lines, setLines] = useState<LogLine[]>([]);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const streamRef = useRef<EventSource | null>(null);
 
-  // Close the progress stream when the dialog goes away
-  useEffect(() => () => streamRef.current?.close(), []);
-
+  const job = usePageJobEvents(jobId, (outcome) => {
+    if (outcome === "done" && jobId) onCreated(jobId);
+  });
+  const running = jobId !== null && (job.status === "idle" || job.status === "running");
   const canSubmit = !submitting && !running && (source === "upload" ? file !== null : url.trim() !== "");
-
-  const follow = (pageId: string) => {
-    setRunning(true);
-    const es = new EventSource(pageEventsUrl(pageId));
-    streamRef.current = es;
-    es.onmessage = (event: MessageEvent<string>) => {
-      const update = JSON.parse(event.data) as PageJobEvent;
-      if (update.type === "progress") {
-        setProgress({ value: update.progress, step: update.message });
-      } else if (update.type === "log") {
-        setProgress({ value: update.progress, step: update.message });
-        setLines((prev) => [...prev, { message: update.message, kind: "log" }]);
-      } else if (update.type === "done") {
-        es.close();
-        setLines((prev) => [...prev, { message: update.message, kind: "done" }]);
-        setRunning(false);
-        onCreated(pageId);
-      } else {
-        es.close();
-        setLines((prev) => [...prev, { message: update.error, kind: "error" }]);
-        setError(update.error);
-        setRunning(false);
-      }
-    };
-    es.onerror = () => {
-      if (es.readyState === EventSource.CLOSED) return;
-      es.close();
-      setError("Lost the connection to the progress stream — the page may still be translating; check the list");
-      setRunning(false);
-    };
-  };
 
   const submit = async () => {
     setSubmitting(true);
     setError(null);
-    setLines([]);
-    setProgress(null);
+    setJobId(null);
     try {
       const body = source === "upload" && file
         ? { image: await fileToDataUrl(file), clean_sfx: cleanSfx, force }
         : { url: url.trim(), clean_sfx: cleanSfx, force };
-      const { job_id, cached } = await createPage(body);
-      setLines([{ message: cached ? "Found a previous translation" : source === "upload" ? "Uploaded" : "Downloaded", kind: "log" }]);
-      follow(job_id);
+      const { job_id } = await createPage(body);
+      setJobId(job_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -168,33 +130,8 @@ export function NewPageDialog({ onClose, onCreated }: { onClose: () => void; onC
             </label>
           </div>
 
-          {(lines.length > 0 || progress) && (
-            <div className="space-y-2">
-              {progress && running && (
-                <div>
-                  <div className="flex justify-between text-xs text-gray-400 mb-1">
-                    <span className="truncate">{progress.step}</span>
-                    <span>{Math.round(progress.value * 100)}%</span>
-                  </div>
-                  <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-indigo-500 transition-all" style={{ width: `${progress.value * 100}%` }} />
-                  </div>
-                </div>
-              )}
-              <ul className="max-h-40 overflow-y-auto space-y-1 text-xs">
-                {lines.map((line, i) => (
-                  <li key={i} className="flex items-center gap-1.5">
-                    {line.kind === "done" ? <CheckCircle2 size={12} className="text-emerald-400" />
-                      : line.kind === "error" ? <XCircle size={12} className="text-red-400" />
-                      : <span className="w-3 text-center text-gray-600">•</span>}
-                    <span className={line.kind === "error" ? "text-red-300" : "text-gray-300"}>{line.message}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {error && !lines.some((l) => l.kind === "error") && <p className="text-sm text-red-400">{error}</p>}
+          {jobId && <JobProgress job={job} />}
+          {error && <p className="text-sm text-red-400">{error}</p>}
         </div>
 
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-800">
