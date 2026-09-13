@@ -33,7 +33,9 @@ class EnvConfig {
 
   // ── Model directories ────────────────────────────────────────────────────
 
-  get OCR_MODELS_DIR(): string { return Bun.env.OCR_MODELS_DIR ?? "./data/models/ocr"; }
+  get OCR_MODELS_DIR(): string {
+    return Bun.env.OCR_MODELS_DIR ?? (this.OCR_ENGINE === "baberu" ? "./data/models/baberu" : "./data/models/ocr");
+  }
   get TRANSLATE_MODELS_DIR(): string { return Bun.env.TRANSLATE_MODELS_DIR ?? "./data/models/translate"; }
   get INPAINT_MODELS_DIR(): string { return Bun.env.INPAINT_MODELS_DIR ?? "./data/models/inpaint"; }
   get BUBBLE_MODELS_DIR(): string { return Bun.env.BUBBLE_MODELS_DIR ?? "./data/models/bubble"; }
@@ -54,10 +56,17 @@ class EnvConfig {
 
   // ── Model repos ──────────────────────────────────────────────────────────
 
-  get OCR_MODEL_REPO(): string { return Bun.env.OCR_MODEL_REPO ?? "mayocream/manga-ocr-onnx"; }
+  /** "baberu" (default; Japanese/Chinese/English) or "manga-ocr" (Japanese only). Sets the OCR repo/dir/files defaults. */
+  get OCR_ENGINE(): "baberu" | "manga-ocr" { return Bun.env.OCR_ENGINE === "manga-ocr" ? "manga-ocr" : "baberu"; }
+  get OCR_MODEL_REPO(): string {
+    return Bun.env.OCR_MODEL_REPO ?? (this.OCR_ENGINE === "baberu" ? "genshiai-daichi/baberu-ocr" : "mayocream/manga-ocr-onnx");
+  }
   get OCR_MODEL_ENABLED(): boolean { return Bun.env.OCR_MODEL_ENABLED !== "false"; }
   get OCR_MODEL_FILES(): string[] {
-    return (Bun.env.OCR_MODEL_FILES ?? "encoder_model.onnx,decoder_model.onnx,vocab.txt").split(",");
+    const defaults = this.OCR_ENGINE === "baberu"
+      ? "onnx/vision_int4.onnx,onnx/decoder_prefill_int8.onnx,onnx/decoder_step_int8.onnx,tokenizer/vocab.json"
+      : "encoder_model.onnx,decoder_model.onnx,vocab.txt";
+    return (Bun.env.OCR_MODEL_FILES ?? defaults).split(",");
   }
 
   get TRANSLATE_MODEL_REPO(): string { return Bun.env.TRANSLATE_MODEL_REPO ?? "Xenova/opus-mt-ja-en"; }

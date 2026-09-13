@@ -91,8 +91,10 @@ async function loadModels(): Promise<void> {
   const loadErrors: string[] = [];
 
   if (env.OCR_MODEL_ENABLED) {
-    const { loadOcrModel } = await import("@/services/ocr-service");
-    await loadOcrModel().catch((err: Error) => { loadErrors.push(`OCR: ${err.message}`); });
+    const load = env.OCR_ENGINE === "baberu"
+      ? (await import("@/services/baberu-ocr-service")).loadBaberuOcrModel
+      : (await import("@/services/ocr-service")).loadOcrModel;
+    await load().catch((err: Error) => { loadErrors.push(`OCR (${env.OCR_ENGINE}): ${err.message}`); });
   }
   if (env.TRANSLATE_MODEL_ENABLED) {
     const { loadTranslateModel } = await import("@/services/translate-service");

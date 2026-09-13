@@ -13,7 +13,8 @@
     "db:generate": "drizzle-kit generate && bun run embed:migrations",
     "db:migrate": "bun run src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "embed:migrations": "bun run scripts/embed-migrations.ts"
+    "embed:migrations": "bun run scripts/embed-migrations.ts",
+    "ocr:compare": "bun run scripts/ocr-compare.ts"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.2",

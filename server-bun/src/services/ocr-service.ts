@@ -25,8 +25,7 @@ let encoderSession: ort.InferenceSession | null = null;
 let decoderSession: ort.InferenceSession | null = null;
 let vocab: string[] = [];
 
-export async function loadOcrModel(): Promise<void> {
-  const dir = env.OCR_MODELS_DIR;
+export async function loadOcrModel(dir: string = env.OCR_MODELS_DIR): Promise<void> {
   const encoderPath = join(dir, "encoder_model.onnx");
   const decoderPath = join(dir, "decoder_model.onnx");
   const vocabPath = join(dir, "vocab.txt");
