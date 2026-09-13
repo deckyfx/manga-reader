@@ -15,6 +15,9 @@ import { tmpdir } from "node:os";
 import { sql } from "drizzle-orm";
 import { embeddedMigrations, embeddedMigrationCount } from "@/db/migrations-embedded";
 import { env } from "@/env";
+import { childLogger } from "@/lib/logger";
+
+const log = childLogger("db");
 
 export class MigrationManager {
   /** Temp dir where embedded SQL is written before Drizzle's migrator runs.
@@ -58,7 +61,7 @@ export class MigrationManager {
       await db.run(sql`PRAGMA journal_mode = WAL`);
       await db.run(sql`PRAGMA foreign_keys = ON`);
       await migrate(db, { migrationsFolder: this.migrationsDir });
-      console.log("DB migrations applied.");
+      log.info("DB migrations applied.");
     } finally {
       sqlite.close();
     }
@@ -98,13 +101,13 @@ export class MigrationManager {
       const appliedHashes = new Set(appliedRows.map(r => r.hash));
       const unknown = [...appliedHashes].filter(h => !embeddedHashes.has(h));
       if (unknown.length > 0) {
-        console.error(
+        log.error(
           `❌ The database has ${unknown.length} migration(s) this build does not recognise.`
         );
-        console.error(
+        log.error(
           "   This binary is older than the database schema."
         );
-        console.error(
+        log.error(
           "   Restore a newer build, or restore the database from a backup."
         );
         process.exit(1);
@@ -118,9 +121,9 @@ export class MigrationManager {
       await migrate(db, { migrationsFolder: this.migrationsDir });
 
       if (pending > 0) {
-        console.log("DB migrations applied.");
+        log.info("DB migrations applied.");
       } else {
-        console.log("DB up to date.");
+        log.info("DB up to date.");
       }
     } finally {
       sqlite.close();
@@ -129,8 +132,8 @@ export class MigrationManager {
 
   private static guardEmbedded(): void {
     if (embeddedMigrationCount === 0) {
-      console.error("❌ No migrations compiled into this binary — database cannot be initialised.");
-      console.error("   This is a packaging fault; re-run \"bun run build\".");
+      log.error("❌ No migrations compiled into this binary — database cannot be initialised.");
+      log.error("   This is a packaging fault; re-run \"bun run build\".");
       process.exit(1);
     }
   }

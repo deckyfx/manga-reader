@@ -9,6 +9,9 @@
 import { mkdirSync, existsSync, renameSync, unlinkSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
 import { bootState } from "@/boot-state";
+import { childLogger } from "@/lib/logger";
+
+const log = childLogger("download");
 
 const HF_BASE = "https://huggingface.co";
 const CHUNK = 65_536;
@@ -48,14 +51,13 @@ export async function downloadHfModel(entry: DownloadEntry): Promise<void> {
 /** Download a single file from any HTTPS URL. Skips if dest already exists. */
 export async function downloadFile(url: string, dest: string, label: string): Promise<void> {
   if (existsSync(dest)) {
-    console.log(`[Boot] ${label} already present — skipping`);
+    log.debug(`${label} already present — skipping`);
     return;
   }
 
   mkdirSync(dirname(dest), { recursive: true });
 
-  console.log(`[Boot] Downloading ${label}`);
-  console.log(`[Boot]   → ${dest}`);
+  log.info({ dest }, `Downloading ${label}`);
 
   const res = await fetch(url);
   if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} fetching ${url}`);
@@ -79,7 +81,7 @@ export async function downloadFile(url: string, dest: string, label: string): Pr
     process.stdout.write("\n");
 
     renameSync(tmp, dest);
-    console.log(`[Boot] ${label} done (${formatBytes(total > 0 ? total : done)}).`);
+    log.info(`${label} done (${formatBytes(total > 0 ? total : done)})`);
     bootState.setDownloadProgress(label, 100);
   } catch (err) {
     process.stdout.write("\n");
@@ -99,9 +101,8 @@ export function printDownloadPlan(entries: DownloadEntry[]): void {
     }
   }
   if (missing.length === 0) return;
-  console.log("\n[Boot] ─── Models to download ──────────────────────────────────────────────");
-  for (const m of missing) console.log(`[Boot] ${m}`);
-  console.log("[Boot] ─────────────────────────────────────────────────────────────────────\n");
+  log.info("Models to download:");
+  for (const m of missing) log.info(m);
 }
 
 // ── Internals ─────────────────────────────────────────────────────────────────

@@ -5,6 +5,9 @@ import { env } from "@/env";
 import { inferenceHandlers } from "@/queue/inference-queue";
 import { bootState } from "@/boot-state";
 import { runtimeSettings } from "@/stores/settings-store";
+import { childLogger } from "@/lib/logger";
+
+const log = childLogger("translate");
 
 export interface TranslateInput {
   text: string;
@@ -83,7 +86,7 @@ export async function loadTranslateModel(): Promise<void> {
 
   inferenceHandlers.translate = runTranslate as (input: unknown, signal: AbortSignal) => Promise<unknown>;
   bootState.translateReady = true;
-  console.log("Translate model loaded.");
+  log.info(`Translate model loaded (BOS=${modelBosToken}, EOS=${modelEosToken})`);
 }
 
 async function runTranslate(input: unknown, signal?: AbortSignal): Promise<TranslateOutput> {

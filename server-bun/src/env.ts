@@ -72,6 +72,11 @@ class EnvConfig {
     return (Bun.env.TEXT_SEG_MODEL_FILES ?? "comictextdetector.pt.onnx").split(",");
   }
 
+  // ── Debug ────────────────────────────────────────────────────────────────
+
+  /** When true, saves each OCR input image to ./data/debug/ocr/ for inspection. */
+  get OCR_DEBUG(): boolean { return Bun.env.OCR_DEBUG === "true"; }
+
   // ── API keys / engines ───────────────────────────────────────────────────
 
   get DEEPL_API_KEY(): string | undefined { return Bun.env.DEEPL_API_KEY || undefined; }

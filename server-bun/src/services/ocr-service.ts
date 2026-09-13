@@ -4,6 +4,11 @@ import { join } from "path";
 import { env } from "@/env";
 import { inferenceHandlers } from "@/queue/inference-queue";
 import { bootState } from "@/boot-state";
+import { childLogger } from "@/lib/logger";
+import { mkdirSync } from "node:fs";
+
+const log = childLogger("ocr");
+const DEBUG_DIR = "./data/debug/ocr";
 
 export interface OcrInput {
   /** Raw image bytes (JPEG/PNG) */
@@ -45,7 +50,7 @@ export async function loadOcrModel(): Promise<void> {
 
   inferenceHandlers.ocr = runOcr as (input: unknown, signal: AbortSignal) => Promise<unknown>;
   bootState.ocrReady = true;
-  console.log("OCR model loaded.");
+  log.info("OCR model loaded.");
 }
 
 async function runOcr(input: unknown, signal?: AbortSignal): Promise<OcrOutput> {
@@ -54,9 +59,17 @@ async function runOcr(input: unknown, signal?: AbortSignal): Promise<OcrOutput> 
   if (signal?.aborted) throw new Error("Inference aborted (timeout)");
 
   const start = Date.now();
+  const tag = start.toString(36); // short unique tag per request
 
   // Pre-process: resize to 224×224, normalise to [-1, 1] float32
   const sharp = (await import("sharp")).default;
+
+  if (env.OCR_DEBUG) {
+    mkdirSync(DEBUG_DIR, { recursive: true });
+    // Save raw input
+    await sharp(imageBuffer).png().toFile(`${DEBUG_DIR}/${tag}_raw.png`);
+  }
+
   const { data, info } = await sharp(imageBuffer)
     .resize(224, 224)
     .removeAlpha()
@@ -80,8 +93,10 @@ async function runOcr(input: unknown, signal?: AbortSignal): Promise<OcrOutput> 
   const encoderHidden = encOut["last_hidden_state"];
 
   // Greedy decoder — mirrors C# MangaOcrService
-  const BOS_TOKEN = 2;
-  const EOS_TOKEN = 3;
+  // vocab[0]=PAD, [1]=UNK, [2]=CLS, [3]=SEP/EOS, [4]=MASK
+  const BOS_TOKEN = 2;  // [CLS] — used as decoder start token
+  const EOS_TOKEN = 3;  // [SEP] — signals end of sequence
+  const SPECIAL_TOKENS = new Set([0, 1, 2, 3, 4]); // skip PAD/UNK/CLS/SEP/MASK in output
   const MAX_LEN = 300;
   let inputIds = [BOS_TOKEN];
   const decoded: number[] = [];
@@ -104,16 +119,25 @@ async function runOcr(input: unknown, signal?: AbortSignal): Promise<OcrOutput> 
       if (lastLogits[j] > maxVal) { maxVal = lastLogits[j]; maxIdx = j; }
     }
     if (maxIdx === EOS_TOKEN) break;
-    decoded.push(maxIdx);
+    if (!SPECIAL_TOKENS.has(maxIdx)) decoded.push(maxIdx);
     inputIds.push(maxIdx);
   }
 
-  // Simple vocab lookup — for SentencePiece the tokens contain "▁" as word boundary
+  // SentencePiece vocab: "▁" marks word boundaries (space before word)
   const text = decoded
     .map((id) => vocab[id] ?? "")
     .join("")
     .replace(/▁/g, " ")
     .trim();
+
+  if (env.OCR_DEBUG) {
+    // Save the 224×224 image the model actually saw (reconstructed from float32 data)
+    const uint8 = Buffer.from(float32.map((v) => Math.round((v + 1) * 127.5)));
+    await sharp(uint8, { raw: { width: 224, height: 224, channels: 3 } })
+      .png()
+      .toFile(`${DEBUG_DIR}/${tag}_224x224.png`);
+    log.debug({ tag, tokens: decoded, text }, `OCR debug — "${text}"`);
+  }
 
   return { text, processingTimeMs: Date.now() - start };
 }
