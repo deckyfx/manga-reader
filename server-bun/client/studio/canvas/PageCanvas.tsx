@@ -821,18 +821,22 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
   const reclean = () => {
     const used = paintedAreas;
     const areas = recleanTargets;
+    // The areas belong to this page: the queued run must not re-clean, or update, a page opened meanwhile
+    const targetPageId = pageId;
     if (areas.length === 0) return;
     setBusyCount((n) => n + 1);
     setRecleaning(true);
     queueRef.current = queueRef.current
       .then(async () => {
         try {
-          live.current.onDetail(await recleanAreas(live.current.pageId, areas));
+          const detail = await recleanAreas(targetPageId, areas);
+          if (live.current.pageId !== targetPageId) return;
+          live.current.onDetail(detail);
           live.current.onImagesChanged();
           setPaintedAreas((current) => current.filter((area) => !used.includes(area)));
           setError(null);
         } catch (err) {
-          setError(err instanceof Error ? err.message : String(err));
+          if (live.current.pageId === targetPageId) setError(err instanceof Error ? err.message : String(err));
         }
       })
       .finally(() => {
