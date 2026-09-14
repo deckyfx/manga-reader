@@ -212,6 +212,16 @@ export async function maskToPng(mask: Uint8Array, width: number, height: number)
 }
 
 /** Decode a black/white mask image (any format) into a binary mask. */
+/**
+ * Pixel size of an image read from its header only, without decoding any pixels: lets a caller refuse an image whose
+ * declared size is wrong (e.g. a tiny compressed PNG claiming huge dimensions) before paying for the decode.
+ */
+export async function imageSize(input: string | Buffer): Promise<{ width: number; height: number }> {
+  const { width, height } = await sharp(input).metadata();
+  if (!width || !height) throw new Error("image has no dimensions");
+  return { width, height };
+}
+
 export async function maskFromImage(input: string | Buffer): Promise<{ mask: Uint8Array; width: number; height: number }> {
   const { data, info } = await sharp(input).extractChannel(0).raw().toBuffer({ resolveWithObject: true });
   const mask = new Uint8Array(info.width * info.height);

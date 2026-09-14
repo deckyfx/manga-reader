@@ -34,7 +34,7 @@ import { enginesNotReady, pageEngines } from "@/services/page-engines";
 import { historyFile, listHistory, restoreResult, snapshotResult } from "@/services/page-history";
 import { decodeBase64Image, resultUrl, submitPageJob } from "@/services/page-jobs";
 import { MASK_LAYER_FILES, PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
-import { maskFromImage, maskToPng } from "@/lib/mask";
+import { imageSize, maskFromImage, maskToPng } from "@/lib/mask";
 import { pageLive } from "@/stores/page-live-channel";
 import { PAGE_JOBS_DIR, pageDir, PageStore, type StageName } from "@/stores/page-store";
 
@@ -466,17 +466,26 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       const dir = pageDir(params.id);
       if (!existsSync(join(dir, "mask.png"))) return status(409, { error: "page has no detected text mask yet" });
 
-      let decoded: Awaited<ReturnType<typeof maskFromImage>>;
+      // Sizes come from the image headers first: a small compressed PNG can declare huge dimensions, so nothing is
+      // decoded until the upload is known to match the detector mask's size
+      const expected = await imageSize(join(dir, "mask.png"));
+      let bytes: Buffer;
+      let declared: { width: number; height: number };
       try {
-        const bytes = decodeBase64Image(body.image);
+        bytes = decodeBase64Image(body.image);
         if (bytes.byteLength > MAX_MASK_BYTES) return status(422, { error: "mask layer too large" });
-        decoded = await maskFromImage(bytes);
+        declared = await imageSize(bytes);
       } catch {
         return status(422, { error: "mask layer must be a valid image" });
       }
-      const detector = await maskFromImage(join(dir, "mask.png"));
-      if (decoded.width !== detector.width || decoded.height !== detector.height) {
-        return status(422, { error: `mask layer must be ${detector.width}×${detector.height}, the page size` });
+      if (declared.width !== expected.width || declared.height !== expected.height) {
+        return status(422, { error: `mask layer must be ${expected.width}×${expected.height}, the page size` });
+      }
+      let decoded: Awaited<ReturnType<typeof maskFromImage>>;
+      try {
+        decoded = await maskFromImage(bytes);
+      } catch {
+        return status(422, { error: "mask layer must be a valid image" });
       }
 
       const file = join(dir, MASK_LAYER_FILES[params.layer]);
