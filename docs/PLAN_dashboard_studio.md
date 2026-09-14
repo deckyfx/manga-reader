@@ -287,9 +287,13 @@ Library: Fabric.js 7.4.0 (D7 confirmed: manga-reader's studio is Fabric).
 - `PUT …/blocks/:idx` `{ x, y, w, h, shape? }` moves, resizes or reshapes it, and clears its render.
 - `DELETE …/blocks/:idx` removes it.
 - Shapes: `rect` (the default, not stored) · `ellipse` · `polygon` with page-pixel points. They're stored in `page_blocks.shape_json` (migration `0004_block_shapes`). The box always bounds the shape and is what OCR crops and cleaning use.
-- Validation: the box must lie inside the page, and polygon points inside the box (422 otherwise).
-- Stale marking:
-  - adding or reshaping a text block marks `ocr`, `translate`, `clean_text` and `render`
+- Validation (422 otherwise):
+  - the box must lie inside the page
+  - polygon points must lie inside the box
+  - a polygon needs at least 3 points that enclose some area (all points on one line are rejected)
+  - self-intersecting polygons are accepted on purpose: the stages work on the bounding box, and rejecting them would discard a region drawn by clicking around a bubble
+- Stale marking (applied in the same transaction as the change):
+  - adding a text block, or changing its geometry in any way (moving, resizing or changing its shape), marks `ocr`, `translate`, `clean_text` and `render`, since the crop OCR reads from has changed
   - an sfx block marks `clean_sfx` and `render`
   - deleting marks the clean stage and `render`
 

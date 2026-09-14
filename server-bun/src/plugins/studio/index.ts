@@ -78,9 +78,18 @@ function geometryError(page: Page, geometry: { x: number; y: number; w: number; 
   if (page.width === 0 || page.height === 0) return "page has no detected size yet";
   if (geometry.x + geometry.w > page.width || geometry.y + geometry.h > page.height) return "region extends outside the page";
   if (geometry.shape?.type === "polygon") {
-    const outside = geometry.shape.points.some((p) =>
+    const points = geometry.shape.points;
+    const outside = points.some((p) =>
       p.x < geometry.x - 1 || p.y < geometry.y - 1 || p.x > geometry.x + geometry.w + 1 || p.y > geometry.y + geometry.h + 1);
     if (outside) return "polygon points must lie inside the region's box";
+    // All points on one line (or repeated) enclose nothing to crop or clean. The test is "some point is off the
+    // line through two distinct points", not the signed shoelace area: a symmetric bow tie has zero signed area
+    // but does enclose pixels. Self-intersecting outlines are allowed: stages use the bounding box.
+    const first = points[0];
+    const second = points.find((p) => p.x !== first.x || p.y !== first.y);
+    const offLine = second !== undefined && points.some((p) =>
+      (second.x - first.x) * (p.y - first.y) - (second.y - first.y) * (p.x - first.x) !== 0);
+    if (!offLine) return "polygon has no area (its points lie on one line)";
   }
   return null;
 }
