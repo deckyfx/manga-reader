@@ -672,6 +672,7 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
           img.src = `data:image/png;base64,${update.result}`;
           img.srcset = "";
           img.dataset.socrJobId = data.job_id;
+          img.dataset.socrRevision = String(revisionOf(update.result_url));
           watchPageUpdates(serverUrl, data.job_id);
           setImageTranslateProgress(1);
           appendLogEntry(`Image replaced ✓ (${(update.elapsed_ms / 1000).toFixed(1)} s)`, "done");
@@ -695,6 +696,12 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
   } catch (e) {
     hideImageTranslateLoading(false, e instanceof Error ? e.message : String(e));
   }
+}
+
+/** Publish revision in a result URL (`…/result?rev=N`); 0 when absent, i.e. the page was never published. */
+function revisionOf(resultUrl: string): number {
+  const rev = Number(new URL(resultUrl, location.href).searchParams.get("rev"));
+  return Number.isInteger(rev) && rev > 0 ? rev : 0;
 }
 
 /** Live streams per translated page; they stay open while this tab shows the page. */
@@ -747,7 +754,13 @@ function watchPageUpdates(serverUrl: string, jobId: string): void {
       stopWatching(jobId);
       return;
     }
-    shown.forEach((img) => { img.srcset = ""; });
+    // The server repeats the current revision on connect (catch-up), so only swap for a newer one
+    const newest = Math.max(...Array.from(shown, (img) => Number(img.dataset.socrRevision ?? 0)));
+    if (update.revision <= newest) return;
+    shown.forEach((img) => {
+      img.srcset = "";
+      img.dataset.socrRevision = String(update.revision);
+    });
     replacePageImages(jobId, `${serverUrl}${update.result_url}`);
   };
 

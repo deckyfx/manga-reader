@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { ErrBody } from "@/lib/schemas";
 import { decodeBase64Image, ImageLoadError, resultUrl, submitPageJob } from "@/services/page-jobs";
 import { pageDir, PageStore } from "@/stores/page-store";
-import { pageLive } from "@/stores/page-live-channel";
+import { pageLive, type PageLiveEvent } from "@/stores/page-live-channel";
 import { translationJobs } from "@/stores/translation-job-store";
 
 /** Comment sent on idle live streams so proxies and the browser keep the connection open. */
@@ -153,7 +153,7 @@ export const routeTranslatePage = new Elysia()
       const encoder = new TextEncoder();
       let stop = (): void => {};
       const stream = new ReadableStream<Uint8Array>({
-        start(controller) {
+        async start(controller) {
           const send = (chunk: string): void => {
             try {
               controller.enqueue(encoder.encode(chunk));
@@ -168,6 +168,13 @@ export const routeTranslatePage = new Elysia()
             unsubscribe();
           };
           send(": connected\n\n");
+          // Catch-up: a publish between the tab swapping its image and connecting here would otherwise be missed.
+          // Subscribed first, so nothing falls in between; a publish meanwhile only repeats the same revision, which the tab ignores.
+          const current = await PageStore.findById(params.id).catch(() => undefined);
+          if (current && current.revision > 0) {
+            const event: PageLiveEvent = { type: "page-updated", page_id: current.id, revision: current.revision, result_url: resultUrl(current.id, current.revision) };
+            send(`data: ${JSON.stringify(event)}\n\n`);
+          }
         },
         cancel() {
           stop();
