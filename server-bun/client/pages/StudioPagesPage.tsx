@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { deletePage, listPages, pageFileUrl } from "../api";
+import { useConfirm } from "../components/ConfirmDialog";
 import { NewPageDialog } from "../components/NewPageDialog";
 import { StatusBadge } from "../components/StatusBadge";
 
@@ -18,10 +19,15 @@ export function StudioPagesPage() {
     onSettled: () => qc.invalidateQueries({ queryKey: ["studio-pages"] }),
   });
 
-  const confirmDelete = (pageId: string) => {
-    if (window.confirm("Discard this page? Its translation, edits, history and all its images are deleted. This can't be undone.")) {
-      deleteM.mutate(pageId);
-    }
+  const confirm = useConfirm();
+  const confirmDelete = async (pageId: string) => {
+    const confirmed = await confirm({
+      title: "Discard this page?",
+      message: "Its translation, edits, publish history and all its images are deleted. This can't be undone.",
+      confirmLabel: "Discard page",
+      danger: true,
+    });
+    if (confirmed) deleteM.mutate(pageId);
   };
 
   return (
@@ -70,7 +76,7 @@ export function StudioPagesPage() {
                   </div>
                 </Link>
                 <button
-                  onClick={() => confirmDelete(page.id)}
+                  onClick={() => void confirmDelete(page.id)}
                   disabled={busy || deleting}
                   title={busy ? "Can't discard while the page is being translated" : "Discard page and images"}
                   aria-label="Discard page"

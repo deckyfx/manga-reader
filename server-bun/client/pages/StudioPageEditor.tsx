@@ -17,6 +17,7 @@ import {
   type StudioBlock,
   type StudioPageDetail,
 } from "../api";
+import { useConfirm } from "../components/ConfirmDialog";
 import { JobProgress } from "../components/JobProgress";
 import { StatusBadge } from "../components/StatusBadge";
 import { usePageJobEvents } from "../hooks/usePageJobEvents";
@@ -86,10 +87,15 @@ export function StudioPageEditor() {
       navigate("/studio");
     },
   });
-  const confirmDelete = () => {
-    if (window.confirm("Discard this page? Its translation, edits, history and all its images are deleted. This can't be undone.")) {
-      deleteM.mutate();
-    }
+  const confirm = useConfirm();
+  const confirmDelete = async () => {
+    const confirmed = await confirm({
+      title: "Discard this page?",
+      message: "Its translation, edits, publish history and all its images are deleted. This can't be undone.",
+      confirmLabel: "Discard page",
+      danger: true,
+    });
+    if (confirmed) deleteM.mutate();
   };
 
   // While the page runs in the pipeline its files are being rewritten: follow the job and reload when it ends
@@ -144,7 +150,7 @@ export function StudioPageEditor() {
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {actionError && <span className="text-xs text-red-400">{actionError.message}</span>}
           <button
-            onClick={confirmDelete}
+            onClick={() => void confirmDelete()}
             disabled={busy || deleteM.isPending}
             title={busy ? "Can't discard while the page is being translated" : "Discard this page and all its images"}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-300 bg-gray-800 hover:bg-red-900/60 hover:text-red-200 disabled:opacity-50 transition-colors"
