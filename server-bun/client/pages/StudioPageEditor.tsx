@@ -182,7 +182,8 @@ export function StudioPageEditor() {
           />
           <ActionButton
             onClick={() => afterSaves("clean-sfx", () => cleanSfxM.mutate())}
-            disabled={busy || cleaning || queued.has("clean-sfx")}
+            // Sound effects are cleaned on top of the text pass: that one has to be current first
+            disabled={busy || cleaning || queued.has("clean-sfx") || (stageStatus("clean_text") !== undefined && stageStatus("clean_text") !== "fresh")}
             pending={cleanSfxM.isPending}
             highlight={stageStatus("clean_sfx") === "stale"}
             icon={<Megaphone size={14} />}

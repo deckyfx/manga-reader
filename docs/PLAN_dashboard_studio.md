@@ -293,9 +293,9 @@ Library: Fabric.js 7.4.0 (D7 confirmed: manga-reader's studio is Fabric).
   - a polygon needs at least 3 points that enclose some area (all points on one line are rejected)
   - self-intersecting polygons are accepted on purpose: the stages work on the bounding box, and rejecting them would discard a region drawn by clicking around a bubble
 - Stale marking (applied in the same transaction as the change):
-  - adding a text block, or changing its geometry in any way (moving, resizing or changing its shape), marks `ocr`, `translate`, `clean_text` and `render`, since the crop OCR reads from has changed
+  - adding a text block, or changing its geometry in any way (moving, resizing or changing its shape), marks `ocr`, `translate`, `clean_text`, `clean_sfx` and `render`, since the crop OCR reads from has changed (the sound-effect pass cleans on top of `clean-text.png`)
   - an sfx block marks `clean_sfx` and `render`
-  - deleting marks the clean stage and `render`
+  - deleting marks the clean stage(s) and `render`: `clean_text` and `clean_sfx` for a text block, `clean_sfx` for a sound effect
 
 **Client canvas** (`client/studio/canvas/`): Fabric stays behind a thin typed layer, so components never touch Fabric objects directly.
 - **Lifecycle:** create the `<canvas>` in an effect that's safe under StrictMode (dispose on cleanup), keep the instance in a ref, and resize with a ResizeObserver.
@@ -313,7 +313,7 @@ Library: Fabric.js 7.4.0 (D7 confirmed: manga-reader's studio is Fabric).
 - Effective mask = (detector `mask.png` ∪ add) − erase. The text pass removes painted-in pixels wherever they are, even outside any block, and adds their connected areas as inpaint regions; block ownership (`selectBlockMask`) still decides which detected pixels each pass removes.
 - `POST …/reclean` `{ areas: [{x, y, w, h}] }` (1–50 areas inside the page) inpaints the effective mask inside those areas on the latest cleaned image (`clean-sfx.png` when present, else `clean-text.png`), in place. Pixels outside the dilated mask stay byte-identical. Only a part of a clean pass ran, so the clean stages keep their status and only `render` turns stale. Erased pixels can't be restored this way (the original isn't consulted): run Clean text for that.
 - `PATCH …/blocks/:idx` also takes `include`. Changing it marks `clean_text`, `clean_sfx` and `render` for a text block, or `clean_sfx` and `render` for a sound effect; sending the current value marks nothing.
-- `POST …/run` also runs `clean_text` (makes `clean_sfx` and `render` stale; it deletes `clean-sfx.png`) and `clean_sfx` (makes `render` stale). Cleaning always covers the whole kind.
+- `POST …/run` also runs `clean_text` (makes `clean_sfx` and `render` stale; it deletes `clean-sfx.png`) and `clean_sfx` (makes `render` stale). Cleaning always covers the whole kind. `clean_sfx` is refused (409) while `clean_text` is stale or failed, since it cleans on top of `clean-text.png`.
 - A full re-run of the page deletes the painted layers along with the other derived outputs.
 
 **Client:**

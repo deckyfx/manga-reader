@@ -91,7 +91,8 @@ const GeometryBody = {
 
 /** Stages a block's geometry feeds: text blocks are read, translated and cleaned; sfx blocks are only cleaned. */
 const stagesAffectedBy = (kind: string): StageName[] =>
-  kind === "sfx" ? ["clean_sfx", "render"] : ["ocr", "translate", "clean_text", "render"];
+  // The sound-effect pass cleans on top of clean-text.png, so anything that outdates the text pass outdates it too
+  kind === "sfx" ? ["clean_sfx", "render"] : ["ocr", "translate", "clean_text", "clean_sfx", "render"];
 
 /** Why a geometry doesn't fit the page (box outside, or polygon points outside the box), or null when it's valid. */
 function geometryError(page: Page, geometry: { x: number; y: number; w: number; h: number; shape?: BlockShape }): string | null {
@@ -381,7 +382,8 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       if ("code" in check) return status(check.code, { error: check.error });
       const block = (await PageStore.readJob(params.id))?.blocks.find((b) => b.id === params.idx);
       // Its lettering is no longer cleaned or typeset; OCR / translate of the remaining blocks is unaffected
-      const stale: StageName[] = block?.kind === "sfx" ? ["clean_sfx", "render"] : ["clean_text", "render"];
+      // (the sound-effect pass is built on the text pass, so a text block outdates both)
+      const stale: StageName[] = block?.kind === "sfx" ? ["clean_sfx", "render"] : ["clean_text", "clean_sfx", "render"];
       if (!block || !(await PageStore.deleteBlock(params.id, params.idx, stale))) return status(404, { error: "block not found" });
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
@@ -400,6 +402,11 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       if (stage === "ocr" || stage === "translate") {
         const notReady = enginesNotReady();
         if (notReady) return status(503, { error: notReady });
+      }
+      // The sound-effect pass reads clean-text.png: running it on an outdated text pass would bake that image in
+      if (stage === "clean_sfx") {
+        const textPass = (await PageStore.listStages(params.id)).find((s) => s.stage === "clean_text");
+        if (textPass && textPass.status !== "fresh") return status(409, { error: "Clean text first: the text pass is out of date" });
       }
 
       try {
