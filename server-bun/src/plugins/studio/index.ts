@@ -20,7 +20,7 @@
  */
 import Elysia, { t } from "elysia";
 import { existsSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { rename, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { Page, PageStageRow } from "@/db/schema";
 import { childLogger } from "@/lib/logger";
@@ -232,8 +232,17 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       const jobsDir = resolve(PAGE_JOBS_DIR);
       const dir = resolve(pageDir(params.id));
       if (dirname(dir) !== jobsDir || basename(dir) !== params.id) return status(409, { error: "refusing to delete an unexpected path" });
-      await rm(dir, { recursive: true, force: true });
-      await PageStore.deletePage(params.id);
+      // Failure-safe order: move the folder aside, delete the row, then remove the moved folder.
+      // If the row delete fails, the folder is put back so the page stays complete.
+      const parked = existsSync(dir) ? join(jobsDir, `${params.id}.deleting-${Date.now()}`) : null;
+      if (parked) await rename(dir, parked);
+      try {
+        await PageStore.deletePage(params.id);
+      } catch (err) {
+        if (parked) await rename(parked, dir).catch((restoreErr: unknown) => log.error({ err: restoreErr, pageId: params.id, parked }, "Couldn't restore the page folder"));
+        throw err;
+      }
+      if (parked) await rm(parked, { recursive: true, force: true });
       log.info({ pageId: params.id }, "Page deleted");
       return { deleted: params.id };
     }),
@@ -279,16 +288,24 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
     ({ params, body, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
-      const { kind, include, ...geometry } = body;
+      const { kind, include, source_text, translated_text, ...geometry } = body;
       const invalid = geometryError(check.page, geometry);
       if (invalid) return status(422, { error: invalid });
-      await PageStore.insertBlock(params.id, kind, geometry, include ?? true);
+      // Text is stored in the same insert, so restoring a deleted region (undo) is a single atomic request
+      await PageStore.insertBlock(params.id, kind, geometry, include ?? true, { sourceText: source_text, translatedText: translated_text });
       await PageStore.markStale(params.id, stagesAffectedBy(kind));
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
     {
       params: IdParams,
-      body: t.Object({ kind: t.UnionEnum(["text", "sfx"]), include: t.Optional(t.Boolean()), ...GeometryBody }),
+      body: t.Object({
+        kind: t.UnionEnum(["text", "sfx"]),
+        include: t.Optional(t.Boolean()),
+        /** Restored with the region (e.g. undoing a delete). */
+        source_text: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
+        translated_text: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
+        ...GeometryBody,
+      }),
       response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
     },
   )

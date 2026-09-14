@@ -18,7 +18,6 @@ import {
   createBlock,
   deleteBlock,
   updateBlockGeometry,
-  updateBlockText,
   type BlockGeometry,
   type StudioBlock,
   type StudioPageDetail,
@@ -215,7 +214,11 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
   const deleteRegion = useCallback((id: number) => {
     const block = live.current.blocks.find((b) => b.id === id);
     if (!block) return;
-    const snapshot = { kind: blockKind(block), geometry: blockGeometry(block), source: block.source_text, translation: block.translated_text };
+    const snapshot = {
+      kind: blockKind(block),
+      geometry: blockGeometry(block),
+      content: { include: block.include, source_text: block.source_text, translated_text: block.translated_text },
+    };
     let current = id;
     perform({
       label: "Delete region",
@@ -224,16 +227,11 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
         live.current.onSelect(null);
       },
       undo: async () => {
-        let detail = await createBlock(live.current.pageId, snapshot.kind, snapshot.geometry);
+        // One request brings back geometry, include flag and text together, so a failure can't leave a blank region
+        const detail = await createBlock(live.current.pageId, snapshot.kind, snapshot.geometry, snapshot.content);
         const restored = newestId(detail);
         history.alias(history.resolve(current), restored);
         current = restored;
-        // Bring back the text too; OCR and translation stay marked stale for the recreated region
-        const text = {
-          ...(snapshot.source !== null ? { source_text: snapshot.source } : {}),
-          ...(snapshot.translation !== null ? { translated_text: snapshot.translation } : {}),
-        };
-        if (Object.keys(text).length > 0) detail = await updateBlockText(live.current.pageId, restored, text);
         live.current.onDetail(detail);
         live.current.onSelect(restored);
       },
@@ -409,6 +407,9 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       const current = live.current;
       if (current.disabled || current.tool === "select") return;
       if (current.tool === "polygon") {
+        // Pressing an existing region doesn't start a polygon; once one is being drawn, points may land on
+        // top of other regions (outlining a bubble that already has a detected box inside it)
+        if (opt.target && !polygon) return;
         addPolygonPoint(opt.scenePoint);
         return;
       }
@@ -484,8 +485,13 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       const after = geometryOf(e.target, live.current.page);
       if (!entry) return;
       const kindOfBlock = blockKind(live.current.blocks.find((b) => b.id === id) ?? ({ kind: "text" } as StudioBlock));
-      if (geometryKey(entry.geometry, kindOfBlock) === geometryKey(after, kindOfBlock)) return;
-      reshapeRegion(id, entry.geometry, after);
+      const before = entry.geometry;
+      if (geometryKey(before, kindOfBlock) === geometryKey(after, kindOfBlock)) return;
+      // Advance the baseline now: a second edit before the server answers must record this edit as its "before",
+      // and the matching key keeps the response from redrawing the object (a failure resets keys and reloads)
+      entry.geometry = after;
+      entry.key = geometryKey(after, kindOfBlock);
+      reshapeRegion(id, before, after);
     });
 
     return () => {

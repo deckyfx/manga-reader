@@ -192,7 +192,13 @@ export class PageStore {
   }
 
   /** Adds a block drawn in the Studio with the next free index and returns that index. Call under the page lock. */
-  static async insertBlock(pageId: string, kind: PageBlock["kind"], geometry: BlockGeometry, include = true): Promise<number> {
+  static async insertBlock(
+    pageId: string,
+    kind: PageBlock["kind"],
+    geometry: BlockGeometry,
+    include = true,
+    text: { sourceText?: string | null; translatedText?: string | null } = {},
+  ): Promise<number> {
     const [row] = await db
       .select({ max: sql<number>`coalesce(max(${pageBlocks.idx}), 0)` })
       .from(pageBlocks)
@@ -208,6 +214,8 @@ export class PageStore {
       h: geometry.h,
       include,
       shapeJson: shapeToJson(geometry.shape),
+      sourceText: text.sourceText ?? null,
+      translatedText: text.translatedText ?? null,
     });
     return idx;
   }

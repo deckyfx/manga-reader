@@ -72,9 +72,16 @@ export interface BlockGeometry {
   shape?: BlockShape;
 }
 
+/** Content restored along with a region (e.g. undoing a delete), stored in the same request. */
+export interface BlockContent {
+  include?: boolean;
+  source_text?: string | null;
+  translated_text?: string | null;
+}
+
 /** Adds a region drawn on the canvas; returns the page detail with the new block. */
-export const createBlock = (id: string, kind: "text" | "sfx", geometry: BlockGeometry) =>
-  unwrap(api.studio.api.pages({ id }).blocks.post({ kind, ...geometry }));
+export const createBlock = (id: string, kind: "text" | "sfx", geometry: BlockGeometry, content: BlockContent = {}) =>
+  unwrap(api.studio.api.pages({ id }).blocks.post({ kind, ...content, ...geometry }));
 
 /** Moves / resizes / reshapes a region. */
 export const updateBlockGeometry = (id: string, idx: number, geometry: BlockGeometry) =>
