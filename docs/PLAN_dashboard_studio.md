@@ -306,6 +306,23 @@ Library: Fabric.js 7.4.0 (D7 confirmed: manga-reader's studio is Fabric).
 - **Undo / redo:** a command stack of inverse API calls (create ↔ delete, geometry before ↔ after). Keyboard: Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y; tool keys V / R / E / P. Shortcuts are ignored while typing in an input.
 - **From manga-reader:** port the region union and ellipse-to-points, the attach/detach tool base, and reading-order sorting (threshold relative to image size, for later auto-detect). Rebuild zoom (manga-reader used a CSS scale), undo (additions only), conversion (duplicated, with polygon offset bugs) and persistence (never saved). Skip the brush/inpaint sidecar, the timeout-based reloads and the hand-drawn merge.
 
+### Phase 3 design (2026-09-14, branch `feat/studio-mask`)
+
+**Server: mask layers and partial re-clean**, each call under the per-page lock and refused (409) while the page is queued or running:
+- `PUT /studio/api/pages/:id/mask/:layer` (`add` | `erase`) `{ image }` saves a painted layer: a page-size PNG (base64 or data URL), bright pixels = painted. A layer of a different size is refused (422); an empty layer deletes the file, so an untouched page keeps using the detector mask as is. `DELETE …/mask/:layer` clears it. Both mark `clean_text`, `clean_sfx` and `render` stale.
+- Effective mask = (detector `mask.png` ∪ add) − erase. The text pass removes painted-in pixels wherever they are, even outside any block, and adds their connected areas as inpaint regions; block ownership (`selectBlockMask`) still decides which detected pixels each pass removes.
+- `POST …/reclean` `{ areas: [{x, y, w, h}] }` (1–50 areas inside the page) inpaints the effective mask inside those areas on the latest cleaned image (`clean-sfx.png` when present, else `clean-text.png`), in place. Pixels outside the dilated mask stay byte-identical. Only a part of a clean pass ran, so the clean stages keep their status and only `render` turns stale. Erased pixels can't be restored this way (the original isn't consulted): run Clean text for that.
+- `PATCH …/blocks/:idx` also takes `include`. Changing it marks `clean_text`, `clean_sfx` and `render` for a text block, or `clean_sfx` and `render` for a sound effect; sending the current value marks nothing.
+- `POST …/run` also runs `clean_text` (makes `clean_sfx` and `render` stale; it deletes `clean-sfx.png`) and `clean_sfx` (makes `render` stale). Cleaning always covers the whole kind.
+- A full re-run of the page deletes the painted layers along with the other derived outputs.
+
+**Client:**
+- **Brush tool** (B) in `PageCanvas`: Add / Erase (X swaps), size 2–200 page px ([ and ]), a circle cursor. Layers are page-size offscreen canvases (`client/studio/canvas/mask-layers.ts`) shown as Fabric images under the regions: blue detector mask, green painted in, red erased. The overlay shows while the brush is active or via the eye toggle (M). A stroke on one layer clears the other under it, since erase wins on the server.
+- **Undo / redo:** each stroke is a command holding the before/after pixels of its bounding box on both layers; only the layers it changed are saved (after each stroke, through the canvas's serial queue).
+- **Re-clean** button: the merged boxes of add strokes not re-cleaned yet, or else the selected region's box. It waits for pending saves and refreshes the stage images.
+- **Include toggles:** a "clean" checkbox on each text block card and on a new sound-effects list. Excluded regions are drawn dashed and unfilled.
+- **Editor actions:** Clean text / Clean SFX buttons (amber while stale). "Detected text mask" is added to the image pickers.
+
 ## 11. Adopt from manga-reader / avoid
 
 **Adopt** (`/home/decky/Documents/funs/bun/manga-reader`):

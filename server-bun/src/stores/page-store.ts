@@ -239,19 +239,19 @@ export class PageStore {
   }
 
   /**
-   * Sets one block's source text and/or translation and marks `staleStages` stale in the same transaction.
-   * False (and nothing marked) when the block doesn't exist.
+   * Sets one block's source text, translation and/or include-in-cleaning flag, and marks `staleStages` stale in the
+   * same transaction. False (and nothing marked) when the block doesn't exist.
    */
-  static async updateBlockText(
+  static async updateBlock(
     pageId: string,
     idx: number,
-    text: { sourceText?: string; translatedText?: string },
+    fields: { sourceText?: string; translatedText?: string; include?: boolean },
     staleStages: readonly StageName[] = [],
   ): Promise<boolean> {
     return db.transaction((tx) => {
       const rows = tx
         .update(pageBlocks)
-        .set({ ...text, updatedAt: sql`(datetime('now'))` })
+        .set({ ...fields, updatedAt: sql`(datetime('now'))` })
         .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))
         .returning({ idx: pageBlocks.idx })
         .all();

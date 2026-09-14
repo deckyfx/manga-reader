@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, History, Languages, Loader2, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Eraser, History, Languages, Loader2, Megaphone, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
 import {
   deletePage,
   getPage,
@@ -12,7 +12,7 @@ import {
   publishPage,
   rollbackPage,
   runStage,
-  updateBlockText,
+  updateBlock,
   type PageImage,
   type StudioBlock,
   type StudioPageDetail,
@@ -68,6 +68,8 @@ export function StudioPageEditor() {
   const [view, setView] = useState<"canvas" | "compare">("canvas");
   const [canvasImage, setCanvasImage] = useState<PageImage>("original.png");
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
+  /** Bumped when a cleaned image is rewritten, so image URLs change and the browser loads the new file. */
+  const [imagesNonce, setImagesNonce] = useState(0);
 
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);
   const onPublished = (result: { revision: number; notified: number }) => {
@@ -77,6 +79,12 @@ export function StudioPageEditor() {
   };
   const renderM = useMutation({ mutationFn: () => runStage(id, "render"), onSuccess: setDetail });
   const translateAllM = useMutation({ mutationFn: () => runStage(id, "translate"), onSuccess: setDetail });
+  const afterClean = (detail: StudioPageDetail) => {
+    setDetail(detail);
+    setImagesNonce((n) => n + 1);
+  };
+  const cleanTextM = useMutation({ mutationFn: () => runStage(id, "clean_text"), onSuccess: afterClean });
+  const cleanSfxM = useMutation({ mutationFn: () => runStage(id, "clean_sfx"), onSuccess: afterClean });
   const publishM = useMutation({ mutationFn: () => publishPage(id), onSuccess: onPublished });
   const navigate = useNavigate();
   const deleteM = useMutation({
@@ -113,9 +121,10 @@ export function StudioPageEditor() {
   const renderStage = stages.find((s) => s.stage === "render");
   const busy = isBusy(page.status);
   const textBlocks = blocks.filter((b) => b.kind === "text");
-  const sfxCount = blocks.length - textBlocks.length;
-  const version = `${page.updated_at}-${page.revision}-${renderStage?.updated_at ?? ""}`;
-  const actionError = renderM.error ?? translateAllM.error ?? publishM.error ?? deleteM.error;
+  const sfxBlocks = blocks.filter((b) => b.kind !== "text");
+  const version = `${page.updated_at}-${page.revision}-${renderStage?.updated_at ?? ""}-${imagesNonce}`;
+  const cleaning = cleanTextM.isPending || cleanSfxM.isPending;
+  const actionError = cleanTextM.error ?? cleanSfxM.error ?? renderM.error ?? translateAllM.error ?? publishM.error ?? deleteM.error;
 
   return (
     <div className="flex flex-col h-full">
@@ -164,6 +173,22 @@ export function StudioPageEditor() {
             </span>
           )}
           <ActionButton
+            onClick={() => cleanTextM.mutate()}
+            disabled={busy || cleaning}
+            pending={cleanTextM.isPending}
+            highlight={stageStatus("clean_text") === "stale"}
+            icon={<Eraser size={14} />}
+            label="Clean text"
+          />
+          <ActionButton
+            onClick={() => cleanSfxM.mutate()}
+            disabled={busy || cleaning}
+            pending={cleanSfxM.isPending}
+            highlight={stageStatus("clean_sfx") === "stale"}
+            icon={<Megaphone size={14} />}
+            label="Clean SFX"
+          />
+          <ActionButton
             onClick={() => afterSaves("translate-all", () => translateAllM.mutate())}
             disabled={busy || translateAllM.isPending || queued.has("translate-all")}
             pending={translateAllM.isPending}
@@ -206,6 +231,7 @@ export function StudioPageEditor() {
             onSelect={setSelectedBlock}
             onDetail={setDetail}
             onReload={() => void qc.invalidateQueries({ queryKey: ["studio-page", id] })}
+            onImagesChanged={() => setImagesNonce((n) => n + 1)}
             toolbarStart={
               <select
                 aria-label="Canvas background image"
@@ -229,11 +255,19 @@ export function StudioPageEditor() {
 
         <aside className="lg:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-gray-800 overflow-y-auto p-3 space-y-3">
           <div className="text-xs text-gray-500">
-            {textBlocks.length} text block{textBlocks.length === 1 ? "" : "s"} · {sfxCount} sound effect{sfxCount === 1 ? "" : "s"}
+            {textBlocks.length} text block{textBlocks.length === 1 ? "" : "s"} · {sfxBlocks.length} sound effect{sfxBlocks.length === 1 ? "" : "s"}
           </div>
           {textBlocks.map((block) => (
             <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} />
           ))}
+          {sfxBlocks.length > 0 && (
+            <div className="pt-2 border-t border-gray-800 space-y-1.5">
+              <div className="text-xs text-gray-400">Sound effects · ticked ones are removed by Clean SFX</div>
+              {sfxBlocks.map((block) => (
+                <SfxBlockRow key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} />
+              ))}
+            </div>
+          )}
           <HistoryPanel pageId={page.id} currentRevision={page.revision} disabled={busy} onRolledBack={onPublished} />
         </aside>
       </div>
@@ -390,7 +424,7 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
   const source = useSavedText(block.source_text ?? "");
   const translation = useSavedText(block.translated_text ?? "");
   const saveM = useMutation({
-    mutationFn: (text: { source_text?: string; translated_text?: string }) => updateBlockText(pageId, block.id, text),
+    mutationFn: (text: { source_text?: string; translated_text?: string }) => updateBlock(pageId, block.id, text),
     onSuccess: onChanged,
   });
   const runM = useMutation({
@@ -416,6 +450,7 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
         {block.render && <span className="text-gray-500">{block.render.font_size}px</span>}
         {(saveM.isPending || runM.isPending) && <Loader2 size={12} className="animate-spin text-gray-500" />}
         {(source.dirty || translation.dirty) && !saveM.isPending && <span className="text-amber-400">unsaved</span>}
+        <IncludeToggle pageId={pageId} block={block} disabled={locked} onChanged={onChanged} title="Remove this block's lettering when the text is cleaned" />
         <span className="ml-auto flex gap-1">
           <IconButton title="Read the text again (OCR)" disabled={locked || queued.has(ocrKey)} onClick={() => afterSaves(ocrKey, () => runM.mutate("ocr"))}>
             <ScanText size={13} />
@@ -444,6 +479,61 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
         className="w-full resize-y bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-indigo-500"
       />
       {error && <p className="text-xs text-red-400">{error.message}</p>}
+    </div>
+  );
+}
+
+/** Whether the clean pass removes a block; saved right away (the server marks the clean stages stale). */
+function IncludeToggle({ pageId, block, disabled, onChanged, title }: {
+  pageId: string;
+  block: StudioBlock;
+  disabled: boolean;
+  onChanged: (detail: StudioPageDetail) => void;
+  title: string;
+}) {
+  const includeM = useMutation({
+    mutationFn: (include: boolean) => updateBlock(pageId, block.id, { include }),
+    onSuccess: onChanged,
+  });
+  const checked = includeM.isPending && includeM.variables !== undefined ? includeM.variables : block.include;
+  return (
+    <label className="flex items-center gap-1 text-gray-400 cursor-pointer" title={includeM.error ? includeM.error.message : title}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled || includeM.isPending}
+        onChange={(e) => includeM.mutate(e.target.checked)}
+        className="accent-indigo-500"
+      />
+      <span className={includeM.error ? "text-red-400" : undefined}>clean</span>
+    </label>
+  );
+}
+
+/** One sound-effect region: selectable, with its include-in-cleaning toggle. */
+function SfxBlockRow({ pageId, block, disabled, onChanged, selected, onSelect }: {
+  pageId: string;
+  block: StudioBlock;
+  disabled: boolean;
+  onChanged: (detail: StudioPageDetail) => void;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selected) rowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selected]);
+  return (
+    <div
+      ref={rowRef}
+      onClick={onSelect}
+      className={`flex items-center gap-2 bg-gray-900 border rounded-lg px-2.5 py-1.5 text-xs cursor-pointer transition-colors ${selected ? "border-orange-400" : "border-gray-800"}`}
+    >
+      <span className="font-semibold text-orange-400">#{block.id}</span>
+      <span className="text-gray-500 tabular-nums">{block.w}×{block.h}</span>
+      <span className="ml-auto">
+        <IncludeToggle pageId={pageId} block={block} disabled={disabled} onChanged={onChanged} title="Remove this sound effect when SFX are cleaned" />
+      </span>
     </div>
   );
 }

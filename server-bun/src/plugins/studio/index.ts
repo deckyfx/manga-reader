@@ -9,8 +9,11 @@
  * POST  /studio/api/pages/:id/blocks             add a region drawn in the Studio (rect / ellipse / polygon)
  * PUT   /studio/api/pages/:id/blocks/:idx        move / resize / reshape a region
  * DELETE /studio/api/pages/:id/blocks/:idx       remove a region
- * PATCH /studio/api/pages/:id/blocks/:idx        edit source text / translation (marks later stages stale)
- * POST  /studio/api/pages/:id/run                re-run ocr / translate (all or some blocks) or render
+ * PATCH /studio/api/pages/:id/blocks/:idx        edit source text / translation / include-in-cleaning (marks later stages stale)
+ * PUT   /studio/api/pages/:id/mask/:layer        save a painted mask layer (add / erase) as a PNG
+ * DELETE /studio/api/pages/:id/mask/:layer       clear a painted mask layer
+ * POST  /studio/api/pages/:id/reclean            re-clean only some areas of the latest cleaned page
+ * POST  /studio/api/pages/:id/run                re-run ocr / translate (all or some blocks), clean_text / clean_sfx, or render
  * POST  /studio/api/pages/:id/publish            snapshot the result and push it to extension tabs showing the page
  * GET   /studio/api/pages/:id/history            published snapshots, newest first
  * GET   /studio/api/pages/:id/history/:revision  a snapshot image
@@ -30,21 +33,38 @@ import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
 import { historyFile, listHistory, restoreResult, snapshotResult } from "@/services/page-history";
 import { decodeBase64Image, resultUrl, submitPageJob } from "@/services/page-jobs";
-import { PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
+import { MASK_LAYER_FILES, PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
+import { maskFromImage, maskToPng } from "@/lib/mask";
 import { pageLive } from "@/stores/page-live-channel";
 import { PAGE_JOBS_DIR, pageDir, PageStore, type StageName } from "@/stores/page-store";
 
 const log = childLogger("studio");
 
 /** Images a page folder may hold; anything else is refused. */
-const PAGE_FILES = ["original.png", "overlay.png", "mask.png", "clean-text.png", "clean-sfx.png", "render-overlay.png", "result.png"] as const;
+const PAGE_FILES = [
+  "original.png", "overlay.png", "mask.png", "mask-add.png", "mask-erase.png",
+  "clean-text.png", "clean-sfx.png", "render-overlay.png", "result.png",
+] as const;
 
 /** Stages the Studio can re-run, and the stages each run makes stale. */
 const RUNNABLE = {
   ocr: ["translate", "render"],
   translate: ["render"],
+  // Re-cleaning text removes the sound-effect pass built on top of it
+  clean_text: ["clean_sfx", "render"],
+  clean_sfx: ["render"],
   render: [],
 } as const satisfies Record<string, readonly StageName[]>;
+
+/** Largest encoded mask layer accepted (a 1-bit page PNG is far smaller). */
+const MAX_MASK_BYTES = 8 * 1024 * 1024;
+
+const AreaSchema = t.Object({
+  x: t.Integer({ minimum: 0 }),
+  y: t.Integer({ minimum: 0 }),
+  w: t.Integer({ minimum: 1 }),
+  h: t.Integer({ minimum: 1 }),
+});
 type RunnableStage = keyof typeof RUNNABLE;
 
 const IdParam = t.String({ pattern: "^[A-Za-z0-9-]+$" });
@@ -278,13 +298,22 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
     ({ params, body, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
-      if (body.source_text === undefined && body.translated_text === undefined) return status(422, { error: "nothing to update" });
-      // A new source text makes its translation stale too; a new translation only needs typesetting again.
-      // The edit and the stale marking commit together.
-      const stale: StageName[] = body.source_text !== undefined ? ["translate", "render"] : ["render"];
-      if (!(await PageStore.updateBlockText(params.id, params.idx, { sourceText: body.source_text, translatedText: body.translated_text }, stale))) {
-        return status(404, { error: "block not found" });
+      if (body.source_text === undefined && body.translated_text === undefined && body.include === undefined) {
+        return status(422, { error: "nothing to update" });
       }
+      const block = (await PageStore.readJob(params.id))?.blocks.find((b) => b.id === params.idx);
+      if (!block) return status(404, { error: "block not found" });
+      // A new source text makes its translation stale too; a new translation only needs typesetting again; toggling
+      // whether a block is cleaned affects its clean pass (text cleaning also feeds the sfx pass) and the result.
+      // The edit and the stale marking commit together.
+      const stale = new Set<StageName>();
+      if (body.source_text !== undefined) stale.add("translate").add("render");
+      if (body.translated_text !== undefined) stale.add("render");
+      if (body.include !== undefined && body.include !== block.include) {
+        for (const s of block.kind === "sfx" ? (["clean_sfx", "render"] as const) : (["clean_text", "clean_sfx", "render"] as const)) stale.add(s);
+      }
+      const fields = { sourceText: body.source_text, translatedText: body.translated_text, include: body.include };
+      if (!(await PageStore.updateBlock(params.id, params.idx, fields, [...stale]))) return status(404, { error: "block not found" });
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
     {
@@ -292,6 +321,8 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       body: t.Object({
         source_text: t.Optional(t.String({ maxLength: 2000 })),
         translated_text: t.Optional(t.String({ maxLength: 2000 })),
+        /** Whether the clean pass removes this block's lettering. */
+        include: t.Optional(t.Boolean()),
       }),
       response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
     },
@@ -366,7 +397,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
       const stage: RunnableStage = body.stage;
-      if (stage !== "render") {
+      if (stage === "ocr" || stage === "translate") {
         const notReady = enginesNotReady();
         if (notReady) return status(503, { error: notReady });
       }
@@ -391,6 +422,11 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
             await pipeline.translate(job, pageEngines.translate, ids);
             return covered;
           }
+          // Cleaning always covers the whole kind; to fix part of the page use POST …/reclean with areas
+          if (stage === "clean_text" || stage === "clean_sfx") {
+            await pipeline.clean(job, stage === "clean_text" ? "text" : "sfx");
+            return true;
+          }
           await pipeline.render(job);
           return true;
         });
@@ -407,11 +443,95 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
     {
       params: IdParams,
       body: t.Object({
-        stage: t.UnionEnum(["ocr", "translate", "render"]),
-        /** Only these blocks (ocr / translate); render always typesets the whole page. */
+        stage: t.UnionEnum(["ocr", "translate", "clean_text", "clean_sfx", "render"]),
+        /** Only these blocks (ocr / translate); cleaning and render always cover the whole page. */
         block_ids: t.Optional(t.Array(t.Integer({ minimum: 1 }), { minItems: 1, maxItems: 500 })),
       }),
       response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody, 503: ErrBody },
+    },
+  )
+
+  .put(
+    "/pages/:id/mask/:layer",
+    ({ params, body, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      const dir = pageDir(params.id);
+      if (!existsSync(join(dir, "mask.png"))) return status(409, { error: "page has no detected text mask yet" });
+
+      let decoded: Awaited<ReturnType<typeof maskFromImage>>;
+      try {
+        const bytes = decodeBase64Image(body.image);
+        if (bytes.byteLength > MAX_MASK_BYTES) return status(422, { error: "mask layer too large" });
+        decoded = await maskFromImage(bytes);
+      } catch {
+        return status(422, { error: "mask layer must be a valid image" });
+      }
+      const detector = await maskFromImage(join(dir, "mask.png"));
+      if (decoded.width !== detector.width || decoded.height !== detector.height) {
+        return status(422, { error: `mask layer must be ${detector.width}×${detector.height}, the page size` });
+      }
+
+      const file = join(dir, MASK_LAYER_FILES[params.layer]);
+      // An empty layer is stored as no file, so an untouched page keeps using the detector mask as-is
+      if (decoded.mask.some((v) => v === 1)) await Bun.write(file, await maskToPng(decoded.mask, decoded.width, decoded.height));
+      else await rm(file, { force: true });
+      await PageStore.markStale(params.id, ["clean_text", "clean_sfx", "render"]);
+      return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
+    }),
+    {
+      params: t.Object({ id: IdParam, layer: t.UnionEnum(["add", "erase"]) }),
+      /** PNG (base64 or data URL) at page size: white (or any bright pixel) = painted. */
+      body: t.Object({ image: t.String({ maxLength: Math.ceil(MAX_MASK_BYTES / 3) * 4 + 64 }) }),
+      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
+    },
+  )
+
+  .delete(
+    "/pages/:id/mask/:layer",
+    ({ params, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      const file = join(pageDir(params.id), MASK_LAYER_FILES[params.layer]);
+      if (existsSync(file)) {
+        await rm(file, { force: true });
+        await PageStore.markStale(params.id, ["clean_text", "clean_sfx", "render"]);
+      }
+      return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
+    }),
+    {
+      params: t.Object({ id: IdParam, layer: t.UnionEnum(["add", "erase"]) }),
+      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody },
+    },
+  )
+
+  .post(
+    "/pages/:id/reclean",
+    ({ params, body, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      const { page } = check;
+      if (body.areas.some((a) => a.x + a.w > page.width || a.y + a.h > page.height)) {
+        return status(422, { error: "an area extends outside the page" });
+      }
+      try {
+        await runExclusiveResult(async () => {
+          const pipeline = new PagePipeline(pageDir(params.id), () => {}, PageStore.repository(params.id));
+          await pipeline.recleanAreas(body.areas);
+        });
+        // Only part of a clean pass ran, so the clean stages keep their status; the result needs typesetting again
+        await PageStore.markStale(params.id, ["render"]);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.error({ err, pageId: params.id }, "Studio re-clean failed");
+        return status(422, { error: message });
+      }
+      return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
+    }),
+    {
+      params: IdParams,
+      body: t.Object({ areas: t.Array(AreaSchema, { minItems: 1, maxItems: 50 }) }),
+      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
     },
   )
 

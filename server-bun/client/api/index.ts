@@ -54,8 +54,20 @@ export const pageEventsUrl = (id: string) => `/api/translate-page/${id}/events`;
 
 export type { PageJobEvent } from "../../src/stores/translation-job-store";
 
-export const updateBlockText = (id: string, idx: number, text: { source_text?: string; translated_text?: string }) =>
-  unwrap(api.studio.api.pages({ id }).blocks({ idx }).patch(text));
+/** Edits a block's text, or whether the clean pass removes its lettering (`include`). */
+export const updateBlock = (id: string, idx: number, fields: { source_text?: string; translated_text?: string; include?: boolean }) =>
+  unwrap(api.studio.api.pages({ id }).blocks({ idx }).patch(fields));
+
+/** Painted mask layers: `add` marks text the detector missed, `erase` marks art it wrongly took for text. */
+export type MaskLayerName = "add" | "erase";
+
+/** Saves a painted layer: a page-size PNG (data URL), white where painted. An empty layer is removed. */
+export const saveMaskLayer = (id: string, layer: MaskLayerName, image: string) =>
+  unwrap(api.studio.api.pages({ id }).mask({ layer }).put({ image }));
+
+/** Cleans only these areas of the latest cleaned page again, using the detector mask plus the painted layers. */
+export const recleanAreas = (id: string, areas: { x: number; y: number; w: number; h: number }[]) =>
+  unwrap(api.studio.api.pages({ id }).reclean.post({ areas }));
 
 /** Region outline stored with a block; rect is the default (returned as null). */
 export type BlockShape =
@@ -90,8 +102,8 @@ export const updateBlockGeometry = (id: string, idx: number, geometry: BlockGeom
 /** Removes a region. */
 export const deleteBlock = (id: string, idx: number) => unwrap(api.studio.api.pages({ id }).blocks({ idx }).delete());
 
-/** Re-run OCR or translation (for `blockIds`, or every text block) or typeset the page again. */
-export const runStage = (id: string, stage: "ocr" | "translate" | "render", blockIds?: number[]) =>
+/** Re-run OCR or translation (for `blockIds`, or every text block), clean text / sound effects, or typeset the page again. */
+export const runStage = (id: string, stage: "ocr" | "translate" | "clean_text" | "clean_sfx" | "render", blockIds?: number[]) =>
   unwrap(api.studio.api.pages({ id }).run.post({ stage, block_ids: blockIds }));
 
 export const publishPage = (id: string) => unwrap(api.studio.api.pages({ id }).publish.post());
@@ -112,6 +124,7 @@ export type StudioStage = StudioPageDetail["stages"][number];
 export const PAGE_IMAGES = [
   { file: "original.png", label: "Original" },
   { file: "overlay.png", label: "Detection" },
+  { file: "mask.png", label: "Detected text mask" },
   { file: "clean-text.png", label: "Cleaned text" },
   { file: "clean-sfx.png", label: "Cleaned SFX" },
   { file: "render-overlay.png", label: "Typeset areas" },
@@ -120,6 +133,9 @@ export const PAGE_IMAGES = [
 
 export type PageImage = (typeof PAGE_IMAGES)[number]["file"];
 
-/** URL of a stage image; `version` changes after edits so the browser doesn't show a cached copy. */
-export const pageFileUrl = (id: string, file: PageImage, version?: string | number) =>
+/** Every image the Studio loads for a page: the stage images plus the painted mask layers. */
+export type PageFile = PageImage | "mask-add.png" | "mask-erase.png";
+
+/** URL of a page image; `version` changes after edits so the browser doesn't show a cached copy. */
+export const pageFileUrl = (id: string, file: PageFile, version?: string | number) =>
   `/studio/api/pages/${id}/files/${file}${version !== undefined ? `?v=${encodeURIComponent(String(version))}` : ""}`;

@@ -58,10 +58,15 @@ export function geometryKey(geometry: BlockGeometry, kind: RegionKind): string {
   return JSON.stringify([kind, geometry.x, geometry.y, geometry.w, geometry.h, shape]);
 }
 
-/** A selectable canvas object for a block, tagged with its id. */
+/** Redraw key of a region: its geometry plus whether the clean pass removes it (excluded regions are drawn dashed). */
+export function regionKey(geometry: BlockGeometry, kind: RegionKind, include: boolean): string {
+  return `${geometryKey(geometry, kind)}|${include ? 1 : 0}`;
+}
+
+/** A selectable canvas object for a block, tagged with its id; a block left out of cleaning is dashed and unfilled. */
 export function regionObject(block: StudioBlock): FabricObject {
   const kind = blockKind(block);
-  const options = baseOptions(kind);
+  const options = { ...baseOptions(kind), ...(block.include ? {} : { strokeDashArray: [5, 4], fill: "transparent" }) };
   const shape = block.shape as BlockShape | null;
   let obj: FabricObject;
   if (shape?.type === "polygon") {
