@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomUUIDv7 } from "bun";
-import { readdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { db } from "@/db/index";
 import { childLogger } from "@/lib/logger";
@@ -102,8 +103,9 @@ export class PageStore {
   }
 
   /**
-   * Removes folders of deleted pages whose cleanup failed (see DELETE /studio/api/pages/:id). Only direct entries
-   * of the jobs directory named `<page id>.deleting-<timestamp>` are touched. Returns how many were removed.
+   * Cleans up folders parked by DELETE /studio/api/pages/:id (`<page id>.deleting-<timestamp>`, direct entries of the
+   * jobs directory only). A folder whose page row is gone is removed; one whose page row still exists (the server
+   * stopped mid-delete) is renamed back so the page keeps its files. Returns how many were removed.
    */
   static async sweepDeletedPageFolders(): Promise<number> {
     let entries: string[];
@@ -113,12 +115,28 @@ export class PageStore {
       return 0;
     }
     const parked = entries.filter((name) => PARKED_FOLDER.test(name));
-    // One folder that can't be removed must not stop the others, or the server from starting; it's retried next start
-    const results = await Promise.allSettled(parked.map((name) => rm(join(PAGE_JOBS_DIR, name), { recursive: true, force: true })));
+    // One folder that can't be handled must not stop the others, or the server from starting; it's retried next start
+    const results = await Promise.allSettled(parked.map(async (name): Promise<"removed" | "restored" | "kept"> => {
+      const pageId = name.slice(0, name.lastIndexOf(".deleting-"));
+      const parkedPath = join(PAGE_JOBS_DIR, name);
+      if (await PageStore.findById(pageId)) {
+        // The server stopped between moving the folder aside and deleting the row: the page still exists, so its
+        // files go back instead of being deleted
+        if (existsSync(pageDir(pageId))) {
+          log.warn({ folder: name, pageId }, "Parked folder belongs to a page that already has a folder; leaving both for manual review");
+          return "kept";
+        }
+        await rename(parkedPath, pageDir(pageId));
+        log.info({ pageId }, "Restored the folder of a page whose deletion didn't finish");
+        return "restored";
+      }
+      await rm(parkedPath, { recursive: true, force: true });
+      return "removed";
+    }));
     results.forEach((result, i) => {
-      if (result.status === "rejected") log.warn({ err: result.reason, folder: parked[i] }, "Couldn't remove a deleted page's folder; will retry at next start");
+      if (result.status === "rejected") log.warn({ err: result.reason, folder: parked[i] }, "Couldn't clean up a deleted page's folder; will retry at next start");
     });
-    return results.filter((result) => result.status === "fulfilled").length;
+    return results.filter((result) => result.status === "fulfilled" && result.value === "removed").length;
   }
 
   /** Deletes a page row; its stages and blocks go with it (foreign keys cascade). False when it didn't exist. */

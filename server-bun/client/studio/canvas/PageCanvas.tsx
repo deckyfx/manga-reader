@@ -216,7 +216,8 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
     if (!block) return;
     const snapshot = {
       kind: blockKind(block),
-      geometry: blockGeometry(block),
+      // The canvas geometry is ahead of `blocks` while an edit is still being saved: undo must restore that shape
+      geometry: entriesRef.current.get(id)?.geometry ?? blockGeometry(block),
       content: { include: block.include, source_text: block.source_text, translated_text: block.translated_text },
     };
     let current = id;
