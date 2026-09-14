@@ -3,7 +3,20 @@ import { randomUUIDv7 } from "bun";
 import { join } from "node:path";
 import { db } from "@/db/index";
 import { pageBlocks, pages, pageStages, type NewPage, type Page, type PageStageRow } from "@/db/schema";
-import type { JobRepository, PageBlock, PageJob } from "@/services/page-pipeline";
+import type { BlockShape, JobRepository, PageBlock, PageJob } from "@/services/page-pipeline";
+
+/** Rectangles are the default, so only ellipse / polygon outlines are stored. */
+const shapeToJson = (shape: BlockShape | undefined): string | null =>
+  shape && shape.type !== "rect" ? JSON.stringify(shape) : null;
+
+/** Geometry of a block drawn or reshaped in the Studio. */
+export interface BlockGeometry {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  shape?: BlockShape;
+}
 
 /** Stage images of every page live in `<PAGE_JOBS_DIR>/<page id>/`. */
 export const PAGE_JOBS_DIR = "./data/jobs";
@@ -129,6 +142,7 @@ export class PageStore {
         source_text: r.sourceText,
         translated_text: r.translatedText,
         ...(r.renderJson ? { render: JSON.parse(r.renderJson) as RenderInfo } : {}),
+        ...(r.shapeJson ? { shape: JSON.parse(r.shapeJson) as BlockShape } : {}),
       })),
     };
   }
@@ -155,6 +169,7 @@ export class PageStore {
           sourceText: b.source_text,
           translatedText: b.translated_text,
           renderJson: b.render ? JSON.stringify(b.render) : null,
+          shapeJson: shapeToJson(b.shape),
         })))
         .run();
     });
@@ -165,6 +180,54 @@ export class PageStore {
     const rows = await db
       .update(pageBlocks)
       .set({ ...text, updatedAt: sql`(datetime('now'))` })
+      .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))
+      .returning({ idx: pageBlocks.idx });
+    return rows.length > 0;
+  }
+
+  /** Adds a block drawn in the Studio with the next free index and returns that index. Call under the page lock. */
+  static async insertBlock(pageId: string, kind: PageBlock["kind"], geometry: BlockGeometry, include = true): Promise<number> {
+    const [row] = await db
+      .select({ max: sql<number>`coalesce(max(${pageBlocks.idx}), 0)` })
+      .from(pageBlocks)
+      .where(eq(pageBlocks.pageId, pageId));
+    const idx = (row?.max ?? 0) + 1;
+    await db.insert(pageBlocks).values({
+      pageId,
+      idx,
+      kind,
+      x: geometry.x,
+      y: geometry.y,
+      w: geometry.w,
+      h: geometry.h,
+      include,
+      shapeJson: shapeToJson(geometry.shape),
+    });
+    return idx;
+  }
+
+  /** Moves / resizes / reshapes a block; its previous render no longer applies. False when the block doesn't exist. */
+  static async updateBlockGeometry(pageId: string, idx: number, geometry: BlockGeometry): Promise<boolean> {
+    const rows = await db
+      .update(pageBlocks)
+      .set({
+        x: geometry.x,
+        y: geometry.y,
+        w: geometry.w,
+        h: geometry.h,
+        shapeJson: shapeToJson(geometry.shape),
+        renderJson: null,
+        updatedAt: sql`(datetime('now'))`,
+      })
+      .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))
+      .returning({ idx: pageBlocks.idx });
+    return rows.length > 0;
+  }
+
+  /** Removes a block; false when it doesn't exist. */
+  static async deleteBlock(pageId: string, idx: number): Promise<boolean> {
+    const rows = await db
+      .delete(pageBlocks)
       .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))
       .returning({ idx: pageBlocks.idx });
     return rows.length > 0;

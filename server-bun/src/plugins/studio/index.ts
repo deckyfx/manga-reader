@@ -5,6 +5,9 @@
  * POST  /studio/api/pages                        new page from an upload or image URL (progress: /api/translate-page/:id/events)
  * GET   /studio/api/pages/:id                    page, stage state and blocks
  * GET   /studio/api/pages/:id/files/:file        a stage image
+ * POST  /studio/api/pages/:id/blocks             add a region drawn in the Studio (rect / ellipse / polygon)
+ * PUT   /studio/api/pages/:id/blocks/:idx        move / resize / reshape a region
+ * DELETE /studio/api/pages/:id/blocks/:idx       remove a region
  * PATCH /studio/api/pages/:id/blocks/:idx        edit source text / translation (marks later stages stale)
  * POST  /studio/api/pages/:id/run                re-run ocr / translate (all or some blocks) or render
  * POST  /studio/api/pages/:id/publish            snapshot the result and push it to extension tabs showing the page
@@ -25,7 +28,7 @@ import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
 import { historyFile, listHistory, restoreResult, snapshotResult } from "@/services/page-history";
 import { decodeBase64Image, resultUrl, submitPageJob } from "@/services/page-jobs";
-import { PagePipeline, type PageBlock } from "@/services/page-pipeline";
+import { PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
 import { pageLive } from "@/stores/page-live-channel";
 import { pageDir, PageStore, type StageName } from "@/stores/page-store";
 
@@ -46,6 +49,39 @@ const IdParam = t.String({ pattern: "^[A-Za-z0-9-]+$" });
 const IdParams = t.Object({ id: IdParam });
 
 const BoxSchema = t.Object({ x: t.Number(), y: t.Number(), w: t.Number(), h: t.Number() });
+
+const PointSchema = t.Object({ x: t.Number(), y: t.Number() });
+
+const ShapeSchema = t.Union([
+  t.Object({ type: t.Literal("rect") }),
+  t.Object({ type: t.Literal("ellipse") }),
+  t.Object({ type: t.Literal("polygon"), points: t.Array(PointSchema, { minItems: 3, maxItems: 500 }) }),
+]);
+
+/** Box and optional outline of a region drawn or edited in the Studio, in page pixels. */
+const GeometryBody = {
+  x: t.Integer({ minimum: 0 }),
+  y: t.Integer({ minimum: 0 }),
+  w: t.Integer({ minimum: 1 }),
+  h: t.Integer({ minimum: 1 }),
+  shape: t.Optional(ShapeSchema),
+};
+
+/** Stages a block's geometry feeds: text blocks are read, translated and cleaned; sfx blocks are only cleaned. */
+const stagesAffectedBy = (kind: string): StageName[] =>
+  kind === "sfx" ? ["clean_sfx", "render"] : ["ocr", "translate", "clean_text", "render"];
+
+/** Why a geometry doesn't fit the page (box outside, or polygon points outside the box), or null when it's valid. */
+function geometryError(page: Page, geometry: { x: number; y: number; w: number; h: number; shape?: BlockShape }): string | null {
+  if (page.width === 0 || page.height === 0) return "page has no detected size yet";
+  if (geometry.x + geometry.w > page.width || geometry.y + geometry.h > page.height) return "region extends outside the page";
+  if (geometry.shape?.type === "polygon") {
+    const outside = geometry.shape.points.some((p) =>
+      p.x < geometry.x - 1 || p.y < geometry.y - 1 || p.x > geometry.x + geometry.w + 1 || p.y > geometry.y + geometry.h + 1);
+    if (outside) return "polygon points must lie inside the region's box";
+  }
+  return null;
+}
 
 const PageSummary = t.Object({
   id: t.String(),
@@ -80,6 +116,8 @@ const BlockSchema = t.Object({
   source_text: t.Nullable(t.String()),
   translated_text: t.Nullable(t.String()),
   render: t.Nullable(t.Object({ font_size: t.Number(), lines: t.Array(t.String()), area: BoxSchema, fits: t.Boolean() })),
+  /** Region outline; null for plain rectangles. */
+  shape: t.Nullable(ShapeSchema),
 });
 
 const PageDetail = t.Object({ page: PageSummary, stages: t.Array(StageSchema), blocks: t.Array(BlockSchema) });
@@ -107,7 +145,7 @@ function toStage(row: PageStageRow) {
 }
 
 function toBlock(block: PageBlock) {
-  return { ...block, render: block.render ?? null };
+  return { ...block, render: block.render ?? null, shape: block.shape ?? null };
 }
 
 /** Everything the page editor shows, or null when the page doesn't exist. */
@@ -214,6 +252,61 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
         translated_text: t.Optional(t.String({ maxLength: 2000 })),
       }),
       response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
+    },
+  )
+
+  .post(
+    "/pages/:id/blocks",
+    ({ params, body, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      const { kind, include, ...geometry } = body;
+      const invalid = geometryError(check.page, geometry);
+      if (invalid) return status(422, { error: invalid });
+      await PageStore.insertBlock(params.id, kind, geometry, include ?? true);
+      await PageStore.markStale(params.id, stagesAffectedBy(kind));
+      return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
+    }),
+    {
+      params: IdParams,
+      body: t.Object({ kind: t.UnionEnum(["text", "sfx"]), include: t.Optional(t.Boolean()), ...GeometryBody }),
+      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
+    },
+  )
+
+  .put(
+    "/pages/:id/blocks/:idx",
+    ({ params, body, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      const invalid = geometryError(check.page, body);
+      if (invalid) return status(422, { error: invalid });
+      const block = (await PageStore.readJob(params.id))?.blocks.find((b) => b.id === params.idx);
+      if (!block || !(await PageStore.updateBlockGeometry(params.id, params.idx, body))) return status(404, { error: "block not found" });
+      await PageStore.markStale(params.id, stagesAffectedBy(block.kind));
+      return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
+    }),
+    {
+      params: t.Object({ id: IdParam, idx: t.Integer({ minimum: 1 }) }),
+      body: t.Object(GeometryBody),
+      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
+    },
+  )
+
+  .delete(
+    "/pages/:id/blocks/:idx",
+    ({ params, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      const block = (await PageStore.readJob(params.id))?.blocks.find((b) => b.id === params.idx);
+      if (!block || !(await PageStore.deleteBlock(params.id, params.idx))) return status(404, { error: "block not found" });
+      // Its lettering is no longer cleaned or typeset; OCR / translate of the remaining blocks is unaffected
+      await PageStore.markStale(params.id, block.kind === "sfx" ? ["clean_sfx", "render"] : ["clean_text", "render"]);
+      return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
+    }),
+    {
+      params: t.Object({ id: IdParam, idx: t.Integer({ minimum: 1 }) }),
+      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody },
     },
   )
 

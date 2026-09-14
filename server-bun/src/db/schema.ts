@@ -137,6 +137,8 @@ export const pageBlocks = sqliteTable("page_blocks", {
   translatedText: text("translated_text"),
   /** Typeset result JSON (font size, lines, area, fits) from the last render. */
   renderJson: text("render_json"),
+  /** Region shape JSON for ellipse / polygon regions drawn in the Studio; null means a plain rectangle. */
+  shapeJson: text("shape_json"),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 }, (table) => ({
   pageBlockIdx: uniqueIndex("page_blocks_page_idx_idx").on(table.pageId, table.idx),

@@ -54,6 +54,32 @@ export type { PageJobEvent } from "../../src/stores/translation-job-store";
 export const updateBlockText = (id: string, idx: number, text: { source_text?: string; translated_text?: string }) =>
   unwrap(api.studio.api.pages({ id }).blocks({ idx }).patch(text));
 
+/** Region outline stored with a block; rect is the default (returned as null). */
+export type BlockShape =
+  | { type: "rect" }
+  | { type: "ellipse" }
+  | { type: "polygon"; points: { x: number; y: number }[] };
+
+/** Box (always bounding the shape) and optional outline, in page pixels. */
+export interface BlockGeometry {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  shape?: BlockShape;
+}
+
+/** Adds a region drawn on the canvas; returns the page detail with the new block. */
+export const createBlock = (id: string, kind: "text" | "sfx", geometry: BlockGeometry) =>
+  unwrap(api.studio.api.pages({ id }).blocks.post({ kind, ...geometry }));
+
+/** Moves / resizes / reshapes a region. */
+export const updateBlockGeometry = (id: string, idx: number, geometry: BlockGeometry) =>
+  unwrap(api.studio.api.pages({ id }).blocks({ idx }).put(geometry));
+
+/** Removes a region. */
+export const deleteBlock = (id: string, idx: number) => unwrap(api.studio.api.pages({ id }).blocks({ idx }).delete());
+
 /** Re-run OCR or translation (for `blockIds`, or every text block) or typeset the page again. */
 export const runStage = (id: string, stage: "ocr" | "translate" | "render", blockIds?: number[]) =>
   unwrap(api.studio.api.pages({ id }).run.post({ stage, block_ids: blockIds }));

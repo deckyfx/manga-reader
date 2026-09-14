@@ -278,6 +278,30 @@ Verified: the in-process route checks pass, including a real re-render, history 
 
 ---
 
+### Phase 2 design (2026-09-14, branch `feat/studio-canvas`)
+
+Library: Fabric.js 7.4.0 (D7 confirmed: manga-reader's studio is Fabric).
+
+**Server: block geometry API**, each call under the per-page lock and refused (409) while the page is queued or running:
+- `POST /studio/api/pages/:id/blocks` `{ kind: "text" | "sfx", x, y, w, h, shape?, include? }` adds a region with the next free index.
+- `PUT …/blocks/:idx` `{ x, y, w, h, shape? }` moves, resizes or reshapes it, and clears its render.
+- `DELETE …/blocks/:idx` removes it.
+- Shapes: `rect` (the default, not stored) · `ellipse` · `polygon` with page-pixel points. They're stored in `page_blocks.shape_json` (migration `0004_block_shapes`). The box always bounds the shape and is what OCR crops and cleaning use.
+- Validation: the box must lie inside the page, and polygon points inside the box (422 otherwise).
+- Stale marking:
+  - adding or reshaping a text block marks `ocr`, `translate`, `clean_text` and `render`
+  - an sfx block marks `clean_sfx` and `render`
+  - deleting marks the clean stage and `render`
+
+**Client canvas** (`client/studio/canvas/`): Fabric stays behind a thin typed layer, so components never touch Fabric objects directly.
+- **Lifecycle:** create the `<canvas>` in an effect that's safe under StrictMode (dispose on cleanup), keep the instance in a ref, and resize with a ResizeObserver.
+- **Viewport:** the page image is the non-selectable background at page scale 1. Zoom and pan use `viewportTransform`: wheel zoom via `zoomToPoint`, space-drag or middle-drag to pan, and fit-to-screen. Pointer positions use scene coordinates, so region geometry is always in page pixels.
+- **Conversion:** one module, `regionToFabric` / `fabricToGeometry`. Polygon math goes through `calcTransformMatrix` and `pathOffset`, so moved, scaled or rotated shapes convert correctly. Objects carry `blockId` only; server data stays the source of truth.
+- **Tools:** select · rect · ellipse · polygon, as handlers with attach/detach. Draw tools don't start a new shape on top of an existing region. A polygon finishes on Enter, a double-click or clicking the first point; Escape cancels.
+- **Editing:** resize and move controls are on. `object:modified` sends `PUT`, a draw sends `POST`, and Delete/Backspace sends `DELETE`. The rendered blocks come from each response.
+- **Undo / redo:** a command stack of inverse API calls (create ↔ delete, geometry before ↔ after). Keyboard: Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y; tool keys V / R / E / P. Shortcuts are ignored while typing in an input.
+- **From manga-reader:** port the region union and ellipse-to-points, the attach/detach tool base, and reading-order sorting (threshold relative to image size, for later auto-detect). Rebuild zoom (manga-reader used a CSS scale), undo (additions only), conversion (duplicated, with polygon offset bugs) and persistence (never saved). Skip the brush/inpaint sidecar, the timeout-based reloads and the hand-drawn merge.
+
 ## 11. Adopt from manga-reader / avoid
 
 **Adopt** (`/home/decky/Documents/funs/bun/manga-reader`):
