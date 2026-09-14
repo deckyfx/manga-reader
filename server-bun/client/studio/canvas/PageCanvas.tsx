@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { Canvas, Circle, Ellipse, FabricImage, Line, Point, Polyline, Rect, type FabricObject } from "fabric";
-import { Circle as EllipseIcon, Maximize, MousePointer2, Pentagon, Redo2, Square, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { Circle as EllipseIcon, Maximize, MousePointer2, Pentagon, Redo2, Square, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import {
   createBlock,
   deleteBlock,
@@ -319,6 +319,9 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
 
     canvas.on("mouse:down", (opt) => {
       const e = opt.e as MouseEvent;
+      // A focused form control (e.g. the stage picker) would swallow Delete / Backspace and the tool keys
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && isTyping(focused)) focused.blur();
       if (spaceRef.current || e.button === 1) {
         panning = { x: e.clientX, y: e.clientY };
         canvas.setCursor("grabbing");
@@ -596,6 +599,15 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
             className="p-1.5 rounded-md text-gray-300 hover:bg-gray-800 disabled:opacity-40"
           >
             <Redo2 size={15} />
+          </button>
+          <button
+            onClick={() => actionsRef.current?.deleteSelected()}
+            disabled={disabled || selectedId === null}
+            title="Delete selected region (Delete)"
+            aria-label="Delete selected region"
+            className="p-1.5 rounded-md text-gray-300 hover:bg-red-900/60 hover:text-red-200 disabled:opacity-40"
+          >
+            <Trash2 size={15} />
           </button>
         </div>
         <div className="flex items-center gap-0.5 text-xs text-gray-400">

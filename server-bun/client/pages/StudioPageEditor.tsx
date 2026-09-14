@@ -210,7 +210,11 @@ export function StudioPageEditor() {
               <select
                 aria-label="Canvas background image"
                 value={canvasImage}
-                onChange={(e) => setCanvasImage(PAGE_IMAGES.find((img) => img.file === e.target.value)?.file ?? canvasImage)}
+                onChange={(e) => {
+                  setCanvasImage(PAGE_IMAGES.find((img) => img.file === e.target.value)?.file ?? canvasImage);
+                  // Hand the keyboard back to the canvas so Delete and the tool keys work right away
+                  e.currentTarget.blur();
+                }}
                 className="bg-gray-900 border border-gray-700 rounded-md px-2 py-1 text-xs"
               >
                 {PAGE_IMAGES.map((img) => (
