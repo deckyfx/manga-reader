@@ -267,35 +267,51 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
     });
   }, [history, perform]);
 
-  /** Saves the painted layers a stroke changed; the server marks the clean stages stale. */
-  const saveLayers = useCallback(async (touched: Record<MaskLayerName, boolean>) => {
-    const mask = maskRef.current;
-    if (!mask) return;
+  /**
+   * Saves the painted layers a stroke changed, to the page and layers it was painted on (the user may have moved to
+   * another page while an earlier save was in flight); the server marks the clean stages stale.
+   */
+  const saveLayers = useCallback(async (pageId: string, mask: MaskLayers, touched: Record<MaskLayerName, boolean>) => {
     for (const name of ["add", "erase"] as const) {
-      if (touched[name]) live.current.onDetail(await saveMaskLayer(live.current.pageId, name, mask.exportLayer(name)));
+      if (!touched[name]) continue;
+      const detail = await saveMaskLayer(pageId, name, mask.exportLayer(name));
+      // A late answer for a page the editor has left must not replace the current page's detail
+      if (live.current.pageId === pageId) live.current.onDetail(detail);
     }
   }, []);
 
   const paintStroke = useCallback((record: StrokeRecord) => {
+    const pageId = live.current.pageId;
+    const mask = maskRef.current;
+    if (!mask) return;
     // The stroke is already on the layer when it's recorded: only a later redo paints it again
     let firstRun = true;
     const show = (state: "before" | "after") => {
-      maskRef.current?.apply(record, state);
-      canvasRef.current?.requestRenderAll();
+      mask.apply(record, state);
+      if (maskRef.current === mask) canvasRef.current?.requestRenderAll();
+    };
+    /** Queues the stroke's area for Re-clean: only when the change can add pixels to the effective mask. */
+    const markForReclean = () => {
+      if (live.current.pageId === pageId) setPaintedAreas((areas) => [...areas, record.area]);
     };
     perform({
       label: record.layer === "add" ? "Paint mask" : "Erase mask",
       redo: async () => {
-        if (!firstRun) show("after");
+        const replay = !firstRun;
+        if (replay) show("after");
         firstRun = false;
-        await saveLayers(record.touched);
+        await saveLayers(pageId, mask, record.touched);
+        // The first run is queued below, right away; a redone add paints the text back in
+        if (replay && record.layer === "add") markForReclean();
       },
       undo: async () => {
         show("before");
-        await saveLayers(record.touched);
+        await saveLayers(pageId, mask, record.touched);
+        // Undoing an erase brings detected pixels back into the mask
+        if (record.layer === "erase") markForReclean();
       },
     });
-    if (record.layer === "add") setPaintedAreas((areas) => [...areas, record.area]);
+    if (record.layer === "add") markForReclean();
   }, [perform, saveLayers]);
 
   // Canvas lifecycle: created by hand inside the host so React never reconciles Fabric's DOM; StrictMode-safe
