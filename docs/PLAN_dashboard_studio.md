@@ -180,6 +180,7 @@ Layout: left page list (chapter thumbnails / Inbox) · centre canvas with viewpo
 
 1. User translates an image; the extension receives `job_id`, which is the page id (sending `page_url` and `image_src` with the job is planned).
 2. After swapping the image, the content script tags the `<img>` with `data-socr-job-id` and opens `GET /api/translate-page/:id/live`. One stream per translated page; it closes when the image leaves the document or the page unloads (D6).
+   - Known limitation: the stream opens after the swap, and the server keeps no event history for it, so a publish in the moments between the swap and the stream connecting is missed. In practice a Studio publish comes much later. Planned fix: open the stream before swapping, and have the server send the page's current revision on connect, so the tab can catch up.
 3. Studio publish → server emits `page-updated` to that page's live listeners → the content script sets `img.src = <server>/<result_url>?rev=N`.
 4. The extension's result panel gets an **Open in Studio** link (`<server>/studio/pages/:id`).
 5. Remove the dead `postMessage` relay (`web-ocr:image-updated`, `ImageUpdatedMsg`, `ImageUpdatedRelayMsg`, `replacePageImages`).
@@ -203,8 +204,18 @@ Layout: left page list (chapter thumbnails / Inbox) · centre canvas with viewpo
 Start after PR #14 (and its CodeRabbit fixes) is merged; branch `feat/studio-framework` from `master`.
 
 **Schema** (`src/db/schema.ts`, then `bun run db:generate`)
-- `pages`: `id` (job id / image hash), `source_url`, `width`, `height`, `revision`, `created_at`, `updated_at`.
-- `page_stages`: `page_id`, `stage` (`detect | ocr | translate | clean_text | clean_sfx | layout | burn`), `status` (`fresh | stale | error`; queued/running live on the page, see section 4), `file` (relative to the job folder, nullable), `error`, `updated_at`; unique on (`page_id`, `stage`).
+- `pages`: `id` (a generated UUIDv7; the extension's job id is this page id), `image_hash` (a separate column for the extension's reuse cache), `source`, `width`, `height`, `status`, `clean_sfx`, `revision`, `created_at`, `updated_at`. `image_hash` is unique for now; making it non-unique so the same image can appear in several chapters is phase 5 (section 5). Studio edits and live listeners address pages by `id`, never by hash.
+- `page_stages`: `page_id`, `stage`, `status` (`fresh | stale | error`; queued/running live on the page, see section 4), `file` (relative to the job folder, nullable), `error`, `updated_at`; unique on (`page_id`, `stage`).
+  - Canonical stage ids, as implemented: `detect | ocr | translate | clean_text | clean_sfx | render`. Splitting `render` into `layout` and `burn` is phase 4; until then, `layout` and `burn` elsewhere in this plan refer to that future split.
+  - Artifacts per stage, as served by `GET /studio/api/pages/:id/files/:file`:
+
+    | Stage | Files |
+    |---|---|
+    | `detect` | `original.png` (page input), `mask.png`, `overlay.png` |
+    | `ocr` | `crops/<block>.png` (not served) |
+    | `clean_text` | `clean-text.png` |
+    | `clean_sfx` | `clean-sfx.png` |
+    | `render` | `result.png`, `render-overlay.png`, `patches/<block>.png` (not served) |
 - `page_blocks`: `page_id`, `idx`, `kind`, `box` / `bubble` (JSON), `source_text`, `translated_text`, `clean` (bool), `layout` (JSON), `style` (JSON, nullable); unique on (`page_id`, `idx`).
 - The old `page_translation_jobs` / `page_translation_logs` stay until the migration question in §12 is decided.
 
@@ -241,13 +252,13 @@ Start after PR #14 (and its CodeRabbit fixes) is merged; branch `feat/studio-fra
 - `render` stays one stage; splitting it into `layout` and `burn` waits for phase 4 (manual burn).
 - The live stream is `GET /api/translate-page/:id/live`, and the page id is the job id.
 - Old `page_translation_jobs` / `page_translation_logs` rows are not migrated. The tables are untouched and unused by the Studio; pages translated before this change must be translated again to appear.
-- `PagePipeline` takes a `JobRepository`: the CLI keeps `blocks.json` and the server writes blocks to SQLite.
+- `PagePipeline` takes a `JobRepository`: the CLI keeps `blocks.json` and the server writes blocks to SQLite. They never share pages: the CLI works in `data/pages/work/<name>` and the server in `data/jobs/<page id>`, so each page has one authoritative block store. For server pages that's SQLite (D4); CLI work folders are scratch copies for tuning stages.
 - The `/read` UI is a placeholder page; `/read/api/volumes` is the only reader route.
 
 ### Phase 1 status (2026-09-14, same branch)
 
 Built:
-- **Runs:** `POST /studio/api/pages/:id/run { stage: "ocr" | "translate" | "render", block_ids? }`. OCR and translate can target single blocks; render always does the whole page. A run marks its stage fresh and the stages after it stale (ocr → translate + render, translate → render).
+- **Runs:** `POST /studio/api/pages/:id/run { stage: "ocr" | "translate" | "render", block_ids? }`. OCR and translate can target single blocks; render always does the whole page. A run marks its stage fresh and the stages after it stale (ocr → translate + render, translate → render). Limitation: freshness is page-wide, so a block-scoped OCR or translate run marks the whole stage fresh even if other blocks still need re-running. Per-block stale tracking is planned (see "Differences from the plan" and `TODO.txt`); render always runs for the whole page, so its freshness is exact.
 - **Edits:** `PATCH …/blocks/:idx` takes `source_text` and/or `translated_text`. A source edit marks translate and render stale; a translation edit marks render stale.
 - **History:** every publish snapshots `result.png` to `history/<rev>.png` and keeps the last 10. `GET …/history` and `GET …/history/:revision` read them. `POST …/rollback { revision }` restores a snapshot, publishes it as a new revision and marks render stale.
 - **Editor:**
