@@ -117,14 +117,14 @@ export async function fetchImage(rawUrl: string, resolve: Resolver = systemResol
     const status = res.statusCode ?? 0;
     const location = res.headers.location;
     if (status < 300 || status >= 400 || !location) break;
-    res.resume();
+    res.destroy();
     if (hop === MAX_REDIRECTS) throw new ImageLoadError("too many redirects");
     url = parseUrl(location, url);
   }
 
   const status = res.statusCode ?? 0;
   if (status < 200 || status >= 300) {
-    res.resume();
+    res.destroy();
     throw new ImageLoadError(`image URL returned HTTP ${status}`);
   }
   if (Number(res.headers["content-length"] ?? 0) > MAX_IMAGE_BYTES) {

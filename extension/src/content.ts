@@ -705,11 +705,15 @@ let watcherCheckQueued = false;
 /** Close the streams whose translated image left the page (e.g. a reader swapped pages). */
 function closeDetachedWatchers(): void {
   watcherCheckQueued = false;
-  for (const [jobId, es] of pageWatchers) {
-    if (document.querySelector(`img[data-socr-job-id="${CSS.escape(jobId)}"]`)) continue;
-    es.close();
-    pageWatchers.delete(jobId);
+  for (const jobId of [...pageWatchers.keys()]) {
+    if (!document.querySelector(`img[data-socr-job-id="${CSS.escape(jobId)}"]`)) stopWatching(jobId);
   }
+}
+
+/** Every stream removal goes through here: closes the stream and stops the observer once nothing is watched. */
+function stopWatching(jobId: string): void {
+  pageWatchers.get(jobId)?.close();
+  pageWatchers.delete(jobId);
   if (pageWatchers.size === 0) {
     watcherObserver?.disconnect();
     watcherObserver = null;
@@ -740,8 +744,7 @@ function watchPageUpdates(serverUrl: string, jobId: string): void {
     const shown = document.querySelectorAll<HTMLImageElement>(`img[data-socr-job-id="${CSS.escape(jobId)}"]`);
     if (shown.length === 0) {
       // The image left the page (e.g. the reader moved on): stop listening
-      es.close();
-      pageWatchers.delete(jobId);
+      stopWatching(jobId);
       return;
     }
     shown.forEach((img) => { img.srcset = ""; });
@@ -750,7 +753,7 @@ function watchPageUpdates(serverUrl: string, jobId: string): void {
 
   // EventSource reconnects on its own after network errors; it only closes for good when the server refuses the stream
   es.onerror = () => {
-    if (es.readyState === EventSource.CLOSED) pageWatchers.delete(jobId);
+    if (es.readyState === EventSource.CLOSED && pageWatchers.get(jobId) === es) stopWatching(jobId);
   };
 }
 
