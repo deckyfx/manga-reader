@@ -34,7 +34,7 @@ const MAX_ZOOM = 8;
 const MIN_REGION = 5;
 
 const TOOL_HINTS: Record<Tool, string> = {
-  select: "Click a region to select, drag to move, handles to resize, Delete to remove",
+  select: "Click a region to select, drag to move, handles to resize, Delete to remove; drag empty space to pan",
   rect: "Drag on empty space to draw a rectangle",
   ellipse: "Drag on empty space to draw an ellipse",
   polygon: "Click to add points; Enter, double-click or the first point to finish; Esc to cancel",
@@ -314,7 +314,16 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       const e = opt.e;
       e.preventDefault();
       e.stopPropagation();
-      setZoomTo(canvas.getZoom() * 0.999 ** e.deltaY, new Point(e.offsetX, e.offsetY));
+      // Ctrl/Cmd + wheel zooms (trackpad pinch arrives as ctrl + wheel too); plain wheel scrolls the page
+      if (e.ctrlKey || e.metaKey) {
+        setZoomTo(canvas.getZoom() * 0.99 ** e.deltaY, new Point(e.offsetX, e.offsetY));
+        return;
+      }
+      // Mice without horizontal wheels scroll sideways with Shift
+      const dx = e.shiftKey && e.deltaX === 0 ? e.deltaY : e.deltaX;
+      const dy = e.shiftKey && e.deltaX === 0 ? 0 : e.deltaY;
+      canvas.relativePan(new Point(-dx, -dy));
+      canvas.requestRenderAll();
     });
 
     canvas.on("mouse:down", (opt) => {
@@ -322,7 +331,8 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       // A focused form control (e.g. the stage picker) would swallow Delete / Backspace and the tool keys
       const focused = document.activeElement;
       if (focused instanceof HTMLElement && isTyping(focused)) focused.blur();
-      if (spaceRef.current || e.button === 1) {
+      // Pan: space-drag or middle-drag with any tool, or dragging empty space with the select tool
+      if (spaceRef.current || e.button === 1 || (live.current.tool === "select" && !opt.target)) {
         panning = { x: e.clientX, y: e.clientY };
         canvas.setCursor("grabbing");
         return;
@@ -623,7 +633,7 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
           </button>
         </div>
         <span className="ml-auto text-xs truncate max-w-full">
-          {error ? <span className="text-red-400">{error}</span> : busyCount > 0 ? <span className="text-gray-400">Saving…</span> : <span className="text-gray-500">{TOOL_HINTS[tool]} · Space-drag to pan</span>}
+          {error ? <span className="text-red-400">{error}</span> : busyCount > 0 ? <span className="text-gray-400">Saving…</span> : <span className="text-gray-500">{TOOL_HINTS[tool]} · Wheel to scroll, Ctrl+wheel to zoom, Space-drag to pan</span>}
         </span>
       </div>
       <div ref={hostRef} className="relative flex-1 min-h-0 overflow-hidden" />
