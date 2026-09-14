@@ -287,7 +287,7 @@ export class PagePipeline {
       this.report({ stage: "cleaning", message: `No ${label} to clean`, fraction: 1 });
       return null;
     }
-    this.report({ stage: "cleaning", message: `Cleaning ${regions.length} ${label}…`, fraction: 0 });
+    this.report({ stage: "cleaning", message: `Cleaning ${regions.length} ${label}${hasPainted ? " and painted areas" : ""}…`, fraction: 0 });
 
     const { data: rgb, info } = await sharp(this.path(input)).removeAlpha().toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
     const { mask, added, width, height } = await this.effectiveMask();
@@ -305,8 +305,10 @@ export class PagePipeline {
     const inpainter = await getInpainter();
     const { rgb: cleaned, flat, lama } = await inpainter.inpaintRgb(rgb, width, height, target, [...regions, ...paintedRegions]);
     await sharp(cleaned, { raw: { width, height, channels: 3 } }).png().toFile(this.path(output));
-    this.report({ stage: "cleaning", message: `Cleaned ${regions.length} ${label} (${flat} flat fill, ${lama} LaMa)`, fraction: 1 });
-    return { output, regions: regions.length, total, flat, lama };
+    const painted = paintedRegions.length > 0 ? ` and ${paintedRegions.length} painted area${paintedRegions.length === 1 ? "" : "s"}` : "";
+    this.report({ stage: "cleaning", message: `Cleaned ${regions.length} ${label}${painted} (${flat} flat fill, ${lama} LaMa)`, fraction: 1 });
+    // Painted areas count as cleaned regions too (a page may have nothing but painted areas)
+    return { output, regions: regions.length + paintedRegions.length, total: total + paintedRegions.length, flat, lama };
   }
 
   /**
