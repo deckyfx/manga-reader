@@ -242,7 +242,11 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
         if (parked) await rename(parked, dir).catch((restoreErr: unknown) => log.error({ err: restoreErr, pageId: params.id, parked }, "Couldn't restore the page folder"));
         throw err;
       }
-      if (parked) await rm(parked, { recursive: true, force: true });
+      // The page is already deleted: cleanup is best-effort, and leftovers are swept at the next server start
+      if (parked) {
+        await rm(parked, { recursive: true, force: true }).catch((err: unknown) =>
+          log.warn({ err, pageId: params.id, parked }, "Couldn't remove the deleted page's folder; it will be swept at next start"));
+      }
       log.info({ pageId: params.id }, "Page deleted");
       return { deleted: params.id };
     }),
@@ -266,11 +270,12 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
       if (body.source_text === undefined && body.translated_text === undefined) return status(422, { error: "nothing to update" });
-      if (!(await PageStore.updateBlockText(params.id, params.idx, { sourceText: body.source_text, translatedText: body.translated_text }))) {
+      // A new source text makes its translation stale too; a new translation only needs typesetting again.
+      // The edit and the stale marking commit together.
+      const stale: StageName[] = body.source_text !== undefined ? ["translate", "render"] : ["render"];
+      if (!(await PageStore.updateBlockText(params.id, params.idx, { sourceText: body.source_text, translatedText: body.translated_text }, stale))) {
         return status(404, { error: "block not found" });
       }
-      // A new source text makes its translation stale too; a new translation only needs typesetting again
-      await PageStore.markStale(params.id, body.source_text !== undefined ? ["translate", "render"] : ["render"]);
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
     {
@@ -292,8 +297,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       const invalid = geometryError(check.page, geometry);
       if (invalid) return status(422, { error: invalid });
       // Text is stored in the same insert, so restoring a deleted region (undo) is a single atomic request
-      await PageStore.insertBlock(params.id, kind, geometry, include ?? true, { sourceText: source_text, translatedText: translated_text });
-      await PageStore.markStale(params.id, stagesAffectedBy(kind));
+      await PageStore.insertBlock(params.id, kind, geometry, include ?? true, { sourceText: source_text, translatedText: translated_text }, stagesAffectedBy(kind));
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
     {
@@ -318,8 +322,9 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       const invalid = geometryError(check.page, body);
       if (invalid) return status(422, { error: invalid });
       const block = (await PageStore.readJob(params.id))?.blocks.find((b) => b.id === params.idx);
-      if (!block || !(await PageStore.updateBlockGeometry(params.id, params.idx, body))) return status(404, { error: "block not found" });
-      await PageStore.markStale(params.id, stagesAffectedBy(block.kind));
+      if (!block || !(await PageStore.updateBlockGeometry(params.id, params.idx, body, stagesAffectedBy(block.kind)))) {
+        return status(404, { error: "block not found" });
+      }
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
     {
@@ -335,9 +340,9 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
       const block = (await PageStore.readJob(params.id))?.blocks.find((b) => b.id === params.idx);
-      if (!block || !(await PageStore.deleteBlock(params.id, params.idx))) return status(404, { error: "block not found" });
       // Its lettering is no longer cleaned or typeset; OCR / translate of the remaining blocks is unaffected
-      await PageStore.markStale(params.id, block.kind === "sfx" ? ["clean_sfx", "render"] : ["clean_text", "render"]);
+      const stale: StageName[] = block?.kind === "sfx" ? ["clean_sfx", "render"] : ["clean_text", "render"];
+      if (!block || !(await PageStore.deleteBlock(params.id, params.idx, stale))) return status(404, { error: "block not found" });
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
     {

@@ -19,6 +19,9 @@ async function migrateDb(): Promise<void> {
   const { PageStore } = await import("@/stores/page-store");
   const interrupted = await PageStore.failInterrupted();
   if (interrupted > 0) bootLog.warn(`${interrupted} page job(s) were interrupted by the last shutdown and marked as failed`);
+  // Folders of deleted pages whose cleanup failed last time
+  const swept = await PageStore.sweepDeletedPageFolders();
+  if (swept > 0) bootLog.info(`Removed ${swept} leftover folder(s) of deleted pages`);
 }
 
 async function loadModels(): Promise<void> {

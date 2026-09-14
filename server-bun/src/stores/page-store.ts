@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { randomUUIDv7 } from "bun";
+import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { db } from "@/db/index";
 import { pageBlocks, pages, pageStages, type NewPage, type Page, type PageStageRow } from "@/db/schema";
@@ -39,6 +40,21 @@ export const STAGE_FILES: Record<StageName, string | null> = {
 export const pageDir = (id: string): string => join(PAGE_JOBS_DIR, id);
 
 type RenderInfo = NonNullable<PageBlock["render"]>;
+
+/** A write transaction (bun-sqlite transactions are synchronous). */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Marks stages stale inside a transaction, so a block edit and its invalidation commit or roll back together. */
+function markStaleIn(tx: Tx, pageId: string, stages: readonly StageName[]): void {
+  if (stages.length === 0) return;
+  tx.update(pageStages)
+    .set({ status: "stale", updatedAt: sql`(datetime('now'))` })
+    .where(and(eq(pageStages.pageId, pageId), inArray(pageStages.stage, [...stages])))
+    .run();
+}
+
+/** Folder name of a deleted page whose cleanup is pending: `<page id>.deleting-<timestamp>`. */
+const PARKED_FOLDER = /^[A-Za-z0-9-]+\.deleting-\d+$/;
 
 /** Pages, their stage state and blocks. SQLite is the source of truth; the page folder only holds images. */
 export class PageStore {
@@ -80,6 +96,22 @@ export class PageStore {
       .where(inArray(pages.status, ["queued", "running"]))
       .returning({ id: pages.id });
     return rows.length;
+  }
+
+  /**
+   * Removes folders of deleted pages whose cleanup failed (see DELETE /studio/api/pages/:id). Only direct entries
+   * of the jobs directory named `<page id>.deleting-<timestamp>` are touched. Returns how many were removed.
+   */
+  static async sweepDeletedPageFolders(): Promise<number> {
+    let entries: string[];
+    try {
+      entries = await readdir(PAGE_JOBS_DIR);
+    } catch {
+      return 0;
+    }
+    const parked = entries.filter((name) => PARKED_FOLDER.test(name));
+    await Promise.all(parked.map((name) => rm(join(PAGE_JOBS_DIR, name), { recursive: true, force: true })));
+    return parked.length;
   }
 
   /** Deletes a page row; its stages and blocks go with it (foreign keys cascade). False when it didn't exist. */
@@ -181,70 +213,106 @@ export class PageStore {
     });
   }
 
-  /** Sets one block's source text and/or translation; false when the block doesn't exist. */
-  static async updateBlockText(pageId: string, idx: number, text: { sourceText?: string; translatedText?: string }): Promise<boolean> {
-    const rows = await db
-      .update(pageBlocks)
-      .set({ ...text, updatedAt: sql`(datetime('now'))` })
-      .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))
-      .returning({ idx: pageBlocks.idx });
-    return rows.length > 0;
+  /**
+   * Sets one block's source text and/or translation and marks `staleStages` stale in the same transaction.
+   * False (and nothing marked) when the block doesn't exist.
+   */
+  static async updateBlockText(
+    pageId: string,
+    idx: number,
+    text: { sourceText?: string; translatedText?: string },
+    staleStages: readonly StageName[] = [],
+  ): Promise<boolean> {
+    return db.transaction((tx) => {
+      const rows = tx
+        .update(pageBlocks)
+        .set({ ...text, updatedAt: sql`(datetime('now'))` })
+        .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))
+        .returning({ idx: pageBlocks.idx })
+        .all();
+      if (rows.length === 0) return false;
+      markStaleIn(tx, pageId, staleStages);
+      return true;
+    });
   }
 
-  /** Adds a block drawn in the Studio with the next free index and returns that index. Call under the page lock. */
+  /**
+   * Adds a block drawn in the Studio with the next free index and marks `staleStages` stale, all in one transaction.
+   * Returns the new index. Call under the page lock.
+   */
   static async insertBlock(
     pageId: string,
     kind: PageBlock["kind"],
     geometry: BlockGeometry,
     include = true,
     text: { sourceText?: string | null; translatedText?: string | null } = {},
+    staleStages: readonly StageName[] = [],
   ): Promise<number> {
-    const [row] = await db
-      .select({ max: sql<number>`coalesce(max(${pageBlocks.idx}), 0)` })
-      .from(pageBlocks)
-      .where(eq(pageBlocks.pageId, pageId));
-    const idx = (row?.max ?? 0) + 1;
-    await db.insert(pageBlocks).values({
-      pageId,
-      idx,
-      kind,
-      x: geometry.x,
-      y: geometry.y,
-      w: geometry.w,
-      h: geometry.h,
-      include,
-      shapeJson: shapeToJson(geometry.shape),
-      sourceText: text.sourceText ?? null,
-      translatedText: text.translatedText ?? null,
+    return db.transaction((tx) => {
+      const row = tx
+        .select({ max: sql<number>`coalesce(max(${pageBlocks.idx}), 0)` })
+        .from(pageBlocks)
+        .where(eq(pageBlocks.pageId, pageId))
+        .get();
+      const idx = (row?.max ?? 0) + 1;
+      tx.insert(pageBlocks)
+        .values({
+          pageId,
+          idx,
+          kind,
+          x: geometry.x,
+          y: geometry.y,
+          w: geometry.w,
+          h: geometry.h,
+          include,
+          shapeJson: shapeToJson(geometry.shape),
+          sourceText: text.sourceText ?? null,
+          translatedText: text.translatedText ?? null,
+        })
+        .run();
+      markStaleIn(tx, pageId, staleStages);
+      return idx;
     });
-    return idx;
   }
 
-  /** Moves / resizes / reshapes a block; its previous render no longer applies. False when the block doesn't exist. */
-  static async updateBlockGeometry(pageId: string, idx: number, geometry: BlockGeometry): Promise<boolean> {
-    const rows = await db
-      .update(pageBlocks)
-      .set({
-        x: geometry.x,
-        y: geometry.y,
-        w: geometry.w,
-        h: geometry.h,
-        shapeJson: shapeToJson(geometry.shape),
-        renderJson: null,
-        updatedAt: sql`(datetime('now'))`,
-      })
-      .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))
-      .returning({ idx: pageBlocks.idx });
-    return rows.length > 0;
+  /**
+   * Moves / resizes / reshapes a block (its previous render no longer applies) and marks `staleStages` stale in the
+   * same transaction. False (and nothing marked) when the block doesn't exist.
+   */
+  static async updateBlockGeometry(pageId: string, idx: number, geometry: BlockGeometry, staleStages: readonly StageName[] = []): Promise<boolean> {
+    return db.transaction((tx) => {
+      const rows = tx
+        .update(pageBlocks)
+        .set({
+          x: geometry.x,
+          y: geometry.y,
+          w: geometry.w,
+          h: geometry.h,
+          shapeJson: shapeToJson(geometry.shape),
+          renderJson: null,
+          updatedAt: sql`(datetime('now'))`,
+        })
+        .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))
+        .returning({ idx: pageBlocks.idx })
+        .all();
+      if (rows.length === 0) return false;
+      markStaleIn(tx, pageId, staleStages);
+      return true;
+    });
   }
 
-  /** Removes a block; false when it doesn't exist. */
-  static async deleteBlock(pageId: string, idx: number): Promise<boolean> {
-    const rows = await db
-      .delete(pageBlocks)
-      .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))
-      .returning({ idx: pageBlocks.idx });
-    return rows.length > 0;
+  /** Removes a block and marks `staleStages` stale in the same transaction. False (and nothing marked) when it doesn't exist. */
+  static async deleteBlock(pageId: string, idx: number, staleStages: readonly StageName[] = []): Promise<boolean> {
+    return db.transaction((tx) => {
+      const rows = tx
+        .delete(pageBlocks)
+        .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))
+        .returning({ idx: pageBlocks.idx })
+        .all();
+      if (rows.length === 0) return false;
+      markStaleIn(tx, pageId, staleStages);
+      return true;
+    });
   }
 
   /** Pipeline storage backed by this store, so every stage writes straight to SQLite. */
