@@ -3,9 +3,9 @@
  * emits (`bun run --cwd ../server-bun types:api`), so request and response shapes are checked at build time.
  */
 import { treaty } from "@elysiajs/eden";
-import type { Api, PageJobEvent } from "../../server-bun/types/src/api";
+import type { Api, PageJobEvent, PageLiveEvent } from "../../server-bun/types/src/api";
 
-export type { PageJobEvent };
+export type { PageJobEvent, PageLiveEvent };
 
 export function serverApi(serverUrl: string) {
   return treaty<Api>(serverUrl.replace(/\/$/, ""));

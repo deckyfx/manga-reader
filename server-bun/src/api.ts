@@ -18,3 +18,4 @@ export const api = new Elysia()
 
 export type Api = typeof api;
 export type { PageJobEvent } from "@/stores/translation-job-store";
+export type { PageLiveEvent } from "@/stores/page-live-channel";

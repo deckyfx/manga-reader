@@ -1,9 +1,9 @@
-import { BrowserRouter, Routes, Route } from "react-router";
+import { BrowserRouter, Navigate, Routes, Route } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "./components/Layout";
-import { JobsPage } from "./pages/JobsPage";
-import { StudioPage } from "./pages/StudioPage";
-import { LibraryPage } from "./pages/LibraryPage";
+import { StudioPagesPage } from "./pages/StudioPagesPage";
+import { StudioPageEditor } from "./pages/StudioPageEditor";
+import { ReadPage } from "./pages/ReadPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
 const queryClient = new QueryClient({
@@ -18,9 +18,10 @@ export function App() {
       <BrowserRouter>
         <Routes>
           <Route element={<Layout />}>
-            <Route index element={<JobsPage />} />
-            <Route path="studio/:id" element={<StudioPage />} />
-            <Route path="library" element={<LibraryPage />} />
+            <Route index element={<Navigate to="/studio" replace />} />
+            <Route path="studio" element={<StudioPagesPage />} />
+            <Route path="studio/pages/:id" element={<StudioPageEditor />} />
+            <Route path="read" element={<ReadPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>

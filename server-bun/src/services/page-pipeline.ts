@@ -9,7 +9,7 @@
  *   clean      clean-text.png (bubbles, captions)  ·  clean-sfx.png (sound effects, optional)
  *   render     patches/<id>.png, render-overlay.png, result.png
  */
-import sharp, { type OverlayOptions } from "sharp";
+import sharp, { type OverlayOptions, type Sharp } from "sharp";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { maskFromImage, maskToPng, selectBlockMask, type BlockKind, type Box } from "@/lib/mask";
@@ -92,6 +92,14 @@ export function missingPipelineModels(): string[] {
   return [textSegModelPath(), inpaintModelPath()].filter((path) => !existsSync(path));
 }
 
+/**
+ * Upright, opaque page: applies the EXIF orientation (phone photos, some scans) and flattens transparency onto
+ * white, since the stages drop alpha and transparent pixels often hide black underneath.
+ */
+export function normalisePage(image: Sharp): Sharp {
+  return image.rotate().flatten({ background: "#ffffff" });
+}
+
 /** Bubble covering most of the block, if any. */
 function matchBubble(block: Box, bubbles: Box[]): Box | null {
   let best: Box | null = null, bestShare = 0.5;
@@ -107,10 +115,31 @@ function matchBubble(block: Box, bubbles: Box[]): Box | null {
   return best;
 }
 
+/** Where a page's blocks and metadata are stored: blocks.json for the CLI, SQLite for the server. */
+export interface JobRepository {
+  read(): Promise<PageJob | null>;
+  write(job: PageJob): Promise<void>;
+}
+
+/** Stores the job as blocks.json inside the job directory. */
+export function fileJobRepository(dir: string): JobRepository {
+  const path = join(dir, "blocks.json");
+  return {
+    read: async () => {
+      const file = Bun.file(path);
+      return (await file.exists()) ? ((await file.json()) as PageJob) : null;
+    },
+    write: async (job) => {
+      await Bun.write(path, JSON.stringify(job, null, 2));
+    },
+  };
+}
+
 export class PagePipeline {
   constructor(
     readonly dir: string,
     private readonly report: ProgressReporter = () => {},
+    private readonly repository: JobRepository = fileJobRepository(dir),
   ) {}
 
   /** Path of a file inside the job directory. */
@@ -118,15 +147,14 @@ export class PagePipeline {
     return join(this.dir, file);
   }
 
-  /** Blocks and metadata from blocks.json, or null before `detect` has run. */
-  async readJob(): Promise<PageJob | null> {
-    const file = Bun.file(this.path("blocks.json"));
-    return (await file.exists()) ? ((await file.json()) as PageJob) : null;
+  /** Blocks and metadata, or null before `detect` has run. */
+  readJob(): Promise<PageJob | null> {
+    return this.repository.read();
   }
 
-  /** Saves blocks and metadata to blocks.json. */
-  async writeJob(job: PageJob): Promise<void> {
-    await Bun.write(this.path("blocks.json"), JSON.stringify(job, null, 2));
+  /** Saves blocks and metadata. */
+  writeJob(job: PageJob): Promise<void> {
+    return this.repository.write(job);
   }
 
   /** Text mask and blocks. Text is grouped per bubble when the bubble detector is available. */
@@ -135,7 +163,7 @@ export class PagePipeline {
     // Later stages pick their input by file existence, so outputs from an earlier run would go stale
     for (const stale of DERIVED_OUTPUTS) rmSync(this.path(stale), { recursive: true, force: true });
     this.report({ stage: "detecting", message: "Detecting bubbles and text…", fraction: 0 });
-    await sharp(image).png().toFile(this.path("original.png"));
+    await normalisePage(sharp(image)).png().toFile(this.path("original.png"));
     const page = Buffer.from(await Bun.file(this.path("original.png")).arrayBuffer());
 
     const detector = await getBubbleDetector();
@@ -186,10 +214,10 @@ export class PagePipeline {
       .toFile(this.path("overlay.png"));
   }
 
-  /** Crops each text block from original.png and reads its source text. */
-  async ocr(job: PageJob, readText: PipelineEngines["ocr"]): Promise<void> {
+  /** Crops each text block (or only `blockIds`) from original.png and reads its source text. */
+  async ocr(job: PageJob, readText: PipelineEngines["ocr"], blockIds?: number[]): Promise<void> {
     mkdirSync(this.path("crops"), { recursive: true });
-    const targets = job.blocks.filter((b) => b.kind === "text");
+    const targets = job.blocks.filter((b) => b.kind === "text" && (!blockIds || blockIds.includes(b.id)));
     this.report({ stage: "ocr", message: `Reading ${targets.length} text blocks…`, fraction: 0 });
     for (const [i, b] of targets.entries()) {
       this.report({ stage: "ocr", message: `Reading text ${i + 1}/${targets.length}`, fraction: i / targets.length, detail: true });
@@ -201,9 +229,9 @@ export class PagePipeline {
     this.report({ stage: "ocr", message: `Read ${targets.length} text blocks`, fraction: 1 });
   }
 
-  /** Returns the translation engine used (e.g. "deepl"), or null when there was nothing to translate. */
-  async translate(job: PageJob, translateText: PipelineEngines["translate"]): Promise<string | null> {
-    const targets = job.blocks.filter((b) => b.kind === "text" && b.source_text?.trim());
+  /** Translates text blocks with source text (or only `blockIds`); returns the engine used (e.g. "deepl"), or null when there was nothing to translate. */
+  async translate(job: PageJob, translateText: PipelineEngines["translate"], blockIds?: number[]): Promise<string | null> {
+    const targets = job.blocks.filter((b) => b.kind === "text" && b.source_text?.trim() && (!blockIds || blockIds.includes(b.id)));
     this.report({ stage: "translating", message: `Translating ${targets.length} text blocks…`, fraction: 0 });
     let engine: string | null = null;
     for (const [i, b] of targets.entries()) {

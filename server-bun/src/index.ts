@@ -6,14 +6,19 @@ import { logger, childLogger } from "@/lib/logger";
 import { loggerPlugin } from "@/plugins/plugin-logger";
 import { api } from "@/api";
 import { routeSettings } from "@/plugins/route-settings";
-import { portalPlugin } from "@/plugins/portal/index";
-import { routeSpa } from "@/plugins/route-spa";
+import { studioPlugin } from "@/plugins/studio/index";
+import { readPlugin } from "@/plugins/read/index";
+import { spaRoutes } from "@/plugins/route-spa";
 
 const bootLog = childLogger("boot");
 
 async function migrateDb(): Promise<void> {
   const { MigrationManager } = await import("@/db/migration-manager");
   await MigrationManager.init();
+  // Page jobs run in memory: anything still queued or running belonged to the previous process
+  const { PageStore } = await import("@/stores/page-store");
+  const interrupted = await PageStore.failInterrupted();
+  if (interrupted > 0) bootLog.warn(`${interrupted} page job(s) were interrupted by the last shutdown and marked as failed`);
 }
 
 async function loadModels(): Promise<void> {
@@ -134,13 +139,13 @@ await loadModels().catch((err) => {
   process.exit(1);
 });
 
-const app = new Elysia()
+const app = new Elysia({ serve: { routes: spaRoutes } })
   .use(loggerPlugin)
   .use(cors())
   .use(api)
   .use(routeSettings)
-  .use(portalPlugin)
-  .use(routeSpa);
+  .use(studioPlugin)
+  .use(readPlugin);
 
 const listen = env.SOCKET_PATH
   ? { unix: env.SOCKET_PATH }
