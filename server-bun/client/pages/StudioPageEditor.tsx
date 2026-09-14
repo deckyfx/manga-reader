@@ -19,6 +19,7 @@ import {
 import { JobProgress } from "../components/JobProgress";
 import { StatusBadge } from "../components/StatusBadge";
 import { usePageJobEvents } from "../hooks/usePageJobEvents";
+import { PageCanvas } from "../studio/canvas/PageCanvas";
 
 const isBusy = (status: string | undefined) => status === "queued" || status === "running";
 
@@ -61,6 +62,10 @@ export function StudioPageEditor() {
       action();
     }, release);
   }, []);
+
+  const [view, setView] = useState<"canvas" | "compare">("canvas");
+  const [canvasImage, setCanvasImage] = useState<PageImage>("original.png");
+  const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
 
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);
   const onPublished = (result: { revision: number; notified: number }) => {
@@ -108,6 +113,19 @@ export function StudioPageEditor() {
           ))}
         </div>
 
+        <div className="flex items-center rounded-md border border-gray-700 overflow-hidden text-xs" role="group" aria-label="Editor view">
+          {(["canvas", "compare"] as const).map((value) => (
+            <button
+              key={value}
+              onClick={() => setView(value)}
+              aria-pressed={view === value}
+              className={`px-2.5 py-1 ${view === value ? "bg-indigo-600 text-white" : "text-gray-400 hover:bg-gray-800"}`}
+            >
+              {value === "canvas" ? "Canvas" : "Compare"}
+            </button>
+          ))}
+        </div>
+
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {actionError && <span className="text-xs text-red-400">{actionError.message}</span>}
           {published && !publishM.isPending && (
@@ -147,14 +165,40 @@ export function StudioPageEditor() {
         <ProcessingView pageId={page.id} status={page.status} version={version} job={job} />
       ) : (
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-        <StageCompare pageId={page.id} version={version} />
+        {view === "canvas" ? (
+          <PageCanvas
+            pageId={page.id}
+            imageUrl={pageFileUrl(page.id, canvasImage, version)}
+            page={{ width: page.width, height: page.height }}
+            blocks={blocks}
+            disabled={busy}
+            selectedId={selectedBlock}
+            onSelect={setSelectedBlock}
+            onDetail={setDetail}
+            onReload={() => void qc.invalidateQueries({ queryKey: ["studio-page", id] })}
+            toolbarStart={
+              <select
+                aria-label="Canvas background image"
+                value={canvasImage}
+                onChange={(e) => setCanvasImage(PAGE_IMAGES.find((img) => img.file === e.target.value)?.file ?? canvasImage)}
+                className="bg-gray-900 border border-gray-700 rounded-md px-2 py-1 text-xs"
+              >
+                {PAGE_IMAGES.map((img) => (
+                  <option key={img.file} value={img.file}>{img.label}</option>
+                ))}
+              </select>
+            }
+          />
+        ) : (
+          <StageCompare pageId={page.id} version={version} />
+        )}
 
         <aside className="lg:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-gray-800 overflow-y-auto p-3 space-y-3">
           <div className="text-xs text-gray-500">
             {textBlocks.length} text block{textBlocks.length === 1 ? "" : "s"} · {sfxCount} sound effect{sfxCount === 1 ? "" : "s"}
           </div>
           {textBlocks.map((block) => (
-            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} />
+            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} />
           ))}
           <HistoryPanel pageId={page.id} currentRevision={page.revision} disabled={busy} onRolledBack={onPublished} />
         </aside>
@@ -288,7 +332,7 @@ function useSavedText(saved: string) {
 }
 
 /** One text block: editable source text and translation, plus per-block OCR and translation re-runs. */
-function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves, queued }: {
+function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves, queued, selected, onSelect }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
@@ -299,7 +343,14 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
   afterSaves: (key: string, action: () => void) => void;
   /** Keys of actions currently waiting on saves. */
   queued: ReadonlySet<string>;
+  /** Selected on the canvas: highlighted and scrolled into view. */
+  selected: boolean;
+  onSelect: () => void;
 }) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selected) cardRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selected]);
   const ocrKey = `block:${block.id}:ocr`;
   const translateKey = `block:${block.id}:translate`;
   const source = useSavedText(block.source_text ?? "");
@@ -316,7 +367,11 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
   const error = saveM.error ?? runM.error;
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-2.5 space-y-1.5">
+    <div
+      ref={cardRef}
+      onClick={onSelect}
+      className={`bg-gray-900 border rounded-lg p-2.5 space-y-1.5 transition-colors ${selected ? "border-sky-400" : "border-gray-800"}`}
+    >
       <div className="flex items-center gap-2 text-xs">
         <span className="font-semibold text-sky-400">#{block.id}</span>
         {block.render && !block.render.fits && (
