@@ -58,6 +58,10 @@ function readWheelMode(): WheelMode {
 
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 8;
+/** Zoom speed per wheel pixel: one ordinary wheel notch (~100px) zooms exactly 10%, about 7 notches to double. */
+const WHEEL_ZOOM_RATE = Math.log(1.1) / 100;
+/** Largest wheel delta (pixels) honoured per event, so fast flicks and hi-res wheels don't jump several levels. */
+const WHEEL_MAX_DELTA = 300;
 /** Drawn regions smaller than this (page pixels) are treated as accidental clicks. */
 const MIN_REGION = 5;
 
@@ -358,7 +362,12 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       e.preventDefault();
       e.stopPropagation();
       const mode = live.current.wheelMode;
-      const zoom = () => setZoomTo(canvas.getZoom() * 0.99 ** e.deltaY, new Point(e.offsetX, e.offsetY));
+      // Wheels report pixels, lines (Firefox) or pages: normalise to pixels, and cap one event so a flick can't jump levels
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.getHeight() : 1;
+      const deltaX = Math.max(-WHEEL_MAX_DELTA, Math.min(WHEEL_MAX_DELTA, e.deltaX * unit));
+      const deltaY = Math.max(-WHEEL_MAX_DELTA, Math.min(WHEEL_MAX_DELTA, e.deltaY * unit));
+      // Exponential steps: a 100px wheel notch zooms 10%, trackpad pinches (small deltas) stay fine-grained
+      const zoom = () => setZoomTo(canvas.getZoom() * Math.exp(-deltaY * WHEEL_ZOOM_RATE), new Point(e.offsetX, e.offsetY));
       const pan = (dx: number, dy: number) => {
         canvas.relativePan(new Point(-dx, -dy));
         canvas.requestRenderAll();
@@ -369,15 +378,15 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
         return;
       }
       // Some browsers turn Shift + wheel into horizontal deltas, so take whichever axis moved
-      const amount = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+      const amount = deltaY !== 0 ? deltaY : deltaX;
       if (mode === "zoom") {
         if (e.shiftKey) pan(0, amount);
         else zoom();
         return;
       }
       // Trackpads send both axes at once: a two-finger swipe moves freely in either scroll mode
-      if (!e.shiftKey && e.deltaX !== 0 && e.deltaY !== 0) {
-        pan(e.deltaX, e.deltaY);
+      if (!e.shiftKey && deltaX !== 0 && deltaY !== 0) {
+        pan(deltaX, deltaY);
         return;
       }
       // Shift switches direction: vertical mode scrolls sideways, horizontal mode scrolls up/down
