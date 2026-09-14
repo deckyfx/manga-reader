@@ -137,7 +137,10 @@ export async function submitPageJob(load: () => Promise<Buffer>, options: Submit
   try {
     let page: Buffer;
     try {
-      page = await normalisePage(sharp(await load(), { limitInputPixels: MAX_INPUT_PIXELS })).png().toBuffer();
+      const input = await load();
+      // Loaders cap their own reads; this keeps any loader from handing sharp an oversized buffer
+      if (input.byteLength > MAX_IMAGE_BYTES) throw new ImageLoadError("image too large (max 15 MB)");
+      page = await normalisePage(sharp(input, { limitInputPixels: MAX_INPUT_PIXELS })).png().toBuffer();
     } catch (err) {
       return { ok: false, code: 400, error: err instanceof ImageLoadError ? err.message : "image could not be decoded" };
     }
