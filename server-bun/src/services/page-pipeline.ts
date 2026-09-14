@@ -12,7 +12,7 @@
 import sharp, { type OverlayOptions, type Sharp } from "sharp";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { maskFromImage, maskToPng, selectBlockMask, type BlockKind, type Box } from "@/lib/mask";
+import { labelComponents, maskFromImage, maskToPng, selectBlockMask, type BlockKind, type Box } from "@/lib/mask";
 import { getTextSegmenter, textSegModelPath } from "@/services/text-seg-service";
 import { getBubbleDetector } from "@/services/bubble-service";
 import { getInpainter, inpaintModelPath } from "@/services/inpaint-service";
@@ -95,8 +95,16 @@ export interface RenderResult {
   skipped: number[];
 }
 
+/** Mask layers painted in the Studio: pixels to add to, or erase from, the detector's text mask. */
+export type MaskLayer = "add" | "erase";
+
+export const MASK_LAYER_FILES: Record<MaskLayer, string> = {
+  add: "mask-add.png",
+  erase: "mask-erase.png",
+};
+
 /** Files produced after `detect`, removed when a page is detected again. */
-const DERIVED_OUTPUTS = ["crops", "clean-text.png", "clean-sfx.png", "patches", "render-overlay.png", "result.png"];
+const DERIVED_OUTPUTS = ["crops", "clean-text.png", "clean-sfx.png", "patches", "render-overlay.png", "result.png", ...Object.values(MASK_LAYER_FILES)];
 
 /** Model files the pipeline cannot run without (the bubble detector is optional). */
 export function missingPipelineModels(): string[] {
@@ -272,25 +280,103 @@ export class PagePipeline {
 
     const regions = job.blocks.filter((b) => b.kind === kind && b.include);
     const total = job.blocks.filter((b) => b.kind === kind).length;
-    if (regions.length === 0) {
+    const hasPainted = kind === "text" && existsSync(this.path(MASK_LAYER_FILES.add));
+    if (regions.length === 0 && !hasPainted) {
       // Still write the output: later stages choose their input by file existence
       await sharp(this.path(input)).png().toFile(this.path(output));
       this.report({ stage: "cleaning", message: `No ${label} to clean`, fraction: 1 });
       return null;
     }
-    this.report({ stage: "cleaning", message: `Cleaning ${regions.length} ${label}…`, fraction: 0 });
+    this.report({ stage: "cleaning", message: `Cleaning ${regions.length} ${label}${hasPainted ? " and painted areas" : ""}…`, fraction: 0 });
 
     const { data: rgb, info } = await sharp(this.path(input)).removeAlpha().toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
-    const { mask, width, height } = await maskFromImage(this.path("mask.png"));
+    const { mask, added, width, height } = await this.effectiveMask();
     if (width !== info.width || height !== info.height) throw new Error(`mask.png size does not match ${input}`);
     const selection = job.blocks.map((b) => ({ ...b, include: b.kind === kind && b.include }));
     const target = selectBlockMask(mask, width, height, selection);
 
+    // Painted additions are removed in the text pass wherever they are, even outside any block: the user asked for it
+    const paintedRegions: Box[] = [];
+    if (kind === "text" && added) {
+      for (let i = 0; i < target.length; i++) if (added[i]) target[i] = 1;
+      paintedRegions.push(...labelComponents(added, width, height).boxes);
+    }
+
     const inpainter = await getInpainter();
-    const { rgb: cleaned, flat, lama } = await inpainter.inpaintRgb(rgb, width, height, target, regions);
+    const { rgb: cleaned, flat, lama } = await inpainter.inpaintRgb(rgb, width, height, target, [...regions, ...paintedRegions]);
     await sharp(cleaned, { raw: { width, height, channels: 3 } }).png().toFile(this.path(output));
-    this.report({ stage: "cleaning", message: `Cleaned ${regions.length} ${label} (${flat} flat fill, ${lama} LaMa)`, fraction: 1 });
-    return { output, regions: regions.length, total, flat, lama };
+    const painted = paintedRegions.length > 0 ? ` and ${paintedRegions.length} painted area${paintedRegions.length === 1 ? "" : "s"}` : "";
+    this.report({ stage: "cleaning", message: `Cleaned ${regions.length} ${label}${painted} (${flat} flat fill, ${lama} LaMa)`, fraction: 1 });
+    // Painted areas count as cleaned regions too (a page may have nothing but painted areas)
+    return { output, regions: regions.length + paintedRegions.length, total: total + paintedRegions.length, flat, lama };
+  }
+
+  /**
+   * Text mask the clean stages remove: the detector's mask.png, plus pixels painted into mask-add.png, minus pixels
+   * painted into mask-erase.png. `added` is the painted-in layer minus erasures (null when there is none). Layers
+   * with a different size than mask.png are refused rather than stretched.
+   */
+  async effectiveMask(): Promise<{ mask: Uint8Array; added: Uint8Array | null; width: number; height: number }> {
+    const { mask, width, height } = await maskFromImage(this.path("mask.png"));
+    const layer = async (name: MaskLayer): Promise<Uint8Array | null> => {
+      const file = this.path(MASK_LAYER_FILES[name]);
+      if (!existsSync(file)) return null;
+      const decoded = await maskFromImage(file);
+      if (decoded.width !== width || decoded.height !== height) throw new Error(`${MASK_LAYER_FILES[name]} size does not match mask.png`);
+      return decoded.mask;
+    };
+    const [add, erase] = await Promise.all([layer("add"), layer("erase")]);
+    const added = add ? new Uint8Array(add.length) : null;
+    for (let i = 0; i < mask.length; i++) {
+      if (add?.[i] && !erase?.[i]) {
+        mask[i] = 1;
+        if (added) added[i] = 1;
+      }
+      if (erase?.[i]) mask[i] = 0;
+    }
+    return { mask, added, width, height };
+  }
+
+  /**
+   * Re-clean only `areas` of the latest cleaned page (the image render reads: clean-sfx.png when present, otherwise
+   * clean-text.png), removing the effective mask inside them. Everything outside the areas stays byte-identical, so a
+   * missed stroke can be painted and fixed without re-cleaning the page. Block ownership doesn't apply here: the user
+   * picked the areas.
+   */
+  async recleanAreas(areas: Box[]): Promise<CleanResult> {
+    const output = existsSync(this.path("clean-sfx.png")) ? "clean-sfx.png" : "clean-text.png";
+    if (!existsSync(this.path(output))) throw new Error("No cleaned page yet — clean the text blocks first");
+    this.report({ stage: "cleaning", message: `Re-cleaning ${areas.length} area${areas.length === 1 ? "" : "s"}…`, fraction: 0 });
+
+    const { data: rgb, info } = await sharp(this.path(output)).removeAlpha().toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
+    const { mask, width, height } = await this.effectiveMask();
+    if (width !== info.width || height !== info.height) throw new Error(`mask.png size does not match ${output}`);
+
+    const target = new Uint8Array(width * height);
+    // Whole pixels covering each area (callers other than the route may pass fractions), clipped to the page
+    const clipped = areas
+      .map((a) => {
+        const x0 = Math.max(0, Math.floor(a.x));
+        const y0 = Math.max(0, Math.floor(a.y));
+        const x1 = Math.min(width, Math.ceil(a.x + a.w));
+        const y1 = Math.min(height, Math.ceil(a.y + a.h));
+        return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      })
+      .filter((a) => a.w > 0 && a.h > 0);
+    for (const area of clipped) {
+      for (let y = area.y; y < area.y + area.h; y++) {
+        for (let x = area.x; x < area.x + area.w; x++) {
+          const p = y * width + x;
+          if (mask[p]) target[p] = 1;
+        }
+      }
+    }
+
+    const inpainter = await getInpainter();
+    const { rgb: cleaned, flat, lama } = await inpainter.inpaintRgb(rgb, width, height, target, clipped);
+    await sharp(cleaned, { raw: { width, height, channels: 3 } }).png().toFile(this.path(output));
+    this.report({ stage: "cleaning", message: `Re-cleaned ${clipped.length} area${clipped.length === 1 ? "" : "s"} (${flat} flat fill, ${lama} LaMa)`, fraction: 1 });
+    return { output, regions: clipped.length, total: clipped.length, flat, lama };
   }
 
   /** Typeset translations inside each bubble on the latest cleaned page → result.png. */
