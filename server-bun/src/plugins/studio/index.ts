@@ -230,17 +230,28 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
       try {
         // The page lock keeps edits out while this reads, processes and writes the blocks; the global queue shares the CPU
-        await runExclusiveResult(async () => {
+        // Whether this run covered every block the stage applies to; a partial run can't vouch for the whole stage
+        const wholeStage = await runExclusiveResult(async (): Promise<boolean> => {
           const pipeline = new PagePipeline(pageDir(params.id), () => {}, PageStore.repository(params.id));
           const job = await pipeline.readJob();
           if (!job) throw new Error("page has no detected blocks");
           const ids = body.block_ids;
           if (ids?.some((id) => !job.blocks.some((b) => b.id === id))) throw new Error("unknown block id");
-          if (stage === "ocr") await pipeline.ocr(job, pageEngines.ocr, ids);
-          else if (stage === "translate") await pipeline.translate(job, pageEngines.translate, ids);
-          else await pipeline.render(job);
+          const covers = (targets: PageBlock[]): boolean => !ids || targets.every((b) => ids.includes(b.id));
+          if (stage === "ocr") {
+            const covered = covers(job.blocks.filter((b) => b.kind === "text"));
+            await pipeline.ocr(job, pageEngines.ocr, ids);
+            return covered;
+          }
+          if (stage === "translate") {
+            const covered = covers(job.blocks.filter((b) => b.kind === "text" && b.source_text?.trim()));
+            await pipeline.translate(job, pageEngines.translate, ids);
+            return covered;
+          }
+          await pipeline.render(job);
+          return true;
         });
-        await PageStore.setStage(params.id, stage, "fresh");
+        if (wholeStage) await PageStore.setStage(params.id, stage, "fresh");
         if (RUNNABLE[stage].length > 0) await PageStore.markStale(params.id, [...RUNNABLE[stage]]);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

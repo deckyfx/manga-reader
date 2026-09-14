@@ -242,7 +242,7 @@ Start after PR #14 (and its CodeRabbit fixes) is merged; branch `feat/studio-fra
   - Publish button showing the current revision
 
 **Extension**
-- `content.ts`: tag the translated `<img>` with `data-socr-job-id`, then open `EventSource(/api/translate-page/:id/live)` while the tab stays open. On `page-updated`, swap `src` to `/result?rev=N`.
+- `content.ts`: tag the translated `<img>` with `data-socr-job-id`, then open `EventSource(${serverUrl}/api/translate-page/:id/live)` (the configured translation server's origin, like the Studio link) while the tab stays open. On `page-updated`, swap `src` to `/result?rev=N`.
 - Add an "Open in Studio" action on the translated image (`${serverUrl}/studio/pages/:id`).
 - Regenerate Eden types (`bun run typecheck`) and bump the minor version.
 
@@ -258,9 +258,9 @@ Start after PR #14 (and its CodeRabbit fixes) is merged; branch `feat/studio-fra
 ### Phase 1 status (2026-09-14, same branch)
 
 Built:
-- **Runs:** `POST /studio/api/pages/:id/run { stage: "ocr" | "translate" | "render", block_ids? }`. OCR and translate can target single blocks; render always does the whole page. A run marks its stage fresh and the stages after it stale (ocr → translate + render, translate → render). Limitation: freshness is page-wide, so a block-scoped OCR or translate run marks the whole stage fresh even if other blocks still need re-running. Per-block stale tracking is planned (see "Differences from the plan" and `TODO.txt`); render always runs for the whole page, so its freshness is exact.
+- **Runs:** `POST /studio/api/pages/:id/run { stage: "ocr" | "translate" | "render", block_ids? }`. OCR and translate can target single blocks; render always does the whole page. A run marks its stage fresh and the stages after it stale (ocr → translate + render, translate → render). A run only marks its stage fresh when it covered every block the stage applies to: all text blocks for OCR, all text blocks with source text for translate, and always for render, which runs for the whole page. A block-scoped run leaves the stage's status as it was, so a stale stage stays stale until every block is re-run (e.g. Translate all); later stages are still marked stale. Tracking freshness per block is still planned (`TODO.txt`).
 - **Edits:** `PATCH …/blocks/:idx` takes `source_text` and/or `translated_text`. A source edit marks translate and render stale; a translation edit marks render stale.
-- **History:** every publish snapshots `result.png` to `history/<rev>.png` and keeps the last 10. `GET …/history` and `GET …/history/:revision` read them. `POST …/rollback { revision }` restores a snapshot, publishes it as a new revision and marks render stale.
+- **History:** every publish snapshots `result.png` to `history/<rev>.png` and keeps the last 10. `GET …/history` and `GET …/history/:revision` read them. `POST …/rollback { revision }` restores a snapshot, publishes it as a new revision and marks render stale. Rollback is image-only by design: blocks keep their current text, so the next re-render replaces the restored image with the current text. That's the intended way back after a rollback; to keep the old wording, edit the blocks before re-rendering. Restoring block text along with the image would need per-revision block snapshots, which aren't stored yet.
 - **Editor:**
   - editable source text
   - per-block Re-OCR and Re-translate
