@@ -172,6 +172,8 @@ function ProcessingView({ pageId, status, version, job }: {
   job: ReturnType<typeof usePageJobEvents>;
 }) {
   const [originalLoaded, setOriginalLoaded] = useState(true);
+  // original.png may not exist yet when a run starts; try again for each new version instead of spinning forever
+  useEffect(() => setOriginalLoaded(true), [version]);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
