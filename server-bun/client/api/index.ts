@@ -42,6 +42,9 @@ export const listPages = () => unwrap(api.studio.api.pages.get());
 
 export const getPage = (id: string) => unwrap(api.studio.api.pages({ id }).get());
 
+/** Discards a page: its data and all its images. Refused while the page is being translated. */
+export const deletePage = (id: string) => unwrap(api.studio.api.pages({ id }).delete());
+
 /** Queue a new page from an upload (base64 / data URL) or an image URL; progress arrives on `pageEventsUrl`. */
 export const createPage = (body: { image?: string; url?: string; clean_sfx?: boolean; force?: boolean }) =>
   unwrap(api.studio.api.pages.post(body));

@@ -82,6 +82,12 @@ export class PageStore {
     return rows.length;
   }
 
+  /** Deletes a page row; its stages and blocks go with it (foreign keys cascade). False when it didn't exist. */
+  static async deletePage(id: string): Promise<boolean> {
+    const rows = await db.delete(pages).where(eq(pages.id, id)).returning({ id: pages.id });
+    return rows.length > 0;
+  }
+
   /** Increments the publish revision and returns the new value. */
   static async bumpRevision(id: string): Promise<number> {
     const [row] = await db

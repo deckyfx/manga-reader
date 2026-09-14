@@ -4,6 +4,7 @@
  * GET   /studio/api/pages                        recent pages
  * POST  /studio/api/pages                        new page from an upload or image URL (progress: /api/translate-page/:id/events)
  * GET   /studio/api/pages/:id                    page, stage state and blocks
+ * DELETE /studio/api/pages/:id                   discard the page: its row, stages, blocks and image folder
  * GET   /studio/api/pages/:id/files/:file        a stage image
  * POST  /studio/api/pages/:id/blocks             add a region drawn in the Studio (rect / ellipse / polygon)
  * PUT   /studio/api/pages/:id/blocks/:idx        move / resize / reshape a region
@@ -19,7 +20,8 @@
  */
 import Elysia, { t } from "elysia";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Page, PageStageRow } from "@/db/schema";
 import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
@@ -30,7 +32,7 @@ import { historyFile, listHistory, restoreResult, snapshotResult } from "@/servi
 import { decodeBase64Image, resultUrl, submitPageJob } from "@/services/page-jobs";
 import { PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
 import { pageLive } from "@/stores/page-live-channel";
-import { pageDir, PageStore, type StageName } from "@/stores/page-store";
+import { PAGE_JOBS_DIR, pageDir, PageStore, type StageName } from "@/stores/page-store";
 
 const log = childLogger("studio");
 
@@ -219,6 +221,23 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
     "/pages/:id",
     async ({ params, status }) => (await pageDetail(params.id)) ?? status(404, { error: "page not found" }),
     { params: IdParams, response: { 200: PageDetail, 404: ErrBody } },
+  )
+
+  .delete(
+    "/pages/:id",
+    ({ params, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      // Only ever this page's own folder: the resolved path must be exactly <jobs dir>/<id>
+      const jobsDir = resolve(PAGE_JOBS_DIR);
+      const dir = resolve(pageDir(params.id));
+      if (dirname(dir) !== jobsDir || basename(dir) !== params.id) return status(409, { error: "refusing to delete an unexpected path" });
+      await rm(dir, { recursive: true, force: true });
+      await PageStore.deletePage(params.id);
+      log.info({ pageId: params.id }, "Page deleted");
+      return { deleted: params.id };
+    }),
+    { params: IdParams, response: { 200: t.Object({ deleted: t.String() }), 404: ErrBody, 409: ErrBody } },
   )
 
   .get(

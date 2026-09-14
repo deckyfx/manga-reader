@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, History, Languages, Loader2, RefreshCw, RotateCcw, ScanText, Send, TriangleAlert } from "lucide-react";
+import { ArrowLeft, History, Languages, Loader2, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
 import {
+  deletePage,
   getPage,
   historyImageUrl,
   listHistory,
@@ -76,6 +77,20 @@ export function StudioPageEditor() {
   const renderM = useMutation({ mutationFn: () => runStage(id, "render"), onSuccess: setDetail });
   const translateAllM = useMutation({ mutationFn: () => runStage(id, "translate"), onSuccess: setDetail });
   const publishM = useMutation({ mutationFn: () => publishPage(id), onSuccess: onPublished });
+  const navigate = useNavigate();
+  const deleteM = useMutation({
+    mutationFn: () => deletePage(id),
+    onSuccess: () => {
+      qc.removeQueries({ queryKey: ["studio-page", id] });
+      void qc.invalidateQueries({ queryKey: ["studio-pages"] });
+      navigate("/studio");
+    },
+  });
+  const confirmDelete = () => {
+    if (window.confirm("Discard this page? Its translation, edits, history and all its images are deleted. This can't be undone.")) {
+      deleteM.mutate();
+    }
+  };
 
   // While the page runs in the pipeline its files are being rewritten: follow the job and reload when it ends
   const job = usePageJobEvents(isBusy(pageQ.data?.page.status) ? id : null, () => {
@@ -94,7 +109,7 @@ export function StudioPageEditor() {
   const textBlocks = blocks.filter((b) => b.kind === "text");
   const sfxCount = blocks.length - textBlocks.length;
   const version = `${page.updated_at}-${page.revision}-${renderStage?.updated_at ?? ""}`;
-  const actionError = renderM.error ?? translateAllM.error ?? publishM.error;
+  const actionError = renderM.error ?? translateAllM.error ?? publishM.error ?? deleteM.error;
 
   return (
     <div className="flex flex-col h-full">
@@ -128,6 +143,15 @@ export function StudioPageEditor() {
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {actionError && <span className="text-xs text-red-400">{actionError.message}</span>}
+          <button
+            onClick={confirmDelete}
+            disabled={busy || deleteM.isPending}
+            title={busy ? "Can't discard while the page is being translated" : "Discard this page and all its images"}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-300 bg-gray-800 hover:bg-red-900/60 hover:text-red-200 disabled:opacity-50 transition-colors"
+          >
+            {deleteM.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            Delete page
+          </button>
           {published && !publishM.isPending && (
             <span className="text-xs text-emerald-400">
               Published rev {published.revision} · {published.notified} open tab{published.notified === 1 ? "" : "s"} updated
