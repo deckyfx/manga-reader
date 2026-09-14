@@ -4,7 +4,11 @@
  * GET   /studio/api/pages                        recent pages
  * POST  /studio/api/pages                        new page from an upload or image URL (progress: /api/translate-page/:id/events)
  * GET   /studio/api/pages/:id                    page, stage state and blocks
+ * DELETE /studio/api/pages/:id                   discard the page: its row, stages, blocks and image folder
  * GET   /studio/api/pages/:id/files/:file        a stage image
+ * POST  /studio/api/pages/:id/blocks             add a region drawn in the Studio (rect / ellipse / polygon)
+ * PUT   /studio/api/pages/:id/blocks/:idx        move / resize / reshape a region
+ * DELETE /studio/api/pages/:id/blocks/:idx       remove a region
  * PATCH /studio/api/pages/:id/blocks/:idx        edit source text / translation (marks later stages stale)
  * POST  /studio/api/pages/:id/run                re-run ocr / translate (all or some blocks) or render
  * POST  /studio/api/pages/:id/publish            snapshot the result and push it to extension tabs showing the page
@@ -16,7 +20,8 @@
  */
 import Elysia, { t } from "elysia";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { rename, rm } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Page, PageStageRow } from "@/db/schema";
 import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
@@ -25,9 +30,9 @@ import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
 import { historyFile, listHistory, restoreResult, snapshotResult } from "@/services/page-history";
 import { decodeBase64Image, resultUrl, submitPageJob } from "@/services/page-jobs";
-import { PagePipeline, type PageBlock } from "@/services/page-pipeline";
+import { PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
 import { pageLive } from "@/stores/page-live-channel";
-import { pageDir, PageStore, type StageName } from "@/stores/page-store";
+import { PAGE_JOBS_DIR, pageDir, PageStore, type StageName } from "@/stores/page-store";
 
 const log = childLogger("studio");
 
@@ -46,6 +51,48 @@ const IdParam = t.String({ pattern: "^[A-Za-z0-9-]+$" });
 const IdParams = t.Object({ id: IdParam });
 
 const BoxSchema = t.Object({ x: t.Number(), y: t.Number(), w: t.Number(), h: t.Number() });
+
+const PointSchema = t.Object({ x: t.Number(), y: t.Number() });
+
+const ShapeSchema = t.Union([
+  t.Object({ type: t.Literal("rect") }),
+  t.Object({ type: t.Literal("ellipse") }),
+  t.Object({ type: t.Literal("polygon"), points: t.Array(PointSchema, { minItems: 3, maxItems: 500 }) }),
+]);
+
+/** Box and optional outline of a region drawn or edited in the Studio, in page pixels. */
+const GeometryBody = {
+  x: t.Integer({ minimum: 0 }),
+  y: t.Integer({ minimum: 0 }),
+  w: t.Integer({ minimum: 1 }),
+  h: t.Integer({ minimum: 1 }),
+  shape: t.Optional(ShapeSchema),
+};
+
+/** Stages a block's geometry feeds: text blocks are read, translated and cleaned; sfx blocks are only cleaned. */
+const stagesAffectedBy = (kind: string): StageName[] =>
+  kind === "sfx" ? ["clean_sfx", "render"] : ["ocr", "translate", "clean_text", "render"];
+
+/** Why a geometry doesn't fit the page (box outside, or polygon points outside the box), or null when it's valid. */
+function geometryError(page: Page, geometry: { x: number; y: number; w: number; h: number; shape?: BlockShape }): string | null {
+  if (page.width === 0 || page.height === 0) return "page has no detected size yet";
+  if (geometry.x + geometry.w > page.width || geometry.y + geometry.h > page.height) return "region extends outside the page";
+  if (geometry.shape?.type === "polygon") {
+    const points = geometry.shape.points;
+    const outside = points.some((p) =>
+      p.x < geometry.x - 1 || p.y < geometry.y - 1 || p.x > geometry.x + geometry.w + 1 || p.y > geometry.y + geometry.h + 1);
+    if (outside) return "polygon points must lie inside the region's box";
+    // All points on one line (or repeated) enclose nothing to crop or clean. The test is "some point is off the
+    // line through two distinct points", not the signed shoelace area: a symmetric bow tie has zero signed area
+    // but does enclose pixels. Self-intersecting outlines are allowed: stages use the bounding box.
+    const first = points[0];
+    const second = points.find((p) => p.x !== first.x || p.y !== first.y);
+    const offLine = second !== undefined && points.some((p) =>
+      (second.x - first.x) * (p.y - first.y) - (second.y - first.y) * (p.x - first.x) !== 0);
+    if (!offLine) return "polygon has no area (its points lie on one line)";
+  }
+  return null;
+}
 
 const PageSummary = t.Object({
   id: t.String(),
@@ -80,6 +127,8 @@ const BlockSchema = t.Object({
   source_text: t.Nullable(t.String()),
   translated_text: t.Nullable(t.String()),
   render: t.Nullable(t.Object({ font_size: t.Number(), lines: t.Array(t.String()), area: BoxSchema, fits: t.Boolean() })),
+  /** Region outline; null for plain rectangles. */
+  shape: t.Nullable(ShapeSchema),
 });
 
 const PageDetail = t.Object({ page: PageSummary, stages: t.Array(StageSchema), blocks: t.Array(BlockSchema) });
@@ -107,7 +156,7 @@ function toStage(row: PageStageRow) {
 }
 
 function toBlock(block: PageBlock) {
-  return { ...block, render: block.render ?? null };
+  return { ...block, render: block.render ?? null, shape: block.shape ?? null };
 }
 
 /** Everything the page editor shows, or null when the page doesn't exist. */
@@ -183,6 +232,36 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
     { params: IdParams, response: { 200: PageDetail, 404: ErrBody } },
   )
 
+  .delete(
+    "/pages/:id",
+    ({ params, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      // Only ever this page's own folder: the resolved path must be exactly <jobs dir>/<id>
+      const jobsDir = resolve(PAGE_JOBS_DIR);
+      const dir = resolve(pageDir(params.id));
+      if (dirname(dir) !== jobsDir || basename(dir) !== params.id) return status(409, { error: "refusing to delete an unexpected path" });
+      // Failure-safe order: move the folder aside, delete the row, then remove the moved folder.
+      // If the row delete fails, the folder is put back so the page stays complete.
+      const parked = existsSync(dir) ? join(jobsDir, `${params.id}.deleting-${Date.now()}`) : null;
+      if (parked) await rename(dir, parked);
+      try {
+        await PageStore.deletePage(params.id);
+      } catch (err) {
+        if (parked) await rename(parked, dir).catch((restoreErr: unknown) => log.error({ err: restoreErr, pageId: params.id, parked }, "Couldn't restore the page folder"));
+        throw err;
+      }
+      // The page is already deleted: cleanup is best-effort, and leftovers are swept at the next server start
+      if (parked) {
+        await rm(parked, { recursive: true, force: true }).catch((err: unknown) =>
+          log.warn({ err, pageId: params.id, parked }, "Couldn't remove the deleted page's folder; it will be swept at next start"));
+      }
+      log.info({ pageId: params.id }, "Page deleted");
+      return { deleted: params.id };
+    }),
+    { params: IdParams, response: { 200: t.Object({ deleted: t.String() }), 404: ErrBody, 409: ErrBody } },
+  )
+
   .get(
     "/pages/:id/files/:file",
     async ({ params, status, set }) => {
@@ -200,11 +279,12 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
       if (body.source_text === undefined && body.translated_text === undefined) return status(422, { error: "nothing to update" });
-      if (!(await PageStore.updateBlockText(params.id, params.idx, { sourceText: body.source_text, translatedText: body.translated_text }))) {
+      // A new source text makes its translation stale too; a new translation only needs typesetting again.
+      // The edit and the stale marking commit together.
+      const stale: StageName[] = body.source_text !== undefined ? ["translate", "render"] : ["render"];
+      if (!(await PageStore.updateBlockText(params.id, params.idx, { sourceText: body.source_text, translatedText: body.translated_text }, stale))) {
         return status(404, { error: "block not found" });
       }
-      // A new source text makes its translation stale too; a new translation only needs typesetting again
-      await PageStore.markStale(params.id, body.source_text !== undefined ? ["translate", "render"] : ["render"]);
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
     {
@@ -214,6 +294,69 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
         translated_text: t.Optional(t.String({ maxLength: 2000 })),
       }),
       response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
+    },
+  )
+
+  .post(
+    "/pages/:id/blocks",
+    ({ params, body, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      const { kind, include, source_text, translated_text, ...geometry } = body;
+      const invalid = geometryError(check.page, geometry);
+      if (invalid) return status(422, { error: invalid });
+      // Text is stored in the same insert, so restoring a deleted region (undo) is a single atomic request
+      await PageStore.insertBlock(params.id, kind, geometry, include ?? true, { sourceText: source_text, translatedText: translated_text }, stagesAffectedBy(kind));
+      return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
+    }),
+    {
+      params: IdParams,
+      body: t.Object({
+        kind: t.UnionEnum(["text", "sfx"]),
+        include: t.Optional(t.Boolean()),
+        /** Restored with the region (e.g. undoing a delete). */
+        source_text: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
+        translated_text: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
+        ...GeometryBody,
+      }),
+      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
+    },
+  )
+
+  .put(
+    "/pages/:id/blocks/:idx",
+    ({ params, body, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      const invalid = geometryError(check.page, body);
+      if (invalid) return status(422, { error: invalid });
+      const block = (await PageStore.readJob(params.id))?.blocks.find((b) => b.id === params.idx);
+      if (!block || !(await PageStore.updateBlockGeometry(params.id, params.idx, body, stagesAffectedBy(block.kind)))) {
+        return status(404, { error: "block not found" });
+      }
+      return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
+    }),
+    {
+      params: t.Object({ id: IdParam, idx: t.Integer({ minimum: 1 }) }),
+      body: t.Object(GeometryBody),
+      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
+    },
+  )
+
+  .delete(
+    "/pages/:id/blocks/:idx",
+    ({ params, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      const block = (await PageStore.readJob(params.id))?.blocks.find((b) => b.id === params.idx);
+      // Its lettering is no longer cleaned or typeset; OCR / translate of the remaining blocks is unaffected
+      const stale: StageName[] = block?.kind === "sfx" ? ["clean_sfx", "render"] : ["clean_text", "render"];
+      if (!block || !(await PageStore.deleteBlock(params.id, params.idx, stale))) return status(404, { error: "block not found" });
+      return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
+    }),
+    {
+      params: t.Object({ id: IdParam, idx: t.Integer({ minimum: 1 }) }),
+      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody },
     },
   )
 

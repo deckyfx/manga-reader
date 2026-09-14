@@ -42,6 +42,9 @@ export const listPages = () => unwrap(api.studio.api.pages.get());
 
 export const getPage = (id: string) => unwrap(api.studio.api.pages({ id }).get());
 
+/** Discards a page: its data and all its images. Refused while the page is being translated. */
+export const deletePage = (id: string) => unwrap(api.studio.api.pages({ id }).delete());
+
 /** Queue a new page from an upload (base64 / data URL) or an image URL; progress arrives on `pageEventsUrl`. */
 export const createPage = (body: { image?: string; url?: string; clean_sfx?: boolean; force?: boolean }) =>
   unwrap(api.studio.api.pages.post(body));
@@ -53,6 +56,39 @@ export type { PageJobEvent } from "../../src/stores/translation-job-store";
 
 export const updateBlockText = (id: string, idx: number, text: { source_text?: string; translated_text?: string }) =>
   unwrap(api.studio.api.pages({ id }).blocks({ idx }).patch(text));
+
+/** Region outline stored with a block; rect is the default (returned as null). */
+export type BlockShape =
+  | { type: "rect" }
+  | { type: "ellipse" }
+  | { type: "polygon"; points: { x: number; y: number }[] };
+
+/** Box (always bounding the shape) and optional outline, in page pixels. */
+export interface BlockGeometry {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  shape?: BlockShape;
+}
+
+/** Content restored along with a region (e.g. undoing a delete), stored in the same request. */
+export interface BlockContent {
+  include?: boolean;
+  source_text?: string | null;
+  translated_text?: string | null;
+}
+
+/** Adds a region drawn on the canvas; returns the page detail with the new block. */
+export const createBlock = (id: string, kind: "text" | "sfx", geometry: BlockGeometry, content: BlockContent = {}) =>
+  unwrap(api.studio.api.pages({ id }).blocks.post({ kind, ...content, ...geometry }));
+
+/** Moves / resizes / reshapes a region. */
+export const updateBlockGeometry = (id: string, idx: number, geometry: BlockGeometry) =>
+  unwrap(api.studio.api.pages({ id }).blocks({ idx }).put(geometry));
+
+/** Removes a region. */
+export const deleteBlock = (id: string, idx: number) => unwrap(api.studio.api.pages({ id }).blocks({ idx }).delete());
 
 /** Re-run OCR or translation (for `blockIds`, or every text block) or typeset the page again. */
 export const runStage = (id: string, stage: "ocr" | "translate" | "render", blockIds?: number[]) =>

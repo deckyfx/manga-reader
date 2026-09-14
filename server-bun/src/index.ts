@@ -8,7 +8,7 @@ import { api } from "@/api";
 import { routeSettings } from "@/plugins/route-settings";
 import { studioPlugin } from "@/plugins/studio/index";
 import { readPlugin } from "@/plugins/read/index";
-import { spaRoutes } from "@/plugins/route-spa";
+import { routeRoot, spaRoutes } from "@/plugins/route-spa";
 
 const bootLog = childLogger("boot");
 
@@ -19,6 +19,9 @@ async function migrateDb(): Promise<void> {
   const { PageStore } = await import("@/stores/page-store");
   const interrupted = await PageStore.failInterrupted();
   if (interrupted > 0) bootLog.warn(`${interrupted} page job(s) were interrupted by the last shutdown and marked as failed`);
+  // Folders of deleted pages whose cleanup failed last time
+  const swept = await PageStore.sweepDeletedPageFolders();
+  if (swept > 0) bootLog.info(`Removed ${swept} leftover folder(s) of deleted pages`);
 }
 
 async function loadModels(): Promise<void> {
@@ -145,7 +148,8 @@ const app = new Elysia({ serve: { routes: spaRoutes } })
   .use(api)
   .use(routeSettings)
   .use(studioPlugin)
-  .use(readPlugin);
+  .use(readPlugin)
+  .use(routeRoot);
 
 const listen = env.SOCKET_PATH
   ? { unix: env.SOCKET_PATH }

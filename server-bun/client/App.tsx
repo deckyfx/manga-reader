@@ -1,6 +1,8 @@
 import { BrowserRouter, Navigate, Routes, Route } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ConfirmProvider } from "./components/ConfirmDialog";
 import { Layout } from "./components/Layout";
+import { HomePage } from "./pages/HomePage";
 import { StudioPagesPage } from "./pages/StudioPagesPage";
 import { StudioPageEditor } from "./pages/StudioPageEditor";
 import { ReadPage } from "./pages/ReadPage";
@@ -15,10 +17,12 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <ConfirmProvider>
       <BrowserRouter>
         <Routes>
           <Route element={<Layout />}>
-            <Route index element={<Navigate to="/studio" replace />} />
+            <Route index element={<Navigate to="/home" replace />} />
+            <Route path="home" element={<HomePage />} />
             <Route path="studio" element={<StudioPagesPage />} />
             <Route path="studio/pages/:id" element={<StudioPageEditor />} />
             <Route path="read" element={<ReadPage />} />
@@ -26,6 +30,7 @@ export function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+      </ConfirmProvider>
     </QueryClientProvider>
   );
 }

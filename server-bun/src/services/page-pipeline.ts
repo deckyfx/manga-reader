@@ -20,9 +20,20 @@ import { findTextArea, getTypesetter, separateAreas, type TextArea } from "@/ser
 
 export type PageStage = "detecting" | "ocr" | "translating" | "cleaning" | "typesetting";
 
+/**
+ * Region outline drawn in the Studio. The block's box (x, y, w, h) always bounds it and is what the stages use for
+ * cropping and cleaning; polygon points are in page pixels.
+ */
+export type BlockShape =
+  | { type: "rect" }
+  | { type: "ellipse" }
+  | { type: "polygon"; points: { x: number; y: number }[] };
+
 export interface PageBlock extends Box {
   id: number;
   kind: BlockKind;
+  /** Absent for detector blocks and plain rectangles. */
+  shape?: BlockShape;
   /** Whether the clean stages remove this block's lettering. */
   include: boolean;
   source_text: string | null;

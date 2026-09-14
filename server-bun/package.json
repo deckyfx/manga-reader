@@ -28,6 +28,7 @@
     "deepl-node": "^1.28.0",
     "drizzle-orm": "^0.45.2",
     "elysia": "^1.4.30",
+    "fabric": "7.4.0",
     "fflate": "^0.8.3",
     "hyphen": "^1.14.1",
     "lucide-react": "^1.45.0",

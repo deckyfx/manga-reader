@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, History, Languages, Loader2, RefreshCw, RotateCcw, ScanText, Send, TriangleAlert } from "lucide-react";
+import { ArrowLeft, History, Languages, Loader2, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
 import {
+  deletePage,
   getPage,
   historyImageUrl,
   listHistory,
@@ -16,9 +17,11 @@ import {
   type StudioBlock,
   type StudioPageDetail,
 } from "../api";
+import { useConfirm } from "../components/ConfirmDialog";
 import { JobProgress } from "../components/JobProgress";
 import { StatusBadge } from "../components/StatusBadge";
 import { usePageJobEvents } from "../hooks/usePageJobEvents";
+import { PageCanvas } from "../studio/canvas/PageCanvas";
 
 const isBusy = (status: string | undefined) => status === "queued" || status === "running";
 
@@ -62,6 +65,10 @@ export function StudioPageEditor() {
     }, release);
   }, []);
 
+  const [view, setView] = useState<"canvas" | "compare">("canvas");
+  const [canvasImage, setCanvasImage] = useState<PageImage>("original.png");
+  const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
+
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);
   const onPublished = (result: { revision: number; notified: number }) => {
     setPublished(result);
@@ -71,6 +78,25 @@ export function StudioPageEditor() {
   const renderM = useMutation({ mutationFn: () => runStage(id, "render"), onSuccess: setDetail });
   const translateAllM = useMutation({ mutationFn: () => runStage(id, "translate"), onSuccess: setDetail });
   const publishM = useMutation({ mutationFn: () => publishPage(id), onSuccess: onPublished });
+  const navigate = useNavigate();
+  const deleteM = useMutation({
+    mutationFn: () => deletePage(id),
+    onSuccess: () => {
+      qc.removeQueries({ queryKey: ["studio-page", id] });
+      void qc.invalidateQueries({ queryKey: ["studio-pages"] });
+      navigate("/studio");
+    },
+  });
+  const confirm = useConfirm();
+  const confirmDelete = async () => {
+    const confirmed = await confirm({
+      title: "Discard this page?",
+      message: "Its translation, edits, publish history and all its images are deleted. This can't be undone.",
+      confirmLabel: "Discard page",
+      danger: true,
+    });
+    if (confirmed) deleteM.mutate();
+  };
 
   // While the page runs in the pipeline its files are being rewritten: follow the job and reload when it ends
   const job = usePageJobEvents(isBusy(pageQ.data?.page.status) ? id : null, () => {
@@ -89,7 +115,7 @@ export function StudioPageEditor() {
   const textBlocks = blocks.filter((b) => b.kind === "text");
   const sfxCount = blocks.length - textBlocks.length;
   const version = `${page.updated_at}-${page.revision}-${renderStage?.updated_at ?? ""}`;
-  const actionError = renderM.error ?? translateAllM.error ?? publishM.error;
+  const actionError = renderM.error ?? translateAllM.error ?? publishM.error ?? deleteM.error;
 
   return (
     <div className="flex flex-col h-full">
@@ -108,8 +134,30 @@ export function StudioPageEditor() {
           ))}
         </div>
 
+        <div className="flex items-center rounded-md border border-gray-700 overflow-hidden text-xs" role="group" aria-label="Editor view">
+          {(["canvas", "compare"] as const).map((value) => (
+            <button
+              key={value}
+              onClick={() => setView(value)}
+              aria-pressed={view === value}
+              className={`px-2.5 py-1 ${view === value ? "bg-indigo-600 text-white" : "text-gray-400 hover:bg-gray-800"}`}
+            >
+              {value === "canvas" ? "Canvas" : "Compare"}
+            </button>
+          ))}
+        </div>
+
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {actionError && <span className="text-xs text-red-400">{actionError.message}</span>}
+          <button
+            onClick={() => void confirmDelete()}
+            disabled={busy || deleteM.isPending}
+            title={busy ? "Can't discard while the page is being translated" : "Discard this page and all its images"}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-300 bg-gray-800 hover:bg-red-900/60 hover:text-red-200 disabled:opacity-50 transition-colors"
+          >
+            {deleteM.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            Delete page
+          </button>
           {published && !publishM.isPending && (
             <span className="text-xs text-emerald-400">
               Published rev {published.revision} · {published.notified} open tab{published.notified === 1 ? "" : "s"} updated
@@ -147,14 +195,44 @@ export function StudioPageEditor() {
         <ProcessingView pageId={page.id} status={page.status} version={version} job={job} />
       ) : (
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-        <StageCompare pageId={page.id} version={version} />
+        {view === "canvas" ? (
+          <PageCanvas
+            pageId={page.id}
+            imageUrl={pageFileUrl(page.id, canvasImage, version)}
+            page={{ width: page.width, height: page.height }}
+            blocks={blocks}
+            disabled={busy}
+            selectedId={selectedBlock}
+            onSelect={setSelectedBlock}
+            onDetail={setDetail}
+            onReload={() => void qc.invalidateQueries({ queryKey: ["studio-page", id] })}
+            toolbarStart={
+              <select
+                aria-label="Canvas background image"
+                value={canvasImage}
+                onChange={(e) => {
+                  setCanvasImage(PAGE_IMAGES.find((img) => img.file === e.target.value)?.file ?? canvasImage);
+                  // Hand the keyboard back to the canvas so Delete and the tool keys work right away
+                  e.currentTarget.blur();
+                }}
+                className="bg-gray-900 border border-gray-700 rounded-md px-2 py-1 text-xs"
+              >
+                {PAGE_IMAGES.map((img) => (
+                  <option key={img.file} value={img.file}>{img.label}</option>
+                ))}
+              </select>
+            }
+          />
+        ) : (
+          <StageCompare pageId={page.id} version={version} />
+        )}
 
         <aside className="lg:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-gray-800 overflow-y-auto p-3 space-y-3">
           <div className="text-xs text-gray-500">
             {textBlocks.length} text block{textBlocks.length === 1 ? "" : "s"} · {sfxCount} sound effect{sfxCount === 1 ? "" : "s"}
           </div>
           {textBlocks.map((block) => (
-            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} />
+            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} />
           ))}
           <HistoryPanel pageId={page.id} currentRevision={page.revision} disabled={busy} onRolledBack={onPublished} />
         </aside>
@@ -288,7 +366,7 @@ function useSavedText(saved: string) {
 }
 
 /** One text block: editable source text and translation, plus per-block OCR and translation re-runs. */
-function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves, queued }: {
+function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves, queued, selected, onSelect }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
@@ -299,7 +377,14 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
   afterSaves: (key: string, action: () => void) => void;
   /** Keys of actions currently waiting on saves. */
   queued: ReadonlySet<string>;
+  /** Selected on the canvas: highlighted and scrolled into view. */
+  selected: boolean;
+  onSelect: () => void;
 }) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selected) cardRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selected]);
   const ocrKey = `block:${block.id}:ocr`;
   const translateKey = `block:${block.id}:translate`;
   const source = useSavedText(block.source_text ?? "");
@@ -316,7 +401,11 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
   const error = saveM.error ?? runM.error;
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-2.5 space-y-1.5">
+    <div
+      ref={cardRef}
+      onClick={onSelect}
+      className={`bg-gray-900 border rounded-lg p-2.5 space-y-1.5 transition-colors ${selected ? "border-sky-400" : "border-gray-800"}`}
+    >
       <div className="flex items-center gap-2 text-xs">
         <span className="font-semibold text-sky-400">#{block.id}</span>
         {block.render && !block.render.fits && (
