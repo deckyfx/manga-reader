@@ -1,3 +1,7 @@
+import { childLogger } from "@/lib/logger";
+
+const log = childLogger("page-live");
+
 /** Pushed to extension tabs that still show a translated page. */
 export type PageLiveEvent =
   /** The page was edited and published in the Studio: reload the image from `result_url`. */
@@ -14,17 +18,34 @@ class PageLiveChannel {
     const set = this.listeners.get(pageId) ?? new Set<Listener>();
     set.add(listener);
     this.listeners.set(pageId, set);
-    return () => {
-      set.delete(listener);
-      if (set.size === 0 && this.listeners.get(pageId) === set) this.listeners.delete(pageId);
-    };
+    return () => this.remove(pageId, listener);
   }
 
-  /** Delivers the event to every subscriber of its page; returns how many were notified. */
+  /**
+   * Delivers the event to every subscriber of its page and returns how many received it. A listener that throws
+   * is dropped and doesn't stop the others; iterating a snapshot keeps unsubscribes during delivery safe.
+   */
   publish(event: PageLiveEvent): number {
     const set = this.listeners.get(event.page_id);
-    for (const listener of set ?? []) listener(event);
-    return set?.size ?? 0;
+    if (!set) return 0;
+    let delivered = 0;
+    for (const listener of [...set]) {
+      try {
+        listener(event);
+        delivered++;
+      } catch (err) {
+        log.warn({ err, pageId: event.page_id }, "Live listener failed; removing it");
+        this.remove(event.page_id, listener);
+      }
+    }
+    return delivered;
+  }
+
+  private remove(pageId: string, listener: Listener): void {
+    const set = this.listeners.get(pageId);
+    if (!set) return;
+    set.delete(listener);
+    if (set.size === 0) this.listeners.delete(pageId);
   }
 }
 

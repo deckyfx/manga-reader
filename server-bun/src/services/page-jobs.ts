@@ -179,7 +179,8 @@ export async function submitPageJob(load: () => Promise<Buffer>, options: Submit
         }
         await runExclusiveResult(() => runJob(id, page, options));
       })
-        .catch((err: unknown) => log.error({ err, jobId: id }, "Page job failed outside the pipeline"))
+        // runJob reports pipeline errors itself; anything that escapes still has to end the job for its subscribers
+        .catch((err: unknown) => failJob(id, err))
         .finally(() => {
           pendingPages--;
         });

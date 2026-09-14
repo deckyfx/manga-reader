@@ -311,7 +311,7 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
           <IconButton title="Read the text again (OCR)" disabled={locked} onClick={() => afterSaves(() => runM.mutate("ocr"))}>
             <ScanText size={13} />
           </IconButton>
-          <IconButton title="Translate again" disabled={locked || !block.source_text?.trim()} onClick={() => afterSaves(() => runM.mutate("translate"))}>
+          <IconButton title="Translate again" disabled={locked || !source.text.trim()} onClick={() => afterSaves(() => runM.mutate("translate"))}>
             <Languages size={13} />
           </IconButton>
         </span>
