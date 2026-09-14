@@ -173,16 +173,16 @@ export function StudioPageEditor() {
             </span>
           )}
           <ActionButton
-            onClick={() => cleanTextM.mutate()}
-            disabled={busy || cleaning}
+            onClick={() => afterSaves("clean-text", () => cleanTextM.mutate())}
+            disabled={busy || cleaning || queued.has("clean-text")}
             pending={cleanTextM.isPending}
             highlight={stageStatus("clean_text") === "stale"}
             icon={<Eraser size={14} />}
             label="Clean text"
           />
           <ActionButton
-            onClick={() => cleanSfxM.mutate()}
-            disabled={busy || cleaning}
+            onClick={() => afterSaves("clean-sfx", () => cleanSfxM.mutate())}
+            disabled={busy || cleaning || queued.has("clean-sfx")}
             pending={cleanSfxM.isPending}
             highlight={stageStatus("clean_sfx") === "stale"}
             icon={<Megaphone size={14} />}
@@ -264,7 +264,7 @@ export function StudioPageEditor() {
             <div className="pt-2 border-t border-gray-800 space-y-1.5">
               <div className="text-xs text-gray-400">Sound effects · ticked ones are removed by Clean SFX</div>
               {sfxBlocks.map((block) => (
-                <SfxBlockRow key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} />
+                <SfxBlockRow key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} />
               ))}
             </div>
           )}
@@ -450,7 +450,7 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
         {block.render && <span className="text-gray-500">{block.render.font_size}px</span>}
         {(saveM.isPending || runM.isPending) && <Loader2 size={12} className="animate-spin text-gray-500" />}
         {(source.dirty || translation.dirty) && !saveM.isPending && <span className="text-amber-400">unsaved</span>}
-        <IncludeToggle pageId={pageId} block={block} disabled={locked} onChanged={onChanged} title="Remove this block's lettering when the text is cleaned" />
+        <IncludeToggle pageId={pageId} block={block} disabled={locked} onChanged={onChanged} trackSave={trackSave} title="Remove this block's lettering when the text is cleaned" />
         <span className="ml-auto flex gap-1">
           <IconButton title="Read the text again (OCR)" disabled={locked || queued.has(ocrKey)} onClick={() => afterSaves(ocrKey, () => runM.mutate("ocr"))}>
             <ScanText size={13} />
@@ -484,11 +484,13 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
 }
 
 /** Whether the clean pass removes a block; saved right away (the server marks the clean stages stale). */
-function IncludeToggle({ pageId, block, disabled, onChanged, title }: {
+function IncludeToggle({ pageId, block, disabled, onChanged, trackSave, title }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
   onChanged: (detail: StudioPageDetail) => void;
+  /** Registers the save so Clean text / Clean SFX wait for it and clean with the new setting. */
+  trackSave: (save: Promise<unknown>) => void;
   title: string;
 }) {
   const includeM = useMutation({
@@ -502,7 +504,7 @@ function IncludeToggle({ pageId, block, disabled, onChanged, title }: {
         type="checkbox"
         checked={checked}
         disabled={disabled || includeM.isPending}
-        onChange={(e) => includeM.mutate(e.target.checked)}
+        onChange={(e) => trackSave(includeM.mutateAsync(e.target.checked))}
         className="accent-indigo-500"
       />
       <span className={includeM.error ? "text-red-400" : undefined}>clean</span>
@@ -511,11 +513,12 @@ function IncludeToggle({ pageId, block, disabled, onChanged, title }: {
 }
 
 /** One sound-effect region: selectable, with its include-in-cleaning toggle. */
-function SfxBlockRow({ pageId, block, disabled, onChanged, selected, onSelect }: {
+function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, onSelect }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
   onChanged: (detail: StudioPageDetail) => void;
+  trackSave: (save: Promise<unknown>) => void;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -532,7 +535,7 @@ function SfxBlockRow({ pageId, block, disabled, onChanged, selected, onSelect }:
       <span className="font-semibold text-orange-400">#{block.id}</span>
       <span className="text-gray-500 tabular-nums">{block.w}×{block.h}</span>
       <span className="ml-auto">
-        <IncludeToggle pageId={pageId} block={block} disabled={disabled} onChanged={onChanged} title="Remove this sound effect when SFX are cleaned" />
+        <IncludeToggle pageId={pageId} block={block} disabled={disabled} onChanged={onChanged} trackSave={trackSave} title="Remove this sound effect when SFX are cleaned" />
       </span>
     </div>
   );
