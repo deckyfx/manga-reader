@@ -474,9 +474,11 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
       const file = join(dir, MASK_LAYER_FILES[params.layer]);
       // An empty layer is stored as no file, so an untouched page keeps using the detector mask as-is
-      if (decoded.mask.some((v) => v === 1)) await Bun.write(file, await maskToPng(decoded.mask, decoded.width, decoded.height));
-      else await rm(file, { force: true });
+      const png = decoded.mask.some((v) => v === 1) ? await maskToPng(decoded.mask, decoded.width, decoded.height) : null;
+      // Stale first: if the write fails, the dependent stages are already flagged rather than wrongly fresh
       await PageStore.markStale(params.id, ["clean_text", "clean_sfx", "render"]);
+      if (png) await Bun.write(file, png);
+      else await rm(file, { force: true });
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
     {
@@ -494,8 +496,8 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       if ("code" in check) return status(check.code, { error: check.error });
       const file = join(pageDir(params.id), MASK_LAYER_FILES[params.layer]);
       if (existsSync(file)) {
-        await rm(file, { force: true });
         await PageStore.markStale(params.id, ["clean_text", "clean_sfx", "render"]);
+        await rm(file, { force: true });
       }
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
@@ -515,12 +517,13 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
         return status(422, { error: "an area extends outside the page" });
       }
       try {
+        // Only part of a clean pass runs, so the clean stages keep their status; the result needs typesetting again.
+        // Marked before the cleaned image is rewritten, so a failure after the write can't leave render looking fresh.
+        await PageStore.markStale(params.id, ["render"]);
         await runExclusiveResult(async () => {
           const pipeline = new PagePipeline(pageDir(params.id), () => {}, PageStore.repository(params.id));
           await pipeline.recleanAreas(body.areas);
         });
-        // Only part of a clean pass ran, so the clean stages keep their status; the result needs typesetting again
-        await PageStore.markStale(params.id, ["render"]);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error({ err, pageId: params.id }, "Studio re-clean failed");
