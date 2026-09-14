@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { Canvas, Circle, Ellipse, FabricImage, Line, Point, Polyline, Rect, type FabricObject } from "fabric";
-import { Circle as EllipseIcon, Maximize, MousePointer2, Pentagon, Redo2, Square, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  Circle as EllipseIcon,
+  Maximize,
+  MousePointer2,
+  MoveHorizontal,
+  MoveVertical,
+  Pentagon,
+  Redo2,
+  Square,
+  Trash2,
+  Undo2,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import {
   createBlock,
   deleteBlock,
@@ -28,6 +41,21 @@ import { CommandHistory, type Command } from "./history";
 
 type Tool = "select" | "rect" | "ellipse" | "polygon";
 
+/** What the mouse wheel does without modifiers; Ctrl/Cmd + wheel always zooms, Shift switches direction. */
+type WheelMode = "zoom" | "vertical" | "horizontal";
+
+const WHEEL_MODE_KEY = "studio-canvas-wheel-mode";
+
+/** Saved wheel mode; storage can be unavailable (private mode), so fall back to scrolling up/down. */
+function readWheelMode(): WheelMode {
+  try {
+    const saved = localStorage.getItem(WHEEL_MODE_KEY);
+    return saved === "zoom" || saved === "horizontal" ? saved : "vertical";
+  } catch {
+    return "vertical";
+  }
+}
+
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 8;
 /** Drawn regions smaller than this (page pixels) are treated as accidental clicks. */
@@ -38,6 +66,12 @@ const TOOL_HINTS: Record<Tool, string> = {
   rect: "Drag on empty space to draw a rectangle",
   ellipse: "Drag on empty space to draw an ellipse",
   polygon: "Click to add points; Enter, double-click or the first point to finish; Esc to cancel",
+};
+
+const WHEEL_HINTS: Record<WheelMode, string> = {
+  zoom: "Wheel zooms, Shift+wheel scrolls",
+  vertical: "Wheel scrolls up/down, Shift sideways",
+  horizontal: "Wheel scrolls sideways, Shift up/down",
 };
 
 interface PageCanvasProps {
@@ -98,6 +132,15 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
 
   const [tool, setTool] = useState<Tool>("select");
   const [kind, setKind] = useState<RegionKind>("text");
+  const [wheelMode, setWheelModeState] = useState<WheelMode>(readWheelMode);
+  const setWheelMode = (mode: WheelMode) => {
+    setWheelModeState(mode);
+    try {
+      localStorage.setItem(WHEEL_MODE_KEY, mode);
+    } catch {
+      // Not persisted; the choice still applies for this visit
+    }
+  };
   const [zoom, setZoom] = useState(1);
   const [busyCount, setBusyCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -107,8 +150,8 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
   const history = historyRef.current;
 
   // Latest props for handlers registered once on the canvas
-  const live = useRef({ pageId, page, blocks, disabled, tool, kind, onSelect, onDetail, onReload });
-  live.current = { pageId, page, blocks, disabled, tool, kind, onSelect, onDetail, onReload };
+  const live = useRef({ pageId, page, blocks, disabled, tool, kind, wheelMode, onSelect, onDetail, onReload });
+  live.current = { pageId, page, blocks, disabled, tool, kind, wheelMode, onSelect, onDetail, onReload };
 
   /** Runs server changes one after another; a failure shows the error, drops the history and reloads the page. */
   const enqueue = useCallback((task: () => Promise<void>) => {
@@ -314,16 +357,33 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       const e = opt.e;
       e.preventDefault();
       e.stopPropagation();
-      // Ctrl/Cmd + wheel zooms (trackpad pinch arrives as ctrl + wheel too); plain wheel scrolls the page
+      const mode = live.current.wheelMode;
+      const zoom = () => setZoomTo(canvas.getZoom() * 0.99 ** e.deltaY, new Point(e.offsetX, e.offsetY));
+      const pan = (dx: number, dy: number) => {
+        canvas.relativePan(new Point(-dx, -dy));
+        canvas.requestRenderAll();
+      };
+      // Ctrl/Cmd + wheel always zooms (a trackpad pinch arrives as ctrl + wheel too)
       if (e.ctrlKey || e.metaKey) {
-        setZoomTo(canvas.getZoom() * 0.99 ** e.deltaY, new Point(e.offsetX, e.offsetY));
+        zoom();
         return;
       }
-      // Mice without horizontal wheels scroll sideways with Shift
-      const dx = e.shiftKey && e.deltaX === 0 ? e.deltaY : e.deltaX;
-      const dy = e.shiftKey && e.deltaX === 0 ? 0 : e.deltaY;
-      canvas.relativePan(new Point(-dx, -dy));
-      canvas.requestRenderAll();
+      // Some browsers turn Shift + wheel into horizontal deltas, so take whichever axis moved
+      const amount = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+      if (mode === "zoom") {
+        if (e.shiftKey) pan(0, amount);
+        else zoom();
+        return;
+      }
+      // Trackpads send both axes at once: a two-finger swipe moves freely in either scroll mode
+      if (!e.shiftKey && e.deltaX !== 0 && e.deltaY !== 0) {
+        pan(e.deltaX, e.deltaY);
+        return;
+      }
+      // Shift switches direction: vertical mode scrolls sideways, horizontal mode scrolls up/down
+      const sideways = (mode === "horizontal") !== e.shiftKey;
+      if (sideways) pan(amount, 0);
+      else pan(0, amount);
     });
 
     canvas.on("mouse:down", (opt) => {
@@ -620,6 +680,27 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
             <Trash2 size={15} />
           </button>
         </div>
+        <div className="flex items-center gap-1 text-xs text-gray-400" role="group" aria-label="Mouse wheel action">
+          <span className="hidden md:inline">Wheel</span>
+          <div className="flex items-center rounded-md border border-gray-700 overflow-hidden">
+            {([
+              { mode: "zoom", icon: <ZoomIn size={14} />, label: "Wheel zooms (Shift+wheel scrolls up/down)" },
+              { mode: "vertical", icon: <MoveVertical size={14} />, label: "Wheel scrolls up/down (Shift+wheel scrolls sideways)" },
+              { mode: "horizontal", icon: <MoveHorizontal size={14} />, label: "Wheel scrolls sideways (Shift+wheel scrolls up/down)" },
+            ] as const).map(({ mode, icon, label }) => (
+              <button
+                key={mode}
+                onClick={() => setWheelMode(mode)}
+                title={`${label}. Ctrl+wheel always zooms.`}
+                aria-label={label}
+                aria-pressed={wheelMode === mode}
+                className={`px-1.5 py-1 ${wheelMode === mode ? "bg-gray-700 text-white" : "text-gray-400 hover:bg-gray-800"}`}
+              >
+                {icon}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex items-center gap-0.5 text-xs text-gray-400">
           <button onClick={() => actionsRef.current?.zoomBy(1 / 1.2)} title="Zoom out (-)" className="p-1.5 rounded-md hover:bg-gray-800">
             <ZoomOut size={15} />
@@ -633,7 +714,7 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
           </button>
         </div>
         <span className="ml-auto text-xs truncate max-w-full">
-          {error ? <span className="text-red-400">{error}</span> : busyCount > 0 ? <span className="text-gray-400">Saving…</span> : <span className="text-gray-500">{TOOL_HINTS[tool]} · Wheel to scroll, Ctrl+wheel to zoom, Space-drag to pan</span>}
+          {error ? <span className="text-red-400">{error}</span> : busyCount > 0 ? <span className="text-gray-400">Saving…</span> : <span className="text-gray-500">{TOOL_HINTS[tool]} · {WHEEL_HINTS[wheelMode]}, Ctrl+wheel zooms, Space-drag pans</span>}
         </span>
       </div>
       <div ref={hostRef} className="relative flex-1 min-h-0 overflow-hidden" />
