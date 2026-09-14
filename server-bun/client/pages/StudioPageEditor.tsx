@@ -43,9 +43,23 @@ export function StudioPageEditor() {
     void tracked.catch(() => {});
     pendingSaves.current.add(tracked);
   }, []);
-  const afterSaves = useCallback((action: () => void) => {
-    // A failed save leaves the server on the old text: don't run OCR, translate, render or publish against it
-    Promise.all([...pendingSaves.current]).then(action, () => {});
+  // Actions waiting on saves, by key: the ref rejects a second click synchronously, the state disables its control
+  const queuedRef = useRef(new Set<string>());
+  const [queued, setQueued] = useState<ReadonlySet<string>>(() => new Set());
+  const afterSaves = useCallback((key: string, action: () => void) => {
+    if (queuedRef.current.has(key)) return;
+    queuedRef.current.add(key);
+    setQueued(new Set(queuedRef.current));
+    const release = () => {
+      queuedRef.current.delete(key);
+      setQueued(new Set(queuedRef.current));
+    };
+    // A failed save leaves the server on the old text: don't run OCR, translate, render or publish against it.
+    // Releasing right before the action lets React batch it with the mutation's pending state, so the control stays disabled.
+    Promise.all([...pendingSaves.current]).then(() => {
+      release();
+      action();
+    }, release);
   }, []);
 
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);
@@ -102,24 +116,24 @@ export function StudioPageEditor() {
             </span>
           )}
           <ActionButton
-            onClick={() => afterSaves(() => translateAllM.mutate())}
-            disabled={busy || translateAllM.isPending}
+            onClick={() => afterSaves("translate-all", () => translateAllM.mutate())}
+            disabled={busy || translateAllM.isPending || queued.has("translate-all")}
             pending={translateAllM.isPending}
             highlight={stageStatus("translate") === "stale"}
             icon={<Languages size={14} />}
             label="Translate all"
           />
           <ActionButton
-            onClick={() => afterSaves(() => renderM.mutate())}
-            disabled={busy || renderM.isPending}
+            onClick={() => afterSaves("render", () => renderM.mutate())}
+            disabled={busy || renderM.isPending || queued.has("render")}
             pending={renderM.isPending}
             highlight={stageStatus("render") === "stale"}
             icon={<RefreshCw size={14} />}
             label="Re-render"
           />
           <button
-            onClick={() => afterSaves(() => publishM.mutate())}
-            disabled={busy || publishM.isPending || !page.has_result || renderStage?.status === "stale"}
+            onClick={() => afterSaves("publish", () => publishM.mutate())}
+            disabled={busy || publishM.isPending || queued.has("publish") || !page.has_result || renderStage?.status === "stale"}
             title={renderStage?.status === "stale" ? "Re-render before publishing" : "Replace the image in open extension tabs"}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors"
           >
@@ -140,7 +154,7 @@ export function StudioPageEditor() {
             {textBlocks.length} text block{textBlocks.length === 1 ? "" : "s"} · {sfxCount} sound effect{sfxCount === 1 ? "" : "s"}
           </div>
           {textBlocks.map((block) => (
-            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} />
+            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} />
           ))}
           <HistoryPanel pageId={page.id} currentRevision={page.revision} disabled={busy} onRolledBack={onPublished} />
         </aside>
@@ -272,16 +286,20 @@ function useSavedText(saved: string) {
 }
 
 /** One text block: editable source text and translation, plus per-block OCR and translation re-runs. */
-function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves }: {
+function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves, queued }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
   onChanged: (detail: StudioPageDetail) => void;
   /** Registers an in-flight save so page actions wait for it. */
   trackSave: (save: Promise<unknown>) => void;
-  /** Runs the action once every pending save has settled. */
-  afterSaves: (action: () => void) => void;
+  /** Runs the action once every pending save has succeeded; a second call with the same key while queued is ignored. */
+  afterSaves: (key: string, action: () => void) => void;
+  /** Keys of actions currently waiting on saves. */
+  queued: ReadonlySet<string>;
 }) {
+  const ocrKey = `block:${block.id}:ocr`;
+  const translateKey = `block:${block.id}:translate`;
   const source = useSavedText(block.source_text ?? "");
   const translation = useSavedText(block.translated_text ?? "");
   const saveM = useMutation({
@@ -308,10 +326,10 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
         {(saveM.isPending || runM.isPending) && <Loader2 size={12} className="animate-spin text-gray-500" />}
         {(source.dirty || translation.dirty) && !saveM.isPending && <span className="text-amber-400">unsaved</span>}
         <span className="ml-auto flex gap-1">
-          <IconButton title="Read the text again (OCR)" disabled={locked} onClick={() => afterSaves(() => runM.mutate("ocr"))}>
+          <IconButton title="Read the text again (OCR)" disabled={locked || queued.has(ocrKey)} onClick={() => afterSaves(ocrKey, () => runM.mutate("ocr"))}>
             <ScanText size={13} />
           </IconButton>
-          <IconButton title="Translate again" disabled={locked || !source.text.trim()} onClick={() => afterSaves(() => runM.mutate("translate"))}>
+          <IconButton title="Translate again" disabled={locked || queued.has(translateKey) || !source.text.trim()} onClick={() => afterSaves(translateKey, () => runM.mutate("translate"))}>
             <Languages size={13} />
           </IconButton>
         </span>
