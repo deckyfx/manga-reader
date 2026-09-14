@@ -351,8 +351,15 @@ export class PagePipeline {
     if (width !== info.width || height !== info.height) throw new Error(`mask.png size does not match ${output}`);
 
     const target = new Uint8Array(width * height);
+    // Whole pixels covering each area (callers other than the route may pass fractions), clipped to the page
     const clipped = areas
-      .map((a) => ({ x: Math.max(0, a.x), y: Math.max(0, a.y), w: Math.min(width, a.x + a.w) - Math.max(0, a.x), h: Math.min(height, a.y + a.h) - Math.max(0, a.y) }))
+      .map((a) => {
+        const x0 = Math.max(0, Math.floor(a.x));
+        const y0 = Math.max(0, Math.floor(a.y));
+        const x1 = Math.min(width, Math.ceil(a.x + a.w));
+        const y1 = Math.min(height, Math.ceil(a.y + a.h));
+        return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      })
       .filter((a) => a.w > 0 && a.h > 0);
     for (const area of clipped) {
       for (let y = area.y; y < area.y + area.h; y++) {
