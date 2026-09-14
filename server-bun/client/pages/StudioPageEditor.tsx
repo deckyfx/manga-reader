@@ -38,11 +38,14 @@ export function StudioPageEditor() {
   // Text saves run on blur, which fires just before a button's click: actions wait for them so they see the new text
   const pendingSaves = useRef(new Set<Promise<unknown>>());
   const trackSave = useCallback((save: Promise<unknown>) => {
-    const tracked = save.catch(() => {}).finally(() => pendingSaves.current.delete(tracked));
+    const tracked = save.finally(() => pendingSaves.current.delete(tracked));
+    // The block shows its own save error; this only keeps the rejection from being reported as unhandled
+    void tracked.catch(() => {});
     pendingSaves.current.add(tracked);
   }, []);
   const afterSaves = useCallback((action: () => void) => {
-    void Promise.all([...pendingSaves.current]).then(action);
+    // A failed save leaves the server on the old text: don't run OCR, translate, render or publish against it
+    Promise.all([...pendingSaves.current]).then(action, () => {});
   }, []);
 
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);

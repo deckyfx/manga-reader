@@ -65,8 +65,13 @@ function parseUrl(raw: string, base?: URL): URL {
     throw new ImageLoadError("invalid image URL");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new ImageLoadError("only http and https image URLs are supported");
+  // user:pass@ would be sent as Basic auth (in plain text over http); page images never need it
+  if (url.username || url.password) throw new ImageLoadError("image URLs with credentials are not supported");
   return url;
 }
+
+/** Origin and path only, for logs: the full URL can carry credentials or signed query parameters. */
+const logUrl = (url: URL): string => `${url.origin}${url.pathname}`;
 
 /** One GET over a connection pinned to validated public addresses; resolves once response headers arrive. */
 async function request(url: URL, resolve: Resolver, signal: AbortSignal): Promise<IncomingMessage> {
@@ -88,7 +93,7 @@ async function request(url: URL, resolve: Resolver, signal: AbortSignal): Promis
 /** Maps transport failures to a client-safe ImageLoadError; the details are only logged. */
 function toLoadError(err: unknown, url: URL, signal: AbortSignal): ImageLoadError {
   if (err instanceof ImageLoadError) return err;
-  log.warn({ err, url: url.href }, "Image fetch failed");
+  log.warn({ err, url: logUrl(url) }, "Image fetch failed");
   return new ImageLoadError(signal.aborted ? "fetching the image timed out" : "could not fetch the image");
 }
 

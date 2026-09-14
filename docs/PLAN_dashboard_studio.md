@@ -204,7 +204,7 @@ Start after PR #14 (and its CodeRabbit fixes) is merged; branch `feat/studio-fra
 
 **Schema** (`src/db/schema.ts`, then `bun run db:generate`)
 - `pages`: `id` (job id / image hash), `source_url`, `width`, `height`, `revision`, `created_at`, `updated_at`.
-- `page_stages`: `page_id`, `stage` (`detect | ocr | translate | clean_text | clean_sfx | layout | burn`), `status` (`fresh | stale | running | error`), `file` (relative to the job folder, nullable), `error`, `updated_at`; unique on (`page_id`, `stage`).
+- `page_stages`: `page_id`, `stage` (`detect | ocr | translate | clean_text | clean_sfx | layout | burn`), `status` (`fresh | stale | error`; queued/running live on the page, see section 4), `file` (relative to the job folder, nullable), `error`, `updated_at`; unique on (`page_id`, `stage`).
 - `page_blocks`: `page_id`, `idx`, `kind`, `box` / `bubble` (JSON), `source_text`, `translated_text`, `clean` (bool), `layout` (JSON), `style` (JSON, nullable); unique on (`page_id`, `idx`).
 - The old `page_translation_jobs` / `page_translation_logs` stay until the migration question in §12 is decided.
 

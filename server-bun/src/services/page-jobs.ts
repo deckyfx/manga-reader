@@ -7,7 +7,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { childLogger } from "@/lib/logger";
-import { runExclusive } from "@/queue/page-queue";
+import { runExclusiveResult, withPageLock } from "@/queue/page-queue";
 import { enginesNotReady, pageEngines as engines } from "@/services/page-engines";
 import { missingPipelineModels, normalisePage, PagePipeline, type PageStage, type ProgressUpdate } from "@/services/page-pipeline";
 import { pageDir, PageStore, type StageName } from "@/stores/page-store";
@@ -59,6 +59,14 @@ export interface SubmitPageOptions {
 export type SubmitPageResult =
   | { ok: true; job_id: string; cached: boolean }
   | { ok: false; code: 400 | 409 | 429 | 503; error: string };
+
+/** Ends a job that failed before the pipeline started: records the error and tells progress subscribers. */
+async function failJob(id: string, err: unknown): Promise<void> {
+  const message = err instanceof Error ? err.message : String(err);
+  log.error({ err, jobId: id }, "Page job failed");
+  await PageStore.update(id, { status: "error", errorMessage: message }).catch(() => {});
+  translationJobs.emit(id, { type: "error", stage: "error", message, error: message });
+}
 
 /** Removes a page's pipeline files before a fresh run; its publish history (`history/`) is kept. */
 async function clearPipelineFiles(id: string): Promise<void> {
@@ -158,15 +166,23 @@ export async function submitPageJob(load: () => Promise<Buffer>, options: Submit
       }
 
       translationJobs.emit(id, { type: "log", stage: "queued", message: "Queued for translation", progress: 0 });
-      await clearPipelineFiles(id);
+      // Mark the page queued first, so Studio mutations that start from now on are refused
       await PageStore.update(id, { status: "queued", errorMessage: null });
-      runExclusive(async () => {
+      // Page lock before the global queue (the same order as Studio runs): a Studio edit, run or publish already
+      // holding the lock finishes before this run clears the page's files, stages and blocks
+      void withPageLock(id, async () => {
         try {
-          await runJob(id, page, options);
-        } finally {
-          pendingPages--;
+          await clearPipelineFiles(id);
+        } catch (err) {
+          await failJob(id, err);
+          return;
         }
-      });
+        await runExclusiveResult(() => runJob(id, page, options));
+      })
+        .catch((err: unknown) => log.error({ err, jobId: id }, "Page job failed outside the pipeline"))
+        .finally(() => {
+          pendingPages--;
+        });
       queued = true;
       return { ok: true, job_id: id, cached: false };
     } catch (err) {
