@@ -3,8 +3,11 @@ import { randomUUIDv7 } from "bun";
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { db } from "@/db/index";
+import { childLogger } from "@/lib/logger";
 import { pageBlocks, pages, pageStages, type NewPage, type Page, type PageStageRow } from "@/db/schema";
 import type { BlockShape, JobRepository, PageBlock, PageJob } from "@/services/page-pipeline";
+
+const log = childLogger("page-store");
 
 /** Rectangles are the default, so only ellipse / polygon outlines are stored. */
 const shapeToJson = (shape: BlockShape | undefined): string | null =>
@@ -110,8 +113,12 @@ export class PageStore {
       return 0;
     }
     const parked = entries.filter((name) => PARKED_FOLDER.test(name));
-    await Promise.all(parked.map((name) => rm(join(PAGE_JOBS_DIR, name), { recursive: true, force: true })));
-    return parked.length;
+    // One folder that can't be removed must not stop the others, or the server from starting; it's retried next start
+    const results = await Promise.allSettled(parked.map((name) => rm(join(PAGE_JOBS_DIR, name), { recursive: true, force: true })));
+    results.forEach((result, i) => {
+      if (result.status === "rejected") log.warn({ err: result.reason, folder: parked[i] }, "Couldn't remove a deleted page's folder; will retry at next start");
+    });
+    return results.filter((result) => result.status === "fulfilled").length;
   }
 
   /** Deletes a page row; its stages and blocks go with it (foreign keys cascade). False when it didn't exist. */
