@@ -131,6 +131,70 @@ export const rollbackPage = (id: string, revision: number) =>
 
 export const historyImageUrl = (id: string, revision: number) => `/studio/api/pages/${id}/history/${revision}`;
 
+// ── Read (library + reader) ───────────────────────────────────────────────────
+
+export const listVolumes = () => unwrap(api.read.api.volumes.get());
+
+export const createVolume = (body: { title: string; reading_direction?: ReadingDirection }) =>
+  unwrap(api.read.api.volumes.post(body));
+
+export const getVolume = (id: number) => unwrap(api.read.api.volumes({ id }).get());
+
+export const updateVolume = (id: number, body: { title?: string; reading_direction?: ReadingDirection; cover_path?: string | null }) =>
+  unwrap(api.read.api.volumes({ id }).put(body));
+
+export const deleteVolume = (id: number) => unwrap(api.read.api.volumes({ id }).delete());
+
+export const createChapter = (body: { volume_id: number; title: string; sort_order?: number }) =>
+  unwrap(api.read.api.chapters.post(body));
+
+export const getChapter = (id: number) => unwrap(api.read.api.chapters({ id }).get());
+
+export const updateChapter = (id: number, body: { title?: string; sort_order?: number }) =>
+  unwrap(api.read.api.chapters({ id }).put(body));
+
+export const deleteChapter = (id: number) => unwrap(api.read.api.chapters({ id }).delete());
+
+/** Files images or ZIP / CBZ archives into a chapter; returns the chapter with its pages and what was skipped. */
+export const importChapterPages = (id: number, files: File[]) => unwrap(api.read.api.chapters({ id }).pages.post({ files }));
+
+export const reorderChapterPages = (id: number, ids: string[]) =>
+  unwrap(api.read.api.chapters({ id }).pages.reorder.put({ ids }));
+
+/** Pages that aren't in a chapter yet (extension jobs and uploads). */
+export const listInbox = () => unwrap(api.read.api.inbox.get());
+
+/** Moves a page between chapters (null = Inbox), renames it, or sets its reading position. */
+export const filePage = (id: string, body: { chapter_id?: number | null; sort_order?: number; name?: string | null }) =>
+  unwrap(api.read.api.pages({ id }).put(body));
+
+/** Takes a page out of its chapter, keeping the page and its images. */
+export const unfilePage = (id: string) => unwrap(api.read.api.pages({ id }).delete());
+
+/** Page image for the reader: the published result, else the original. `version` busts the browser cache. */
+export const readPageImageUrl = (id: string, version?: string | number) =>
+  `/read/api/pages/${id}/image${version !== undefined ? `?v=${encodeURIComponent(String(version))}` : ""}`;
+
+export const chapterExportUrl = (id: number) => `/read/api/chapters/${id}/export`;
+
+/** Translates a chapter's pages: skips finished ones unless `force`. */
+export const startChapterRun = (id: number, body?: { force?: boolean; clean_sfx?: boolean }) =>
+  unwrap(api.studio.api.chapters({ id }).run.post(body ?? {}));
+
+export const getChapterRun = (id: number) => unwrap(api.studio.api.chapters({ id }).run.get());
+
+/** Runs the whole pipeline again for one page, from its stored original. */
+export const rerunPage = (id: string, body?: { clean_sfx?: boolean }) =>
+  unwrap(api.studio.api.pages({ id }).rerun.post(body ?? {}));
+
+export type ReadingDirection = "rtl" | "ltr";
+export type VolumeSummary = Awaited<ReturnType<typeof listVolumes>>[number];
+export type VolumeDetail = Awaited<ReturnType<typeof getVolume>>;
+export type ChapterSummary = VolumeDetail["chapters"][number];
+export type ChapterDetail = Awaited<ReturnType<typeof getChapter>>;
+export type ReadPage = ChapterDetail["pages"][number];
+export type ChapterRunState = Awaited<ReturnType<typeof getChapterRun>>;
+
 export type StudioPageSummary = Awaited<ReturnType<typeof listPages>>[number];
 export type StudioPageDetail = Awaited<ReturnType<typeof getPage>>;
 export type StudioBlock = StudioPageDetail["blocks"][number];

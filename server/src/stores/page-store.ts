@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { randomUUIDv7 } from "bun";
 import { existsSync } from "node:fs";
 import { readdir, rename, rm } from "node:fs/promises";
@@ -72,18 +72,77 @@ export class PageStore {
   }
 
   /** Existing page for this image, or a new queued one. Safe against concurrent inserts of the same image. */
+  /**
+   * The Inbox page for an image, created if there is none. Only Inbox pages (no chapter) are reused: the same image
+   * filed into chapters keeps its own page per chapter, so edits there are independent.
+   */
   static async findOrCreate(imageHash: string, source: string): Promise<{ page: Page; created: boolean }> {
-    const existing = await db.query.pages.findFirst({ where: eq(pages.imageHash, imageHash) });
+    const inbox = and(eq(pages.imageHash, imageHash), isNull(pages.chapterId));
+    const existing = await db.query.pages.findFirst({ where: inbox, orderBy: desc(pages.createdAt) });
     if (existing) return { page: existing, created: false };
-    const [row] = await db
-      .insert(pages)
-      .values({ id: randomUUIDv7(), imageHash, source })
-      .onConflictDoNothing({ target: pages.imageHash })
-      .returning();
-    if (row) return { page: row, created: true };
-    const raced = await db.query.pages.findFirst({ where: eq(pages.imageHash, imageHash) });
-    if (!raced) throw new Error("failed to create page");
-    return { page: raced, created: false };
+    const [row] = await db.insert(pages).values({ id: randomUUIDv7(), imageHash, source }).returning();
+    if (!row) throw new Error("failed to create page");
+    return { page: row, created: true };
+  }
+
+  /** A page filed straight into a chapter (ZIP or image import); never reuses an existing page. */
+  static async createInChapter(imageHash: string, source: string, chapterId: number, sortOrder: number, name: string | null): Promise<Page> {
+    const [row] = await db.insert(pages).values({ id: randomUUIDv7(), imageHash, source, chapterId, sortOrder, name }).returning();
+    if (!row) throw new Error("failed to create page");
+    return row;
+  }
+
+  /** Pages of a chapter in reading order. */
+  static async listByChapter(chapterId: number): Promise<Page[]> {
+    return db.select().from(pages).where(eq(pages.chapterId, chapterId)).orderBy(pages.sortOrder, pages.createdAt);
+  }
+
+  /** Pages not filed into a chapter yet (extension jobs and uploads), newest first. */
+  static async listInbox(): Promise<Page[]> {
+    return db.select().from(pages).where(isNull(pages.chapterId)).orderBy(desc(pages.createdAt));
+  }
+
+  /** How many pages each of these chapters holds. */
+  static async countsByChapter(chapterIds: number[]): Promise<Map<number, number>> {
+    if (chapterIds.length === 0) return new Map();
+    const rows = await db
+      .select({ chapterId: pages.chapterId, count: sql<number>`count(*)` })
+      .from(pages)
+      .where(inArray(pages.chapterId, chapterIds))
+      .groupBy(pages.chapterId);
+    return new Map(rows.flatMap((r) => (r.chapterId === null ? [] : [[r.chapterId, Number(r.count)] as const])));
+  }
+
+  /** Highest sort order in a chapter (0 when empty), so imports append. */
+  static async maxSortOrder(chapterId: number): Promise<number> {
+    const row = await db
+      .select({ max: sql<number>`coalesce(max(${pages.sortOrder}), 0)` })
+      .from(pages)
+      .where(eq(pages.chapterId, chapterId))
+      .get();
+    return row?.max ?? 0;
+  }
+
+  /** Moves a page into a chapter (null = back to the Inbox), optionally renaming it. False when it doesn't exist. */
+  static async filePage(id: string, fields: { chapterId?: number | null; sortOrder?: number; name?: string | null }): Promise<boolean> {
+    const rows = await db
+      .update(pages)
+      .set({ ...fields, updatedAt: sql`(datetime('now'))` })
+      .where(eq(pages.id, id))
+      .returning({ id: pages.id });
+    return rows.length > 0;
+  }
+
+  /** Writes a chapter's reading order from the given page ids, in one transaction. */
+  static async reorderChapter(chapterId: number, orderedIds: string[]): Promise<void> {
+    db.transaction((tx) => {
+      orderedIds.forEach((id, index) => {
+        tx.update(pages)
+          .set({ sortOrder: index + 1, updatedAt: sql`(datetime('now'))` })
+          .where(and(eq(pages.id, id), eq(pages.chapterId, chapterId)))
+          .run();
+      });
+    });
   }
 
   static async update(id: string, data: Partial<Omit<NewPage, "id" | "imageHash">>): Promise<void> {

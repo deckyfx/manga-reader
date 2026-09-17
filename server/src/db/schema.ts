@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 // ── OCR / Translate logs (mirrors C# OcrLog / TranslateLog) ────────────────
@@ -29,6 +29,8 @@ export const volumes = sqliteTable("volumes", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   title: text("title").notNull(),
   coverPath: text("cover_path"),
+  /** How the reader pages through this volume: rtl (manga, default) | ltr */
+  readingDirection: text("reading_direction").notNull().default("rtl"),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 });
@@ -38,7 +40,6 @@ export const chapters = sqliteTable("chapters", {
   volumeId: integer("volume_id").notNull().references(() => volumes.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   sortOrder: integer("sort_order").notNull().default(0),
-  pagesDir: text("pages_dir").notNull(),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 });
@@ -92,7 +93,14 @@ export const pageTranslationLogs = sqliteTable("page_translation_logs", {
 /** One manga page; stage images live in data/jobs/<id>/, everything else is here. */
 export const pages = sqliteTable("pages", {
   id: text("id").primaryKey(),
-  imageHash: text("image_hash").notNull().unique(),
+  /** Not unique: the same image can sit in several chapters. The extension's reuse cache looks up Inbox pages. */
+  imageHash: text("image_hash").notNull(),
+  /** Chapter this page belongs to; null = Inbox (extension jobs and uploads not filed yet). */
+  chapterId: integer("chapter_id").references(() => chapters.id, { onDelete: "set null" }),
+  /** Reading order inside the chapter. */
+  sortOrder: integer("sort_order").notNull().default(0),
+  /** Shown in the reader and used for export file names; falls back to the page number. */
+  name: text("name"),
   /** Where the page came from ("upload" or the page URL). */
   source: text("source").notNull(),
   width: integer("width").notNull().default(0),
@@ -106,7 +114,10 @@ export const pages = sqliteTable("pages", {
   revision: integer("revision").notNull().default(0),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
-});
+}, (table) => ({
+  pageHashIdx: index("pages_image_hash_idx").on(table.imageHash),
+  pageChapterIdx: index("pages_chapter_sort_idx").on(table.chapterId, table.sortOrder),
+}));
 
 export const pageStages = sqliteTable("page_stages", {
   pageId: text("page_id").notNull().references(() => pages.id, { onDelete: "cascade" }),

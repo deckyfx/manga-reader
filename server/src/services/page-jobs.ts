@@ -118,6 +118,71 @@ async function runJob(id: string, page: Buffer, options: SubmitPageOptions): Pro
 }
 
 /**
+ * Queues the pipeline for a page whose job slot is already reserved: marks it queued, then runs under the page lock
+ * and the global queue. Returns once it's queued; `done` resolves when the run has finished (used by batch runs).
+ * Releases the pending-page slot when the run ends.
+ */
+async function startRun(id: string, page: Buffer, options: SubmitPageOptions): Promise<{ done: Promise<void> }> {
+  translationJobs.emit(id, { type: "log", stage: "queued", message: "Queued for translation", progress: 0 });
+  // Mark the page queued first, so Studio mutations that start from now on are refused
+  await PageStore.update(id, { status: "queued", errorMessage: null });
+  // Page lock before the global queue (the same order as Studio runs): a Studio edit, run or publish already
+  // holding the lock finishes before this run clears the page's files, stages and blocks
+  const done = withPageLock(id, async () => {
+    try {
+      await clearPipelineFiles(id);
+    } catch (err) {
+      await failJob(id, err);
+      return;
+    }
+    await runExclusiveResult(() => runJob(id, page, options));
+  })
+    // runJob reports pipeline errors itself; anything that escapes still has to end the job for its subscribers
+    .catch((err: unknown) => failJob(id, err))
+    .finally(() => {
+      pendingPages--;
+    });
+  return { done };
+}
+
+/**
+ * Runs the pipeline again for a page that already has its original stored (an imported chapter page, or "run again"
+ * in the Studio). Unlike {@link submitPageJob} it never looks a page up by image hash, so chapter pages keep their
+ * own job. `done` resolves when the run has finished.
+ */
+export async function runStoredPage(id: string, options: SubmitPageOptions): Promise<
+  { ok: true; job_id: string; done: Promise<void> } | { ok: false; code: 400 | 404 | 409 | 429 | 503; error: string }
+> {
+  const notReady = enginesNotReady();
+  if (notReady) return { ok: false, code: 503, error: notReady };
+  const missing = missingPipelineModels();
+  if (missing.length > 0) {
+    return { ok: false, code: 503, error: `Page translation models missing (${missing.join(", ")}) — set TEXT_SEG_MODEL_ENABLED and INPAINT_MODEL_ENABLED so they download at boot` };
+  }
+  const row = await PageStore.findById(id);
+  if (!row) return { ok: false, code: 404, error: "page not found" };
+  const original = join(pageDir(id), "original.png");
+  if (!existsSync(original)) return { ok: false, code: 400, error: "this page has no stored original to run again" };
+
+  const live = translationJobs.get(id);
+  if (live && (live.status === "queued" || live.status === "running")) {
+    return { ok: false, code: 409, error: "this page is already being translated" };
+  }
+  if (pendingPages >= MAX_PENDING_PAGES) return { ok: false, code: 429, error: "Too many pages waiting for translation — try again shortly" };
+  pendingPages++;
+  let queued = false;
+  try {
+    const page = Buffer.from(await Bun.file(original).arrayBuffer());
+    translationJobs.create(id, options.cleanSfx);
+    const { done } = await startRun(id, page, options);
+    queued = true;
+    return { ok: true, job_id: id, done };
+  } finally {
+    if (!queued) pendingPages--;
+  }
+}
+
+/**
  * Admits one page: checks models and capacity, loads and decodes the image, then replays a cached result
  * or queues a pipeline run. `load` runs only after capacity is reserved, so slow downloads count against it.
  * Progress is streamed on GET /api/translate-page/:id/events.
@@ -168,25 +233,7 @@ export async function submitPageJob(load: () => Promise<Buffer>, options: Submit
         return { ok: true, job_id: id, cached: true };
       }
 
-      translationJobs.emit(id, { type: "log", stage: "queued", message: "Queued for translation", progress: 0 });
-      // Mark the page queued first, so Studio mutations that start from now on are refused
-      await PageStore.update(id, { status: "queued", errorMessage: null });
-      // Page lock before the global queue (the same order as Studio runs): a Studio edit, run or publish already
-      // holding the lock finishes before this run clears the page's files, stages and blocks
-      void withPageLock(id, async () => {
-        try {
-          await clearPipelineFiles(id);
-        } catch (err) {
-          await failJob(id, err);
-          return;
-        }
-        await runExclusiveResult(() => runJob(id, page, options));
-      })
-        // runJob reports pipeline errors itself; anything that escapes still has to end the job for its subscribers
-        .catch((err: unknown) => failJob(id, err))
-        .finally(() => {
-          pendingPages--;
-        });
+      await startRun(id, page, options);
       queued = true;
       return { ok: true, job_id: id, cached: false };
     } catch (err) {

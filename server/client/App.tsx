@@ -6,6 +6,9 @@ import { HomePage } from "./pages/HomePage";
 import { StudioPagesPage } from "./pages/StudioPagesPage";
 import { StudioPageEditor } from "./pages/StudioPageEditor";
 import { ReadPage } from "./pages/ReadPage";
+import { VolumePage } from "./pages/VolumePage";
+import { ChapterPage } from "./pages/ChapterPage";
+import { ReaderPage } from "./pages/ReaderPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
 const queryClient = new QueryClient({
@@ -26,6 +29,9 @@ export function App() {
             <Route path="studio" element={<StudioPagesPage />} />
             <Route path="studio/pages/:id" element={<StudioPageEditorRoute />} />
             <Route path="read" element={<ReadPage />} />
+            <Route path="read/volumes/:id" element={<VolumePage />} />
+            <Route path="read/chapters/:id" element={<ChapterPage />} />
+            <Route path="read/chapters/:id/pages/:n" element={<ReaderPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>
