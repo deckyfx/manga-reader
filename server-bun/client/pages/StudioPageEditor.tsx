@@ -370,9 +370,11 @@ export function StudioPageEditor() {
             onStylePreview={setBlockStyle}
             relayout={relayout}
             onModeChange={(mode) => {
-              // Lettering is judged against the cleaned page, where it will be burned
+              // Lettering is judged against the cleaned page, where it will be burned; a page not cleaned yet keeps its
+              // background rather than pointing at an image that doesn't exist
               if (mode === "lettering" && canvasImage !== "clean-text.png" && canvasImage !== "clean-sfx.png") {
-                setCanvasImage(stageStatus("clean_sfx") === "fresh" ? "clean-sfx.png" : "clean-text.png");
+                if (stageStatus("clean_sfx") === "fresh") setCanvasImage("clean-sfx.png");
+                else if (stageStatus("clean_text") !== undefined) setCanvasImage("clean-text.png");
               }
             }}
             renderLetteringPanel={(blockId) => {
