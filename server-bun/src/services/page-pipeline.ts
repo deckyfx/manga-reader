@@ -16,7 +16,8 @@ import { labelComponents, maskFromImage, maskToPng, selectBlockMask, type BlockK
 import { getTextSegmenter, textSegModelPath } from "@/services/text-seg-service";
 import { getBubbleDetector } from "@/services/bubble-service";
 import { getInpainter, inpaintModelPath } from "@/services/inpaint-service";
-import { findTextArea, getTypesetter, separateAreas, type TextArea } from "@/services/typeset-service";
+import { findTextArea, getTypesetter, isDarkBackground, separateAreas, type TextArea } from "@/services/typeset-service";
+import { rectArea, storedArea, typesetPage, type StoredArea, type TextStyle, type TypesetEntry } from "@/shared/typeset";
 
 export type PageStage = "detecting" | "ocr" | "translating" | "cleaning" | "typesetting";
 
@@ -40,6 +41,10 @@ export interface PageBlock extends Box {
   translated_text: string | null;
   /** Filled by `render`: the typeset result, kept for review and later manual overrides. */
   render?: { font_size: number; lines: string[]; area: Box; fits: boolean };
+  /** Lettering overrides set in the Studio (font, size, colours, alignment, rotation, text box). */
+  style?: TextStyle;
+  /** Filled by `render`: where the text was placed, reused by the Studio's live preview. */
+  area?: StoredArea;
 }
 
 export interface PageJob {
@@ -383,7 +388,8 @@ export class PagePipeline {
   async render(job: PageJob): Promise<RenderResult> {
     const input = existsSync(this.path("clean-sfx.png")) ? "clean-sfx.png" : "clean-text.png";
     if (!existsSync(this.path(input))) throw new Error("No cleaned page yet — clean the text blocks first");
-    const targets = job.blocks.filter((b) => b.kind === "text" && b.translated_text?.trim());
+    // Text blocks carry translations; sound-effect regions are re-lettered when given text in the Studio
+    const targets = job.blocks.filter((b) => (b.kind === "text" || b.kind === "sfx") && b.translated_text?.trim());
     this.report({ stage: "typesetting", message: `Typesetting ${targets.length} translations…`, fraction: 0 });
 
     const page = Buffer.from(await Bun.file(this.path(input)).arrayBuffer());
@@ -391,46 +397,62 @@ export class PagePipeline {
     const { width, height } = info;
 
     // Bubbles are detected again on the cleaned page: without the original lettering the outlines are unambiguous.
-    const detector = await getBubbleDetector();
+    // Only text blocks without an explicit text box are placed by bubble shape.
+    const detector = targets.some((b) => b.kind === "text" && !b.style?.box) ? await getBubbleDetector() : null;
     const bubbles = detector ? (await detector.detect(page)).bubbles : [];
-    const typesetter = await getTypesetter();
-    const maxFontSize = Math.round(height / 40);
-    // A block this run doesn't typeset (skipped, or no translation any more) must not keep an older patch
-    for (const b of job.blocks) delete b.render;
+    // A block this run doesn't typeset (skipped, or no translation any more) must not keep an older patch or area
+    for (const b of job.blocks) {
+      delete b.render;
+      delete b.area;
+    }
     rmSync(this.path("patches"), { recursive: true, force: true });
     mkdirSync(this.path("patches"), { recursive: true });
 
-    const entries: { block: PageBlock; area: TextArea }[] = [];
+    const entries: TypesetEntry[] = [];
+    const detected: { block: PageBlock; area: TextArea }[] = [];
     const skipped: number[] = [];
     for (const b of targets) {
-      const area = findTextArea(rgb, width, height, b, matchBubble(b, bubbles));
-      if (area) entries.push({ block: b, area });
+      const style = b.style ?? {};
+      let area: TextArea | null;
+      if (style.box) area = rectArea(style.box, isDarkBackground(rgb, width, height, style.box));
+      else if (b.kind === "sfx") area = rectArea(b, isDarkBackground(rgb, width, height, b));
+      else {
+        area = findTextArea(rgb, width, height, b, matchBubble(b, bubbles));
+        if (area) detected.push({ block: b, area });
+      }
+      if (area) entries.push({ id: b.id, text: b.translated_text ?? "", area, style });
       else skipped.push(b.id);
     }
-    separateAreas(entries);
+    // Only detected interiors can overlap by accident; explicit boxes are where the user put them
+    separateAreas(detected);
 
-    // Largest size each block could take, then a shared page size so the lettering looks consistent
-    const bestSizes = entries.map(({ block, area }) => typesetter.layout(block.translated_text ?? "", area, maxFontSize).fontSize);
-    // Size 0 means separateAreas left the area empty: it must not drag the page size down to the minimum
-    const sortedSizes = bestSizes.filter((size) => size > 0).sort((a, b) => a - b);
-    const pageFontSize = sortedSizes[Math.floor((sortedSizes.length - 1) / 2)] ?? maxFontSize;
+    const typesetter = await getTypesetter();
+    const typeset = typesetPage(typesetter, entries, { width, height });
+    skipped.push(...typeset.skipped);
+    const pageFontSize = typeset.pageFontSize;
 
     const patches: OverlayOptions[] = [];
     const rendered: RenderedBlock[] = [];
     const laidOut: TextArea[] = [];
-    for (const [i, { block: b, area }] of entries.entries()) {
-      if (bestSizes[i] <= 0) {
+    for (const entry of entries) {
+      const b = job.blocks.find((block) => block.id === entry.id);
+      if (b) b.area = storedArea(entry.area);
+    }
+    for (const result of typeset.blocks) {
+      const entry = entries.find((e) => e.id === result.id);
+      const b = job.blocks.find((block) => block.id === result.id);
+      if (!entry || !b) continue;
+      if (!result.patch) {
         skipped.push(b.id);
         continue;
       }
-      laidOut.push(area);
-      const layout = typesetter.layout(b.translated_text ?? "", area, Math.min(pageFontSize, bestSizes[i]));
-      const patch = await sharp(Buffer.from(typesetter.renderSvg(layout, area))).png().toBuffer();
+      laidOut.push(entry.area);
+      const patch = await sharp(Buffer.from(result.patch.svg)).png().toBuffer();
       await Bun.write(this.path(`patches/${b.id}.png`), patch);
-      patches.push({ input: patch, left: area.bound.x, top: area.bound.y });
-      const lines = layout.lines.map((l) => l.text);
-      b.render = { font_size: layout.fontSize, lines, area: area.bound, fits: layout.fits };
-      rendered.push({ id: b.id, fontSize: layout.fontSize, bestFontSize: bestSizes[i], lines, fits: layout.fits });
+      patches.push({ input: patch, left: result.patch.x, top: result.patch.y });
+      const lines = result.layout.lines.map((l) => l.text);
+      b.render = { font_size: result.layout.fontSize, lines, area: entry.area.bound, fits: result.layout.fits };
+      rendered.push({ id: b.id, fontSize: result.layout.fontSize, bestFontSize: result.bestFontSize, lines, fits: result.layout.fits });
     }
 
     await sharp(page).composite(patches).png().toFile(this.path("result.png"));

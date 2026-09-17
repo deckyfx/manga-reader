@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Eraser, History, Languages, Loader2, Megaphone, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ArrowLeft, Eraser, History, Languages, Loader2, Megaphone, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
 import {
   deletePage,
   getPage,
@@ -13,6 +13,9 @@ import {
   rollbackPage,
   runStage,
   updateBlock,
+  type FontVariant,
+  type TextAlign,
+  type TextStyle,
   type PageImage,
   type StudioBlock,
   type StudioPageDetail,
@@ -23,6 +26,7 @@ import { JobProgress } from "../components/JobProgress";
 import { StatusBadge } from "../components/StatusBadge";
 import { usePageJobEvents } from "../hooks/usePageJobEvents";
 import { PageCanvas } from "../studio/canvas/PageCanvas";
+import { buildTextPreview, useTypesetter } from "../studio/text/typesetter";
 
 const isBusy = (status: string | undefined) => status === "queued" || status === "running";
 
@@ -113,6 +117,20 @@ export function StudioPageEditor() {
     void qc.invalidateQueries({ queryKey: ["studio-history", id] });
   });
 
+  /** Shows a block's style right away; the save that follows replaces it with the server's answer. */
+  const setBlockStyle = useCallback((blockId: number, style: TextStyle | null) => {
+    qc.setQueryData<StudioPageDetail>(["studio-page", id], (current) =>
+      current && { ...current, blocks: current.blocks.map((b) => (b.id === blockId ? { ...b, style } : b)) });
+  }, [qc, id]);
+
+  // Lettering as the burn would draw it, from the same shared typesetter the server uses
+  const { typesetter, error: typesetterError } = useTypesetter();
+  const previewDetail = pageQ.data;
+  const textPreview = useMemo(
+    () => (typesetter && previewDetail ? buildTextPreview(previewDetail, typesetter) : []),
+    [typesetter, previewDetail],
+  );
+
   const detail = pageQ.data;
   if (pageQ.isLoading) return <Loader2 className="m-4 animate-spin text-gray-500" />;
   if (!detail) return <p className="m-4 text-sm text-red-400">{pageQ.error?.message ?? "Page not found"}</p>;
@@ -179,7 +197,7 @@ export function StudioPageEditor() {
       key: "render",
       label: "Re-render",
       icon: <RefreshCw size={14} />,
-      hint: "Typeset the translations again",
+      hint: "Burn the placed lettering into the page",
       onSelect: () => afterSaves("render", () => renderM.mutate()),
       unavailable: unavailableWhen(translating, [renderM.isPending, "Already rendering"], [queued.has("render"), "Waiting for edits to save"]),
       pending: renderM.isPending,
@@ -273,6 +291,15 @@ export function StudioPageEditor() {
             onDetail={setDetail}
             onReload={() => void qc.invalidateQueries({ queryKey: ["studio-page", id] })}
             onImagesChanged={() => setImagesNonce((n) => n + 1)}
+            textPreview={textPreview}
+            textPreviewAvailable={canvasImage === "clean-text.png" || canvasImage === "clean-sfx.png"}
+            onStylePreview={setBlockStyle}
+            onToolChange={(tool) => {
+              // Placing lettering is judged against the cleaned page, where the preview is drawn
+              if (tool === "text" && canvasImage !== "clean-text.png" && canvasImage !== "clean-sfx.png") {
+                setCanvasImage(stageStatus("clean_sfx") === "fresh" ? "clean-sfx.png" : "clean-text.png");
+              }
+            }}
             toolbarStart={
               <select
                 aria-label="Canvas background image"
@@ -298,14 +325,15 @@ export function StudioPageEditor() {
           <div className="text-xs text-gray-500">
             {textBlocks.length} text block{textBlocks.length === 1 ? "" : "s"} · {sfxBlocks.length} sound effect{sfxBlocks.length === 1 ? "" : "s"}
           </div>
+          {typesetterError && <p className="text-xs text-red-400">Lettering preview unavailable: {typesetterError}</p>}
           {textBlocks.map((block) => (
-            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} />
+            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} setBlockStyle={setBlockStyle} />
           ))}
           {sfxBlocks.length > 0 && (
             <div className="pt-2 border-t border-gray-800 space-y-1.5">
-              <div className="text-xs text-gray-400">Sound effects · ticked ones are removed by Clean SFX</div>
+              <div className="text-xs text-gray-400">Sound effects · ticked ones are removed by Clean SFX; give one lettering to draw it again</div>
               {sfxBlocks.map((block) => (
-                <SfxBlockRow key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} />
+                <SfxBlockRow key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} setBlockStyle={setBlockStyle} />
               ))}
             </div>
           )}
@@ -418,7 +446,7 @@ function useSavedText(saved: string) {
 }
 
 /** One text block: editable source text and translation, plus per-block OCR and translation re-runs. */
-function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves, queued, selected, onSelect }: {
+function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves, queued, selected, onSelect, setBlockStyle }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
@@ -432,6 +460,7 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
   /** Selected on the canvas: highlighted and scrolled into view. */
   selected: boolean;
   onSelect: () => void;
+  setBlockStyle: (blockId: number, style: TextStyle | null) => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -496,6 +525,7 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
         placeholder="Translation"
         className="w-full resize-y bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-indigo-500"
       />
+      <StyleEditor pageId={pageId} block={block} disabled={locked} onChanged={onChanged} trackSave={trackSave} setBlockStyle={setBlockStyle} />
       {error && <p className="text-xs text-red-400">{error.message}</p>}
     </div>
   );
@@ -530,8 +560,8 @@ function IncludeToggle({ pageId, block, disabled, onChanged, trackSave, title }:
   );
 }
 
-/** One sound-effect region: selectable, with its include-in-cleaning toggle. */
-function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, onSelect }: {
+/** One sound-effect region: selectable, with its include-in-cleaning toggle and optional new lettering. */
+function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, onSelect, setBlockStyle }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
@@ -539,22 +569,259 @@ function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, 
   trackSave: (save: Promise<unknown>) => void;
   selected: boolean;
   onSelect: () => void;
+  setBlockStyle: (blockId: number, style: TextStyle | null) => void;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (selected) rowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selected]);
+  const lettering = useSavedText(block.translated_text ?? "");
+  const saveM = useMutation({
+    mutationFn: (text: string) => updateBlock(pageId, block.id, { translated_text: text }),
+    onSuccess: onChanged,
+  });
   return (
     <div
       ref={rowRef}
       onClick={onSelect}
-      className={`flex items-center gap-2 bg-gray-900 border rounded-lg px-2.5 py-1.5 text-xs cursor-pointer transition-colors ${selected ? "border-orange-400" : "border-gray-800"}`}
+      className={`bg-gray-900 border rounded-lg px-2.5 py-1.5 text-xs space-y-1.5 cursor-pointer transition-colors ${selected ? "border-orange-400" : "border-gray-800"}`}
     >
-      <span className="font-semibold text-orange-400">#{block.id}</span>
-      <span className="text-gray-500 tabular-nums">{block.w}×{block.h}</span>
-      <span className="ml-auto">
-        <IncludeToggle pageId={pageId} block={block} disabled={disabled} onChanged={onChanged} trackSave={trackSave} title="Remove this sound effect when SFX are cleaned" />
-      </span>
+      <div className="flex items-center gap-2">
+        <span className="font-semibold text-orange-400">#{block.id}</span>
+        <span className="text-gray-500 tabular-nums">{block.w}×{block.h}</span>
+        {saveM.isPending && <Loader2 size={12} className="animate-spin text-gray-500" />}
+        <span className="ml-auto">
+          <IncludeToggle pageId={pageId} block={block} disabled={disabled} onChanged={onChanged} trackSave={trackSave} title="Remove this sound effect when SFX are cleaned" />
+        </span>
+      </div>
+      <textarea
+        value={lettering.text}
+        disabled={disabled}
+        onChange={(e) => lettering.setText(e.target.value)}
+        onBlur={() => lettering.dirty && trackSave(saveM.mutateAsync(lettering.text))}
+        rows={1}
+        placeholder="New lettering (optional)"
+        className="w-full resize-y bg-gray-950 border border-gray-800 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-indigo-500"
+      />
+      {saveM.error && <p className="text-red-400">{saveM.error.message}</p>}
+      {lettering.text.trim() !== "" && (
+        <StyleEditor pageId={pageId} block={block} disabled={disabled} onChanged={onChanged} trackSave={trackSave} setBlockStyle={setBlockStyle} />
+      )}
+    </div>
+  );
+}
+
+/** Drops unset fields; an empty style means automatic lettering. */
+function compactStyle(style: TextStyle): TextStyle | null {
+  const next = { ...style } as Record<string, unknown>;
+  for (const key of Object.keys(next)) if (next[key] === undefined) delete next[key];
+  return Object.keys(next).length > 0 ? (next as TextStyle) : null;
+}
+
+/**
+ * Lettering overrides for one block. Changes show in the canvas preview at once and are saved after a short pause
+ * (page actions wait for the save); a save still pending when the panel goes away is sent right then.
+ */
+function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockStyle }: {
+  pageId: string;
+  block: StudioBlock;
+  disabled: boolean;
+  onChanged: (detail: StudioPageDetail) => void;
+  trackSave: (save: Promise<unknown>) => void;
+  setBlockStyle: (blockId: number, style: TextStyle | null) => void;
+}) {
+  const style = (block.style ?? {}) as TextStyle;
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const pending = useRef<{ style: TextStyle | null } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latest = useRef({ pageId, blockId: block.id, onChanged, trackSave });
+  latest.current = { pageId, blockId: block.id, onChanged, trackSave };
+
+  const flush = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    const next = pending.current;
+    if (!next) return;
+    pending.current = null;
+    const { pageId: page, blockId, onChanged: changed, trackSave: track } = latest.current;
+    setSaving(true);
+    const save = updateBlock(page, blockId, { style: next.style })
+      .then((detail) => {
+        changed(detail);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : String(err));
+        throw err;
+      })
+      .finally(() => setSaving(false));
+    track(save);
+  }, []);
+  useEffect(() => flush, [flush]);
+
+  const change = (patch: Partial<TextStyle>) => {
+    const next = compactStyle({ ...style, ...patch });
+    setBlockStyle(block.id, next);
+    pending.current = { style: next };
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(flush, 400);
+  };
+
+  const custom = block.style !== null && Object.keys(style).length > 0;
+  const previewable = !!style.box || !!block.area || block.kind === "sfx";
+
+  return (
+    <details className="rounded-md border border-gray-800 bg-gray-950/40">
+      <summary className="cursor-pointer select-none px-2 py-1 text-xs text-gray-400 flex items-center gap-2">
+        Lettering
+        {custom && <span className="text-violet-300">custom</span>}
+        {!previewable && <span className="text-gray-600">· burn once to preview</span>}
+        {saving && <Loader2 size={11} className="animate-spin" />}
+      </summary>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2 px-2 pb-2 pt-1 text-xs text-gray-400">
+        <label className="flex items-center justify-between gap-2">
+          Font
+          <select
+            value={style.font ?? "bold"}
+            disabled={disabled}
+            onChange={(e) => change({ font: e.target.value === "bold" ? undefined : (e.target.value as FontVariant) })}
+            className="bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-gray-200"
+          >
+            <option value="regular">Regular</option>
+            <option value="bold">Bold</option>
+            <option value="italic">Italic</option>
+          </select>
+        </label>
+        <NumberField label="Size" value={style.font_size} min={6} max={400} step={1} placeholder="auto" disabled={disabled}
+          onChange={(v) => change({ font_size: v === undefined ? undefined : Math.round(v) })} />
+        <ColorField label="Fill" value={style.fill} fallback="#000000" disabled={disabled} onChange={(v) => change({ fill: v })} />
+        <ColorField label="Outline" value={style.stroke} fallback="#ffffff" disabled={disabled} onChange={(v) => change({ stroke: v })} />
+        <NumberField label="Outline px" value={style.stroke_width} min={0} max={60} step={0.5} placeholder="auto" disabled={disabled}
+          onChange={(v) => change({ stroke_width: v })} />
+        <NumberField label="Line height" value={style.line_height} min={0.6} max={3} step={0.05} placeholder="1.1" disabled={disabled}
+          onChange={(v) => change({ line_height: v })} />
+        <div className="flex items-center justify-between gap-2">
+          Align
+          <span className="flex rounded border border-gray-700 overflow-hidden" role="group" aria-label="Alignment">
+            {([["left", <AlignLeft size={12} />], ["center", <AlignCenter size={12} />], ["right", <AlignRight size={12} />]] as [TextAlign, ReactNode][]).map(([value, icon]) => (
+              <button
+                key={value}
+                type="button"
+                disabled={disabled}
+                aria-pressed={(style.align ?? "center") === value}
+                aria-label={`Align ${value}`}
+                onClick={() => change({ align: value === "center" ? undefined : value })}
+                className={`px-1.5 py-1 ${(style.align ?? "center") === value ? "bg-gray-700 text-white" : "hover:bg-gray-800"}`}
+              >
+                {icon}
+              </button>
+            ))}
+          </span>
+        </div>
+        <NumberField label="Rotation °" value={style.rotation} min={-180} max={180} step={1} placeholder="0" disabled={disabled}
+          onChange={(v) => change({ rotation: v === 0 ? undefined : v })} />
+        <label className="flex items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={style.uppercase ?? true}
+            disabled={disabled}
+            onChange={(e) => change({ uppercase: e.target.checked ? undefined : false })}
+            className="accent-indigo-500"
+          />
+          Capitals
+        </label>
+        <div className="flex items-center justify-end">
+          {style.box ? (
+            <button type="button" disabled={disabled} onClick={() => change({ box: undefined })} className="text-violet-300 hover:text-violet-200 disabled:opacity-40">
+              Use bubble area
+            </button>
+          ) : (
+            <span className="text-gray-600" title="Use the Text box tool (T) on the canvas to place the text freely">Box: bubble</span>
+          )}
+        </div>
+        <button
+          type="button"
+          disabled={disabled || !custom}
+          onClick={() => change({ font: undefined, font_size: undefined, fill: undefined, stroke: undefined, stroke_width: undefined, align: undefined, line_height: undefined, uppercase: undefined, rotation: undefined, box: undefined })}
+          className="col-span-2 justify-self-start text-gray-400 hover:text-white disabled:opacity-40"
+        >
+          Reset to automatic
+        </button>
+      </div>
+      {error && <p className="px-2 pb-2 text-xs text-red-400">{error}</p>}
+    </details>
+  );
+}
+
+/** A number input that only reports values inside [min, max]; empty means unset. Shows the saved value on blur. */
+function NumberField({ label, value, min, max, step, placeholder, disabled, onChange }: {
+  label: string;
+  value: number | undefined;
+  min: number;
+  max: number;
+  step: number;
+  placeholder: string;
+  disabled: boolean;
+  onChange: (value: number | undefined) => void;
+}) {
+  const shown = value === undefined ? "" : String(value);
+  const [text, setText] = useState(shown);
+  useEffect(() => setText(shown), [shown]);
+  return (
+    <label className="flex items-center justify-between gap-2">
+      {label}
+      <input
+        type="number"
+        inputMode="decimal"
+        value={text}
+        min={min}
+        max={max}
+        step={step}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={(e) => {
+          const next = e.target.value;
+          setText(next);
+          if (next === "") return onChange(undefined);
+          const n = Number(next);
+          if (Number.isFinite(n) && n >= min && n <= max) onChange(n);
+        }}
+        onBlur={() => setText(shown)}
+        className="w-16 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-right text-gray-200 tabular-nums"
+      />
+    </label>
+  );
+}
+
+/** A colour that is automatic (by background brightness) until its box is ticked. */
+function ColorField({ label, value, fallback, disabled, onChange }: {
+  label: string;
+  value: string | undefined;
+  fallback: string;
+  disabled: boolean;
+  onChange: (value: string | undefined) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <label className="flex items-center gap-1.5" title="Tick for a fixed colour; unticked picks black or white by the background">
+        <input
+          type="checkbox"
+          checked={value !== undefined}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked ? fallback : undefined)}
+          className="accent-indigo-500"
+        />
+        {label}
+      </label>
+      <input
+        type="color"
+        aria-label={`${label} colour`}
+        value={value ?? fallback}
+        disabled={disabled || value === undefined}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-5 w-8 bg-transparent disabled:opacity-40"
+      />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { db } from "@/db/index";
 import { childLogger } from "@/lib/logger";
 import { pageBlocks, pages, pageStages, type NewPage, type Page, type PageStageRow } from "@/db/schema";
 import type { BlockShape, JobRepository, PageBlock, PageJob } from "@/services/page-pipeline";
+import type { StoredArea, TextStyle } from "@/shared/typeset";
 
 const log = childLogger("page-store");
 
@@ -206,6 +207,8 @@ export class PageStore {
         translated_text: r.translatedText,
         ...(r.renderJson ? { render: JSON.parse(r.renderJson) as RenderInfo } : {}),
         ...(r.shapeJson ? { shape: JSON.parse(r.shapeJson) as BlockShape } : {}),
+        ...(r.styleJson ? { style: JSON.parse(r.styleJson) as TextStyle } : {}),
+        ...(r.areaJson ? { area: JSON.parse(r.areaJson) as StoredArea } : {}),
       })),
     };
   }
@@ -233,25 +236,33 @@ export class PageStore {
           translatedText: b.translated_text,
           renderJson: b.render ? JSON.stringify(b.render) : null,
           shapeJson: shapeToJson(b.shape),
+          styleJson: b.style ? JSON.stringify(b.style) : null,
+          areaJson: b.area ? JSON.stringify(b.area) : null,
         })))
         .run();
     });
   }
 
   /**
-   * Sets one block's source text, translation and/or include-in-cleaning flag, and marks `staleStages` stale in the
-   * same transaction. False (and nothing marked) when the block doesn't exist.
+   * Sets one block's source text, translation, include-in-cleaning flag and/or lettering style (null clears it), and
+   * marks `staleStages` stale in the same transaction. False (and nothing marked) when the block doesn't exist.
    */
   static async updateBlock(
     pageId: string,
     idx: number,
-    fields: { sourceText?: string; translatedText?: string; include?: boolean },
+    fields: { sourceText?: string; translatedText?: string; include?: boolean; style?: TextStyle | null },
     staleStages: readonly StageName[] = [],
   ): Promise<boolean> {
     return db.transaction((tx) => {
       const rows = tx
         .update(pageBlocks)
-        .set({ ...fields, updatedAt: sql`(datetime('now'))` })
+        .set({
+          sourceText: fields.sourceText,
+          translatedText: fields.translatedText,
+          include: fields.include,
+          styleJson: fields.style === undefined ? undefined : fields.style === null ? null : JSON.stringify(fields.style),
+          updatedAt: sql`(datetime('now'))`,
+        })
         .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))
         .returning({ idx: pageBlocks.idx })
         .all();
@@ -315,6 +326,7 @@ export class PageStore {
           h: geometry.h,
           shapeJson: shapeToJson(geometry.shape),
           renderJson: null,
+          areaJson: null,
           updatedAt: sql`(datetime('now'))`,
         })
         .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))

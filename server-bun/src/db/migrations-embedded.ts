@@ -6,6 +6,7 @@ import m0001 from "./migrations/0001_complete_starjammers.sql" with { type: "tex
 import m0002 from "./migrations/0002_sloppy_eternals.sql" with { type: "text" };
 import m0003 from "./migrations/0003_studio_pages.sql" with { type: "text" };
 import m0004 from "./migrations/0004_block_shapes.sql" with { type: "text" };
+import m0005 from "./migrations/0005_block_text_style.sql" with { type: "text" };
 
 const files: Record<string, string> = {
   "0000_tidy_namor.sql": m0000,
@@ -13,6 +14,7 @@ const files: Record<string, string> = {
   "0002_sloppy_eternals.sql": m0002,
   "0003_studio_pages.sql": m0003,
   "0004_block_shapes.sql": m0004,
+  "0005_block_text_style.sql": m0005,
 };
 
 /** Embedded migration SQL keyed by filename, plus the raw journal JSON. */

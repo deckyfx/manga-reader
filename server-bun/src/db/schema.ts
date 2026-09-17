@@ -139,6 +139,10 @@ export const pageBlocks = sqliteTable("page_blocks", {
   renderJson: text("render_json"),
   /** Region shape JSON for ellipse / polygon regions drawn in the Studio; null means a plain rectangle. */
   shapeJson: text("shape_json"),
+  /** Lettering style overrides JSON (font, size, colours, alignment, rotation, text box); null means automatic. */
+  styleJson: text("style_json"),
+  /** Text area JSON from the last render (bound, dark, run-length mask), reused by the Studio's live preview. */
+  areaJson: text("area_json"),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 }, (table) => ({
   pageBlockIdx: uniqueIndex("page_blocks_page_idx_idx").on(table.pageId, table.idx),

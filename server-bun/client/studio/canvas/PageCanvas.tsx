@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { Canvas, Circle, Ellipse, FabricImage, Line, Point, Polyline, Rect, type FabricObject } from "fabric";
 import {
+  ALargeSmall,
   Brush,
   Circle as EllipseIcon,
   Eye,
@@ -13,6 +14,7 @@ import {
   Redo2,
   Square,
   Trash2,
+  Type,
   Undo2,
   WandSparkles,
   ZoomIn,
@@ -23,9 +25,11 @@ import {
   deleteBlock,
   recleanAreas,
   saveMaskLayer,
+  updateBlock,
   updateBlockGeometry,
   type BlockGeometry,
   type MaskLayerName,
+  type TextStyle,
   type StudioBlock,
   type StudioPageDetail,
 } from "../../api";
@@ -46,8 +50,9 @@ import {
 } from "./geometry";
 import { CommandHistory, type Command } from "./history";
 import { MaskLayers, mergeAreas, type Area, type StrokeRecord } from "./mask-layers";
+import type { TextPreview } from "../text/typesetter";
 
-type Tool = "select" | "rect" | "ellipse" | "polygon" | "brush";
+export type Tool = "select" | "rect" | "ellipse" | "polygon" | "brush" | "text";
 
 /** What the mouse wheel does without modifiers; Ctrl/Cmd + wheel always zooms, Shift switches direction. */
 type WheelMode = "zoom" | "vertical" | "horizontal";
@@ -83,7 +88,11 @@ const TOOL_HINTS: Record<Tool, string> = {
   ellipse: "Drag on empty space to draw an ellipse",
   polygon: "Click to add points; Enter, double-click or the first point to finish; Esc to cancel",
   brush: "Add paints text the detector missed, Erase paints art it caught; X swaps, [ ] resize; then Re-clean",
+  text: "Click a lettered region, then drag, resize or rotate its text box; the side panel sets font, size and colours",
 };
+
+/** Text box outline colour (violet, distinct from text/sfx regions). */
+const TEXT_BOX_COLOR = "#a78bfa";
 
 const WHEEL_HINTS: Record<WheelMode, string> = {
   zoom: "Wheel zooms, Shift+wheel scrolls",
@@ -108,6 +117,13 @@ interface PageCanvasProps {
   toolbarStart?: ReactNode;
   /** A cleaned page image was rewritten (e.g. re-cleaning an area): reload the stage images. */
   onImagesChanged: () => void;
+  /** Lettering drawn by the shared typesetter, as the burn would place it. */
+  textPreview: TextPreview[];
+  /** The preview only makes sense over a cleaned page (not over the original or the burned result). */
+  textPreviewAvailable: boolean;
+  /** Shows a style change right away, before the server has saved it. */
+  onStylePreview: (id: number, style: TextStyle | null) => void;
+  onToolChange?: (tool: Tool) => void;
 }
 
 interface Entry {
@@ -140,7 +156,10 @@ const isTyping = (target: EventTarget | null): boolean =>
  * zoom and pan, undo and redo. The server is the source of truth: every change is sent right away and the canvas
  * redraws from the returned blocks.
  */
-export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedId, onSelect, onDetail, onReload, toolbarStart, onImagesChanged }: PageCanvasProps) {
+export function PageCanvas({
+  pageId, imageUrl, page, blocks, disabled, selectedId, onSelect, onDetail, onReload, toolbarStart, onImagesChanged,
+  textPreview, textPreviewAvailable, onStylePreview, onToolChange,
+}: PageCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<Canvas | null>(null);
   const entriesRef = useRef(new Map<number, Entry>());
@@ -161,6 +180,11 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
   const [layersNonce, setLayersNonce] = useState(0);
   const maskRef = useRef<MaskLayers | null>(null);
   const brushCursorRef = useRef<Circle | null>(null);
+  const [showText, setShowText] = useState(true);
+  /** Previewed lettering images by block id, keyed by their SVG so unchanged ones aren't reloaded. */
+  const textImagesRef = useRef(new Map<number, { key: string; img: FabricImage | null }>());
+  /** The editable text box of the selected block while the text tool is active. */
+  const textBoxRef = useRef<{ id: number; key: string; rect: Rect } | null>(null);
   const [wheelMode, setWheelModeState] = useState<WheelMode>(readWheelMode);
   const setWheelMode = (mode: WheelMode) => {
     setWheelModeState(mode);
@@ -179,8 +203,15 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
   const history = historyRef.current;
 
   // Latest props for handlers registered once on the canvas
-  const live = useRef({ pageId, page, blocks, disabled, tool, kind, wheelMode, brushLayer, brushSize, showMask, onSelect, onDetail, onReload, onImagesChanged });
-  live.current = { pageId, page, blocks, disabled, tool, kind, wheelMode, brushLayer, brushSize, showMask, onSelect, onDetail, onReload, onImagesChanged };
+  const showTextLayer = showText && textPreviewAvailable;
+  const live = useRef({
+    pageId, page, blocks, disabled, tool, kind, wheelMode, brushLayer, brushSize, showMask, showTextLayer,
+    onSelect, onDetail, onReload, onImagesChanged, onStylePreview, onToolChange,
+  });
+  live.current = {
+    pageId, page, blocks, disabled, tool, kind, wheelMode, brushLayer, brushSize, showMask, showTextLayer,
+    onSelect, onDetail, onReload, onImagesChanged, onStylePreview, onToolChange,
+  };
 
   /** Runs server changes one after another; a failure shows the error, drops the history and reloads the page. */
   const enqueue = useCallback((task: () => Promise<void>) => {
@@ -313,6 +344,15 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
     });
     if (record.layer === "add") markForReclean();
   }, [perform, saveLayers]);
+
+  /** Moves, resizes or rotates a block's text box: previewed at once, saved as an undoable style change. */
+  const restyle = useCallback((id: number, before: TextStyle | null, after: TextStyle | null) => {
+    const apply = (style: TextStyle | null) => async () => {
+      live.current.onStylePreview(history.resolve(id), style);
+      live.current.onDetail(await updateBlock(live.current.pageId, history.resolve(id), { style }));
+    };
+    perform({ label: "Move, resize or rotate text", redo: apply(after), undo: apply(before) });
+  }, [history, perform]);
 
   // Canvas lifecycle: created by hand inside the host so React never reconciles Fabric's DOM; StrictMode-safe
   useEffect(() => {
@@ -506,6 +546,16 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
         canvas.setCursor("grabbing");
         return;
       }
+      if (live.current.tool === "text") {
+        if (live.current.disabled || (opt.target && opt.target === textBoxRef.current?.rect)) return;
+        // Pick the smallest lettered-capable region under the pointer
+        const p = opt.scenePoint;
+        const hit = live.current.blocks
+          .filter((b) => (b.kind === "text" || b.kind === "sfx") && p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h)
+          .sort((a, b) => a.w * a.h - b.w * b.h)[0];
+        live.current.onSelect(hit ? hit.id : null);
+        return;
+      }
       if (live.current.tool === "brush") {
         const mask = maskRef.current;
         if (live.current.disabled || !mask || e.button === 2) return;
@@ -606,6 +656,26 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
     });
 
     canvas.on("object:modified", (e) => {
+      const textBox = textBoxRef.current;
+      if (textBox && e.target === textBox.rect) {
+        const { rect } = textBox;
+        const { width: pw, height: ph } = live.current.page;
+        const w = Math.max(4, Math.min(pw, Math.round(rect.width * rect.scaleX)));
+        const h = Math.max(4, Math.min(ph, Math.round(rect.height * rect.scaleY)));
+        // The stored box is the unrotated rectangle around the rotation centre, kept inside the page
+        const x = Math.min(Math.max(0, Math.round(rect.left - w / 2)), pw - w);
+        const y = Math.min(Math.max(0, Math.round(rect.top - h / 2)), ph - h);
+        const rotation = Math.round((((((rect.angle ?? 0) + 180) % 360) + 360) % 360 - 180) * 10) / 10;
+        const block = live.current.blocks.find((b) => b.id === textBox.id);
+        const before = (block?.style ?? null) as TextStyle | null;
+        const after: TextStyle = { ...(before ?? {}), box: { x, y, w, h } };
+        if (rotation) after.rotation = rotation;
+        else delete after.rotation;
+        // Matching key: the saved answer doesn't redraw the box the user just placed
+        textBox.key = JSON.stringify([textBox.id, after.box, after.rotation ?? 0]);
+        restyle(textBox.id, before, after);
+        return;
+      }
       const id = blockIdOf(e.target);
       if (id === undefined) return;
       const entry = entriesRef.current.get(id);
@@ -627,12 +697,14 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       actionsRef.current = null;
       canvasRef.current = null;
       brushCursorRef.current = null;
+      textImagesRef.current.clear();
+      textBoxRef.current = null;
       entriesRef.current.clear();
       fittedRef.current = false;
       void canvas.dispose();
       host.replaceChildren();
     };
-  }, [createRegion, deleteRegion, reshapeRegion, paintStroke]);
+  }, [createRegion, deleteRegion, reshapeRegion, paintStroke, restyle]);
 
   // Background image: the chosen stage image at page scale; fit the page into view once
   useEffect(() => {
@@ -684,6 +756,98 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
     };
   }, [pageId, page.width, page.height, layersNonce, createRegion, deleteRegion, reshapeRegion, paintStroke]);
 
+  // Lettering preview: one image per block, drawn from the shared typesetter's SVG, under the regions
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const images = textImagesRef.current;
+    const seen = new Set<number>();
+    for (const { id, patch } of textPreview) {
+      seen.add(id);
+      const existing = images.get(id);
+      if (existing?.key === patch.svg) {
+        existing.img?.set({ visible: showTextLayer });
+        continue;
+      }
+      if (existing?.img) canvas.remove(existing.img);
+      const entry: { key: string; img: FabricImage | null } = { key: patch.svg, img: null };
+      images.set(id, entry);
+      FabricImage.fromURL(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(patch.svg)}`)
+        .then((img) => {
+          if (images.get(id) !== entry || canvasRef.current !== canvas) return;
+          img.set({
+            originX: "left",
+            originY: "top",
+            left: patch.x,
+            top: patch.y,
+            selectable: false,
+            evented: false,
+            objectCaching: false,
+            visible: live.current.showTextLayer,
+          });
+          entry.img = img;
+          canvas.insertAt(0, img);
+          canvas.requestRenderAll();
+        })
+        .catch(() => {
+          if (images.get(id) === entry) images.delete(id);
+        });
+    }
+    for (const [id, entry] of images) {
+      if (seen.has(id)) continue;
+      if (entry.img) canvas.remove(entry.img);
+      images.delete(id);
+    }
+    canvas.requestRenderAll();
+  }, [textPreview, showTextLayer, createRegion, deleteRegion, reshapeRegion, paintStroke, restyle]);
+
+  // Text tool: an editable box (move, resize, rotate) for the selected block's lettering
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const block = tool === "text" && selectedId !== null && !disabled
+      ? blocks.find((b) => b.id === selectedId && (b.kind === "text" || b.kind === "sfx"))
+      : undefined;
+    const current = textBoxRef.current;
+    if (!block) {
+      if (current) {
+        canvas.remove(current.rect);
+        textBoxRef.current = null;
+        canvas.requestRenderAll();
+      }
+      return;
+    }
+    const style = (block.style ?? null) as TextStyle | null;
+    const box = style?.box ?? block.area?.bound ?? { x: block.x, y: block.y, w: block.w, h: block.h };
+    const rotation = style?.rotation ?? 0;
+    const key = JSON.stringify([block.id, box, rotation]);
+    if (current?.key === key) return;
+    if (current) canvas.remove(current.rect);
+    const rect = new Rect({
+      originX: "center",
+      originY: "center",
+      left: box.x + box.w / 2,
+      top: box.y + box.h / 2,
+      width: box.w,
+      height: box.h,
+      angle: rotation,
+      fill: "rgba(167, 139, 250, 0.08)",
+      stroke: TEXT_BOX_COLOR,
+      strokeWidth: 1.5,
+      strokeUniform: true,
+      strokeDashArray: [6, 4],
+      objectCaching: false,
+      transparentCorners: false,
+      cornerColor: TEXT_BOX_COLOR,
+      cornerSize: 9,
+      borderColor: TEXT_BOX_COLOR,
+    });
+    canvas.add(rect);
+    canvas.setActiveObject(rect);
+    textBoxRef.current = { id: block.id, key, rect };
+    canvas.requestRenderAll();
+  }, [tool, selectedId, blocks, disabled, createRegion, deleteRegion, reshapeRegion, paintStroke, restyle]);
+
   // The overlay shows while painting, or when asked for
   useEffect(() => {
     maskRef.current?.setVisible(showMask || tool === "brush");
@@ -712,14 +876,17 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       canvas.remove(entry.obj);
       entries.delete(id);
     }
-    for (const { obj } of entries.values()) obj.set({ selectable: !disabled, evented: !disabled });
+    const regionsInteractive = !disabled && tool !== "text";
+    for (const { obj } of entries.values()) obj.set({ selectable: regionsInteractive, evented: regionsInteractive });
 
-    const target = selectedId !== null ? entries.get(selectedId)?.obj : undefined;
-    const active = canvas.getActiveObject();
-    if (target && active !== target) canvas.setActiveObject(target);
-    else if (!target && active) canvas.discardActiveObject();
+    if (tool !== "text") {
+      const target = selectedId !== null ? entries.get(selectedId)?.obj : undefined;
+      const active = canvas.getActiveObject();
+      if (target && active !== target) canvas.setActiveObject(target);
+      else if (!target && active) canvas.discardActiveObject();
+    }
     canvas.requestRenderAll();
-  }, [blocks, disabled, selectedId, createRegion, deleteRegion, reshapeRegion, paintStroke]);
+  }, [blocks, disabled, selectedId, tool, createRegion, deleteRegion, reshapeRegion, paintStroke, restyle]);
 
   // Switching tools abandons a half-drawn region; the brush paints over regions instead of picking them
   useEffect(() => {
@@ -728,6 +895,7 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
     if (!canvas) return;
     canvas.defaultCursor = tool === "select" ? "default" : "crosshair";
     canvas.skipTargetFind = tool === "brush";
+    live.current.onToolChange?.(tool);
     if (tool !== "brush") {
       brushCursorRef.current?.set({ visible: false });
       canvas.requestRenderAll();
@@ -775,6 +943,7 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       else if (key === "e") setTool("ellipse");
       else if (key === "p") setTool("polygon");
       else if (key === "b") setTool("brush");
+      else if (key === "t") setTool("text");
       else if (key === "x") setBrushLayer((layer) => (layer === "add" ? "erase" : "add"));
       else if (key === "[") setBrushSize((size) => Math.max(MIN_BRUSH, Math.round(size / 1.25)));
       else if (key === "]") setBrushSize((size) => Math.min(MAX_BRUSH, Math.round(size * 1.25)));
@@ -868,6 +1037,7 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
           {toolButton("ellipse", <EllipseIcon size={15} />, "Ellipse", "E")}
           {toolButton("polygon", <Pentagon size={15} />, "Polygon", "P")}
           {toolButton("brush", <Brush size={15} />, "Mask brush", "B")}
+          {toolButton("text", <Type size={15} />, "Text box", "T")}
         </div>
         {tool === "brush" ? (
           <div className="flex items-center gap-2 text-xs">
@@ -928,6 +1098,18 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
             className="p-1.5 rounded-md text-gray-300 hover:bg-gray-800 disabled:opacity-60"
           >
             {showMask || tool === "brush" ? <Eye size={15} /> : <EyeOff size={15} />}
+          </button>
+          <button
+            onClick={() => setShowText((shown) => !shown)}
+            disabled={!textPreviewAvailable}
+            aria-pressed={showTextLayer}
+            aria-label="Show the lettering preview"
+            title={textPreviewAvailable
+              ? "Show the lettering as the burn would draw it"
+              : "The lettering preview shows over a cleaned page: pick Cleaned text or Cleaned SFX as the background"}
+            className={`p-1.5 rounded-md hover:bg-gray-800 disabled:opacity-40 ${showTextLayer ? "text-violet-300" : "text-gray-400"}`}
+          >
+            <ALargeSmall size={15} />
           </button>
           <button
             onClick={reclean}
