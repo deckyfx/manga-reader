@@ -316,8 +316,9 @@ export function PageCanvas({
         include: block.include,
         source_text: block.source_text,
         translated_text: block.translated_text,
-        // Its lettering style (font, colours, rotation, offset, text box) comes back too
-        style: (block.style ?? null) as TextStyle | null,
+        // Its lettering style (font, colours, rotation, offset, text box) comes back too, including a canvas change
+        // that hasn't reached `blocks` yet
+        style: currentStyle(id),
       },
     };
     let current = id;
@@ -394,10 +395,31 @@ export function PageCanvas({
   }, [perform, saveLayers]);
 
   /** Moves, resizes or rotates a block's text box: previewed at once, saved as an undoable style change. */
+  /**
+   * The latest style each block was given on the canvas, ahead of `blocks` until the preview renders: a second quick
+   * move must record the first move's result as its "before", or undoing it would skip the first move.
+   */
+  const styleBaselineRef = useRef(new Map<number, TextStyle | null>());
+  useEffect(() => styleBaselineRef.current.clear(), [blocks]);
+
+  /** The block's current lettering style, including canvas changes not rendered into `blocks` yet. */
+  const currentStyle = useCallback((id: number): TextStyle | null => {
+    const baseline = styleBaselineRef.current;
+    if (baseline.has(id)) return baseline.get(id) ?? null;
+    return (live.current.blocks.find((b) => b.id === id)?.style ?? null) as TextStyle | null;
+  }, []);
+
+  /** Moves, resizes or rotates a block's text box: previewed at once, saved as an undoable style change. */
   const restyle = useCallback((id: number, before: TextStyle | null, after: TextStyle | null) => {
+    // The change belongs to this page: a queued save must not write to, or update, a page opened meanwhile
+    const pageId = live.current.pageId;
+    styleBaselineRef.current.set(id, after);
+    live.current.onStylePreview(id, after);
     const apply = (style: TextStyle | null) => async () => {
-      live.current.onStylePreview(history.resolve(id), style);
-      live.current.onDetail(await updateBlock(live.current.pageId, history.resolve(id), { style }));
+      const target = history.resolve(id);
+      if (live.current.pageId === pageId) live.current.onStylePreview(target, style);
+      const detail = await updateBlock(pageId, target, { style });
+      if (live.current.pageId === pageId) live.current.onDetail(detail);
     };
     perform({ label: "Move, resize or rotate text", redo: apply(after), undo: apply(before) });
   }, [history, perform]);
@@ -743,7 +765,7 @@ export function PageCanvas({
         const x = Math.min(Math.max(0, Math.round(center.x - w / 2)), pw - w);
         const y = Math.min(Math.max(0, Math.round(center.y - h / 2)), ph - h);
         const rotation = Math.round((((((obj.angle ?? 0) + 180) % 360) + 360) % 360 - 180) * 10) / 10;
-        const before = (block.style ?? null) as TextStyle | null;
+        const before = currentStyle(letteringId);
         const after: TextStyle = { ...(before ?? {}) };
         const resized = w !== item.box.w || h !== item.box.h;
         if (resized || item.hasExplicitBox) {
