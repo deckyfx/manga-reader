@@ -17,6 +17,7 @@ import {
   type StudioBlock,
   type StudioPageDetail,
 } from "../api";
+import { ActionsMenu, type MenuAction } from "../components/ActionsMenu";
 import { useConfirm } from "../components/ConfirmDialog";
 import { JobProgress } from "../components/JobProgress";
 import { StatusBadge } from "../components/StatusBadge";
@@ -126,6 +127,85 @@ export function StudioPageEditor() {
   const cleaning = cleanTextM.isPending || cleanSfxM.isPending;
   const actionError = cleanTextM.error ?? cleanSfxM.error ?? renderM.error ?? translateAllM.error ?? publishM.error ?? deleteM.error;
 
+  /** First reason in the list that applies, or undefined when the action can run. */
+  const unavailableWhen = (...checks: [boolean, string][]): string | undefined => checks.find(([applies]) => applies)?.[1];
+  const translating: [boolean, string] = [busy, "The page is being translated"];
+  const textPassStatus = stageStatus("clean_text");
+  const pageActions: MenuAction[] = [
+    {
+      key: "clean-text",
+      label: "Clean text",
+      icon: <Eraser size={14} />,
+      hint: "Remove the lettering of text blocks",
+      onSelect: () => afterSaves("clean-text", () => cleanTextM.mutate()),
+      unavailable: unavailableWhen(translating, [cleaning, "A clean is already running"], [queued.has("clean-text"), "Waiting for edits to save"]),
+      pending: cleanTextM.isPending,
+      attention: textPassStatus === "stale",
+    },
+    {
+      key: "clean-sfx",
+      label: "Clean SFX",
+      icon: <Megaphone size={14} />,
+      hint: "Remove the ticked sound effects",
+      onSelect: () => afterSaves("clean-sfx", () => cleanSfxM.mutate()),
+      // Sound effects are cleaned on top of the text pass: that one has to be current first
+      unavailable: unavailableWhen(
+        translating,
+        [cleaning, "A clean is already running"],
+        [queued.has("clean-sfx"), "Waiting for edits to save"],
+        [textPassStatus !== undefined && textPassStatus !== "fresh", "Run Clean text first"],
+      ),
+      pending: cleanSfxM.isPending,
+      attention: stageStatus("clean_sfx") === "stale",
+    },
+    {
+      key: "translate-all",
+      label: "Translate all",
+      icon: <Languages size={14} />,
+      hint: "Translate every text block again",
+      onSelect: () => afterSaves("translate-all", () => translateAllM.mutate()),
+      unavailable: unavailableWhen(translating, [translateAllM.isPending, "Already translating"], [queued.has("translate-all"), "Waiting for edits to save"]),
+      pending: translateAllM.isPending,
+      attention: stageStatus("translate") === "stale",
+    },
+    {
+      key: "render",
+      label: "Re-render",
+      icon: <RefreshCw size={14} />,
+      hint: "Typeset the translations again",
+      onSelect: () => afterSaves("render", () => renderM.mutate()),
+      unavailable: unavailableWhen(translating, [renderM.isPending, "Already rendering"], [queued.has("render"), "Waiting for edits to save"]),
+      pending: renderM.isPending,
+      attention: renderStage?.status === "stale",
+    },
+    {
+      key: "publish",
+      label: "Publish",
+      icon: <Send size={14} />,
+      hint: "Replace the image in open extension tabs",
+      onSelect: () => afterSaves("publish", () => publishM.mutate()),
+      unavailable: unavailableWhen(
+        translating,
+        [publishM.isPending, "Already publishing"],
+        [queued.has("publish"), "Waiting for edits to save"],
+        [!page.has_result, "No result image yet"],
+        [renderStage?.status === "stale", "Re-render before publishing"],
+      ),
+      pending: publishM.isPending,
+    },
+    {
+      key: "delete",
+      label: "Delete page",
+      icon: <Trash2 size={14} />,
+      hint: "Discard the page and all its images",
+      onSelect: () => void confirmDelete(),
+      unavailable: unavailableWhen([busy, "Can't discard while the page is being translated"], [deleteM.isPending, "Deleting…"]),
+      pending: deleteM.isPending,
+      danger: true,
+      separated: true,
+    },
+  ];
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-800">
@@ -158,62 +238,12 @@ export function StudioPageEditor() {
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {actionError && <span className="text-xs text-red-400">{actionError.message}</span>}
-          <button
-            onClick={() => void confirmDelete()}
-            disabled={busy || deleteM.isPending}
-            title={busy ? "Can't discard while the page is being translated" : "Discard this page and all its images"}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-300 bg-gray-800 hover:bg-red-900/60 hover:text-red-200 disabled:opacity-50 transition-colors"
-          >
-            {deleteM.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-            Delete page
-          </button>
           {published && !publishM.isPending && (
             <span className="text-xs text-emerald-400">
               Published rev {published.revision} · {published.notified} open tab{published.notified === 1 ? "" : "s"} updated
             </span>
           )}
-          <ActionButton
-            onClick={() => afterSaves("clean-text", () => cleanTextM.mutate())}
-            disabled={busy || cleaning || queued.has("clean-text")}
-            pending={cleanTextM.isPending}
-            highlight={stageStatus("clean_text") === "stale"}
-            icon={<Eraser size={14} />}
-            label="Clean text"
-          />
-          <ActionButton
-            onClick={() => afterSaves("clean-sfx", () => cleanSfxM.mutate())}
-            // Sound effects are cleaned on top of the text pass: that one has to be current first
-            disabled={busy || cleaning || queued.has("clean-sfx") || (stageStatus("clean_text") !== undefined && stageStatus("clean_text") !== "fresh")}
-            pending={cleanSfxM.isPending}
-            highlight={stageStatus("clean_sfx") === "stale"}
-            icon={<Megaphone size={14} />}
-            label="Clean SFX"
-          />
-          <ActionButton
-            onClick={() => afterSaves("translate-all", () => translateAllM.mutate())}
-            disabled={busy || translateAllM.isPending || queued.has("translate-all")}
-            pending={translateAllM.isPending}
-            highlight={stageStatus("translate") === "stale"}
-            icon={<Languages size={14} />}
-            label="Translate all"
-          />
-          <ActionButton
-            onClick={() => afterSaves("render", () => renderM.mutate())}
-            disabled={busy || renderM.isPending || queued.has("render")}
-            pending={renderM.isPending}
-            highlight={stageStatus("render") === "stale"}
-            icon={<RefreshCw size={14} />}
-            label="Re-render"
-          />
-          <button
-            onClick={() => afterSaves("publish", () => publishM.mutate())}
-            disabled={busy || publishM.isPending || queued.has("publish") || !page.has_result || renderStage?.status === "stale"}
-            title={renderStage?.status === "stale" ? "Re-render before publishing" : "Replace the image in open extension tabs"}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors"
-          >
-            {publishM.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-            Publish
-          </button>
+          <ActionsMenu actions={pageActions} />
         </div>
       </div>
 
@@ -317,29 +347,6 @@ function ProcessingView({ pageId, status, version, job }: {
         )}
       </aside>
     </div>
-  );
-}
-
-function ActionButton({ onClick, disabled, pending, highlight, icon, label }: {
-  onClick: () => void;
-  disabled: boolean;
-  pending: boolean;
-  /** Stage is stale: draw attention to the button that refreshes it. */
-  highlight: boolean;
-  icon: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors ${
-        highlight ? "bg-amber-600 hover:bg-amber-500" : "bg-gray-800 hover:bg-gray-700"
-      }`}
-    >
-      {pending ? <Loader2 size={14} className="animate-spin" /> : icon}
-      {label}
-    </button>
   );
 }
 
