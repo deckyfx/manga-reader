@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlignCenter, AlignLeft, AlignRight, ArrowLeft, Eraser, History, Languages, Loader2, Megaphone, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ArrowLeft, Eraser, History, Languages, Loader2, Megaphone, PanelRightClose, PanelRightOpen, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
 import {
+  deleteBlock,
   deletePage,
   getPage,
   historyImageUrl,
@@ -26,10 +27,21 @@ import { useConfirm } from "../components/ConfirmDialog";
 import { JobProgress } from "../components/JobProgress";
 import { StatusBadge } from "../components/StatusBadge";
 import { usePageJobEvents } from "../hooks/usePageJobEvents";
-import { PageCanvas } from "../studio/canvas/PageCanvas";
+import { PageCanvas, type PageCanvasHandle } from "../studio/canvas/PageCanvas";
 import { buildLettering, relayoutBlock, useTypesetter } from "../studio/text/typesetter";
 
 const isBusy = (status: string | undefined) => status === "queued" || status === "running";
+
+const PANEL_COLLAPSED_KEY = "studio-editor-panel-collapsed";
+
+/** Saved side-panel state; storage can be unavailable (private mode), so default to expanded. */
+function readPanelCollapsed(): boolean {
+  try {
+    return localStorage.getItem(PANEL_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 /** Studio editor for one page: compare stage images, edit and re-run blocks, re-render, publish and roll back. */
 export function StudioPageEditor() {
@@ -74,6 +86,16 @@ export function StudioPageEditor() {
   const [view, setView] = useState<"canvas" | "compare">("canvas");
   const [canvasImage, setCanvasImage] = useState<PageImage>("original.png");
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
+  const [panelCollapsed, setPanelCollapsedState] = useState(readPanelCollapsed);
+  const setPanelCollapsed = (collapsed: boolean) => {
+    setPanelCollapsedState(collapsed);
+    try {
+      localStorage.setItem(PANEL_COLLAPSED_KEY, collapsed ? "1" : "0");
+    } catch {
+      // Not persisted; the choice still applies for this visit
+    }
+  };
+  const canvasHandle = useRef<PageCanvasHandle>(null);
   /** Bumped when a cleaned image is rewritten, so image URLs change and the browser loads the new file. */
   const [imagesNonce, setImagesNonce] = useState(0);
 
@@ -102,6 +124,27 @@ export function StudioPageEditor() {
     },
   });
   const confirm = useConfirm();
+  const deleteBlockM = useMutation({
+    mutationFn: (blockId: number) => deleteBlock(id, blockId),
+    onSuccess: (next) => {
+      setDetail(next);
+      setSelectedBlock(null);
+    },
+  });
+  /** Deletes a region: undoable through the canvas when it's open, otherwise after a confirmation. */
+  const removeBlock = async (blockId: number) => {
+    if (canvasHandle.current) {
+      canvasHandle.current.deleteBlock(blockId);
+      return;
+    }
+    const confirmed = await confirm({
+      title: `Delete region #${blockId}?`,
+      message: "Its text, translation and lettering are removed. Outside the canvas this can't be undone.",
+      confirmLabel: "Delete region",
+      danger: true,
+    });
+    if (confirmed) deleteBlockM.mutate(blockId);
+  };
   const confirmDelete = async () => {
     const confirmed = await confirm({
       title: "Discard this page?",
@@ -301,17 +344,6 @@ export function StudioPageEditor() {
               Published rev {published.revision} · {published.notified} open tab{published.notified === 1 ? "" : "s"} updated
             </span>
           )}
-          {renderStage?.status === "stale" && blocks.some((b) => b.translated_text?.trim()) && (
-            <button
-              onClick={() => afterSaves("render", () => renderM.mutate())}
-              disabled={busy || renderM.isPending || queued.has("render")}
-              title="The page image doesn't show your latest lettering yet: burn it to update the result"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-amber-600 hover:bg-amber-500 disabled:opacity-50 transition-colors"
-            >
-              {renderM.isPending ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-              Burn lettering
-            </button>
-          )}
           <ActionsMenu actions={pageActions} />
         </div>
       </div>
@@ -322,6 +354,7 @@ export function StudioPageEditor() {
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
         {view === "canvas" ? (
           <PageCanvas
+            ref={canvasHandle}
             pageId={page.id}
             imageUrl={pageFileUrl(page.id, canvasImage, version)}
             page={{ width: page.width, height: page.height }}
@@ -354,6 +387,7 @@ export function StudioPageEditor() {
                   trackSave={trackSave}
                   setBlockStyle={setBlockStyle}
                   setBlockText={setBlockText}
+                  onDelete={() => void removeBlock(block.id)}
                 />
               ) : null;
             }}
@@ -378,9 +412,30 @@ export function StudioPageEditor() {
           <StageCompare pageId={page.id} version={version} />
         )}
 
+        {panelCollapsed ? (
+        <aside className="shrink-0 border-t lg:border-t-0 lg:border-l border-gray-800 p-1.5 flex lg:flex-col items-center gap-2">
+          <button
+            onClick={() => setPanelCollapsed(false)}
+            title="Show the side panel"
+            aria-label="Show the side panel"
+            className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800"
+          >
+            <PanelRightOpen size={16} />
+          </button>
+          <span className="text-[11px] text-gray-500 lg:[writing-mode:vertical-rl]">{blocks.length} regions</span>
+        </aside>
+        ) : (
         <aside className="lg:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-gray-800 overflow-y-auto p-3 space-y-3">
-          <div className="text-xs text-gray-500">
+          <div className="flex items-center gap-2 text-xs text-gray-500">
             {textBlocks.length} text block{textBlocks.length === 1 ? "" : "s"} · {sfxBlocks.length} sound effect{sfxBlocks.length === 1 ? "" : "s"}
+            <button
+              onClick={() => setPanelCollapsed(true)}
+              title="Hide the side panel for more room"
+              aria-label="Hide the side panel"
+              className="ml-auto p-1 rounded-md text-gray-400 hover:text-white hover:bg-gray-800"
+            >
+              <PanelRightClose size={15} />
+            </button>
           </div>
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500">
             <span title="Speech bubbles and captions: read with OCR, translated, removed by Clean text, lettered with the translation">
@@ -392,18 +447,19 @@ export function StudioPageEditor() {
           </div>
           {typesetterError && <p className="text-xs text-red-400">Lettering preview unavailable: {typesetterError}</p>}
           {textBlocks.map((block) => (
-            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} setBlockStyle={setBlockStyle} />
+            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} setBlockStyle={setBlockStyle} onDelete={() => void removeBlock(block.id)} />
           ))}
           {sfxBlocks.length > 0 && (
             <div className="pt-2 border-t border-gray-800 space-y-1.5">
               <div className="text-xs text-gray-400">Sound effects · ticked ones are removed by Clean SFX; give one lettering to draw it again</div>
               {sfxBlocks.map((block) => (
-                <SfxBlockRow key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} setBlockStyle={setBlockStyle} />
+                <SfxBlockRow key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} setBlockStyle={setBlockStyle} onDelete={() => void removeBlock(block.id)} />
               ))}
             </div>
           )}
           <HistoryPanel pageId={page.id} currentRevision={page.revision} disabled={busy} onRolledBack={onPublished} />
         </aside>
+        )}
       </div>
       )}
     </div>
@@ -511,7 +567,7 @@ function useSavedText(saved: string) {
 }
 
 /** One text block: editable source text and translation, plus per-block OCR and translation re-runs. */
-function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves, queued, selected, onSelect, setBlockStyle }: {
+function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves, queued, selected, onSelect, setBlockStyle, onDelete }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
@@ -526,6 +582,7 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
   selected: boolean;
   onSelect: () => void;
   setBlockStyle: (blockId: number, style: TextStyle | null) => void;
+  onDelete: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -569,6 +626,9 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
           </IconButton>
           <IconButton title="Translate again" disabled={locked || queued.has(translateKey) || !source.text.trim()} onClick={() => afterSaves(translateKey, () => runM.mutate("translate"))}>
             <Languages size={13} />
+          </IconButton>
+          <IconButton title="Delete this region" disabled={locked} onClick={onDelete}>
+            <Trash2 size={13} />
           </IconButton>
         </span>
       </div>
@@ -626,7 +686,7 @@ function IncludeToggle({ pageId, block, disabled, onChanged, trackSave, title }:
 }
 
 /** One sound-effect region: selectable, with its include-in-cleaning toggle and optional new lettering. */
-function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, onSelect, setBlockStyle }: {
+function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, onSelect, setBlockStyle, onDelete }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
@@ -635,6 +695,7 @@ function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, 
   selected: boolean;
   onSelect: () => void;
   setBlockStyle: (blockId: number, style: TextStyle | null) => void;
+  onDelete: () => void;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -658,6 +719,9 @@ function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, 
         <span className="ml-auto">
           <IncludeToggle pageId={pageId} block={block} disabled={disabled} onChanged={onChanged} trackSave={trackSave} title="Remove this sound effect when SFX are cleaned" />
         </span>
+        <IconButton title="Delete this region" disabled={disabled} onClick={onDelete}>
+          <Trash2 size={13} />
+        </IconButton>
       </div>
       <textarea
         value={lettering.text}
@@ -825,7 +889,7 @@ function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockSt
  * The floating editor next to selected lettering (Lettering mode): its text, drawn live on the page as you type and
  * saved after a short pause, and its style.
  */
-function LetteringPanel({ pageId, block, disabled, onChanged, trackSave, setBlockStyle, setBlockText }: {
+function LetteringPanel({ pageId, block, disabled, onChanged, trackSave, setBlockStyle, setBlockText, onDelete }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
@@ -833,6 +897,7 @@ function LetteringPanel({ pageId, block, disabled, onChanged, trackSave, setBloc
   trackSave: (save: Promise<unknown>) => void;
   setBlockStyle: (blockId: number, style: TextStyle | null) => void;
   setBlockText: (blockId: number, text: string) => void;
+  onDelete: () => void;
 }) {
   const saved = block.translated_text ?? "";
   const [text, setText] = useState(saved);
@@ -877,6 +942,16 @@ function LetteringPanel({ pageId, block, disabled, onChanged, trackSave, setBloc
         <span className={`font-semibold ${isSfx ? "text-orange-400" : "text-sky-400"}`}>#{block.id}</span>
         <span className="text-gray-400">{isSfx ? "Sound effect lettering" : "Text lettering"}</span>
         {saving && <Loader2 size={11} className="animate-spin text-gray-500" />}
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={disabled}
+          title="Delete this region (Ctrl+Z undoes it)"
+          className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-gray-400 hover:bg-red-900/50 hover:text-red-200 disabled:opacity-40"
+        >
+          <Trash2 size={12} />
+          Delete
+        </button>
       </div>
       <textarea
         data-lettering-text

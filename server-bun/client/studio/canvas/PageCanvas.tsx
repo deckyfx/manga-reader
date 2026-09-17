@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useImperativeHandle, useReducer, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { Canvas, Circle, Ellipse, FabricImage, Line, Point, Polyline, Rect, util, type FabricObject } from "fabric";
 import {
   ALargeSmall,
@@ -6,6 +6,8 @@ import {
   Circle as EllipseIcon,
   Eye,
   EyeOff,
+  GripHorizontal,
+  LocateFixed,
   Maximize,
   Shapes,
   MousePointer2,
@@ -113,7 +115,14 @@ const WHEEL_HINTS: Record<WheelMode, string> = {
   horizontal: "Wheel scrolls sideways, Shift up/down",
 };
 
+/** What the page editor can ask the canvas to do. */
+export interface PageCanvasHandle {
+  /** Deletes a region through the canvas history, so it can be undone. */
+  deleteBlock: (id: number) => void;
+}
+
 interface PageCanvasProps {
+  ref?: Ref<PageCanvasHandle>;
   pageId: string;
   /** Background image (a stage image of the page). */
   imageUrl: string;
@@ -175,7 +184,7 @@ const isTyping = (target: EventTarget | null): boolean =>
  */
 export function PageCanvas({
   pageId, imageUrl, page, blocks, disabled, selectedId, onSelect, onDetail, onReload, toolbarStart, onImagesChanged,
-  lettering, textPreviewAvailable, onStylePreview, relayout, onModeChange, renderLetteringPanel,
+  lettering, textPreviewAvailable, onStylePreview, relayout, onModeChange, renderLetteringPanel, ref,
 }: PageCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<Canvas | null>(null);
@@ -203,6 +212,9 @@ export function PageCanvas({
   const letteringRef = useRef(new Map<number, LetteringObject>());
   const panelHostRef = useRef<HTMLDivElement>(null);
   const [panelPosition, setPanelPosition] = useState<{ left: number; top: number } | null>(null);
+  /** Where the user dragged the lettering panel; it stays there for every selection until it's set to follow again. */
+  const [panelPin, setPanelPin] = useState<{ left: number; top: number } | null>(null);
+  const panelDragRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [wheelMode, setWheelModeState] = useState<WheelMode>(readWheelMode);
   const setWheelMode = (mode: WheelMode) => {
     setWheelModeState(mode);
@@ -320,6 +332,13 @@ export function PageCanvas({
       },
     });
   }, [history, perform]);
+
+  useImperativeHandle(ref, () => ({
+    deleteBlock: (id: number) => {
+      if (live.current.disabled) return;
+      deleteRegion(id);
+    },
+  }), [deleteRegion]);
 
   /**
    * Saves the painted layers a stroke changed, to the page and layers it was painted on (the user may have moved to
@@ -1053,6 +1072,25 @@ export function PageCanvas({
       current && Math.abs(current.left - left) < 1 && Math.abs(current.top - top) < 1 ? current : { left: Math.round(left), top: Math.round(top) });
   };
 
+  /** Dragging the lettering panel by its grab bar, kept inside the canvas area. */
+  const panelSpot = panelPin ?? panelPosition;
+  const startPanelDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!panelSpot || e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    panelDragRef.current = { x: e.clientX, y: e.clientY, left: panelSpot.left, top: panelSpot.top };
+  };
+  const movePanel = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = panelDragRef.current;
+    const host = panelHostRef.current;
+    if (!drag || !host) return;
+    const left = Math.min(Math.max(0, drag.left + e.clientX - drag.x), Math.max(0, host.clientWidth - 300));
+    const top = Math.min(Math.max(0, drag.top + e.clientY - drag.y), Math.max(0, host.clientHeight - 40));
+    setPanelPin({ left: Math.round(left), top: Math.round(top) });
+  };
+  const endPanelDrag = () => {
+    panelDragRef.current = null;
+  };
+
   // Re-clean targets: the painted spots when there are any, otherwise the selected region's box
   const selectedBlock = selectedId !== null ? blocks.find((b) => b.id === selectedId) : undefined;
   const recleanTargets: Area[] = paintedAreas.length > 0
@@ -1285,12 +1323,35 @@ export function PageCanvas({
       </div>
       <div ref={panelHostRef} className="relative flex-1 min-h-0 overflow-hidden">
         <div ref={hostRef} className="absolute inset-0" />
-        {mode === "lettering" && panelPosition && selectedId !== null && renderLetteringPanel && (
+        {mode === "lettering" && panelPosition && panelSpot && selectedId !== null && renderLetteringPanel && (
           <div
-            className="absolute z-20 w-[300px] max-h-[360px] overflow-y-auto rounded-lg border border-violet-500/40 bg-gray-900/95 shadow-2xl backdrop-blur"
-            style={{ left: panelPosition.left, top: panelPosition.top }}
+            className="absolute z-20 w-[300px] rounded-lg border border-violet-500/40 bg-gray-900/95 shadow-2xl backdrop-blur flex flex-col"
+            style={{ left: panelSpot.left, top: panelSpot.top }}
           >
-            {renderLetteringPanel(selectedId)}
+            <div
+              onPointerDown={startPanelDrag}
+              onPointerMove={movePanel}
+              onPointerUp={endPanelDrag}
+              onPointerCancel={endPanelDrag}
+              title="Drag to move this panel out of the way"
+              className="flex items-center gap-1.5 px-2 py-1 border-b border-gray-800 text-[11px] text-gray-500 cursor-grab active:cursor-grabbing select-none touch-none"
+            >
+              <GripHorizontal size={14} />
+              {panelPin ? "Moved" : "Drag to move"}
+              {panelPin && (
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => setPanelPin(null)}
+                  title="Put the panel back next to the selected lettering"
+                  className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-violet-300 hover:bg-gray-800"
+                >
+                  <LocateFixed size={12} />
+                  Follow
+                </button>
+              )}
+            </div>
+            <div className="max-h-[340px] overflow-y-auto">{renderLetteringPanel(selectedId)}</div>
           </div>
         )}
       </div>
