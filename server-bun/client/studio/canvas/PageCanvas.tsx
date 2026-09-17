@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
-import { Canvas, Circle, Ellipse, FabricImage, Line, Point, Polyline, Rect, type FabricObject } from "fabric";
+import { useCallback, useEffect, useImperativeHandle, useReducer, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
+import { Canvas, Circle, Ellipse, FabricImage, Line, Point, Polyline, Rect, util, type FabricObject } from "fabric";
 import {
+  ALargeSmall,
   Brush,
   Circle as EllipseIcon,
   Eye,
   EyeOff,
+  GripHorizontal,
+  LocateFixed,
   Maximize,
+  Shapes,
   MousePointer2,
   MoveHorizontal,
   MoveVertical,
@@ -13,6 +17,7 @@ import {
   Redo2,
   Square,
   Trash2,
+  Type,
   Undo2,
   WandSparkles,
   ZoomIn,
@@ -23,9 +28,12 @@ import {
   deleteBlock,
   recleanAreas,
   saveMaskLayer,
+  updateBlock,
   updateBlockGeometry,
   type BlockGeometry,
+  type LetteringPaths,
   type MaskLayerName,
+  type TextStyle,
   type StudioBlock,
   type StudioPageDetail,
 } from "../../api";
@@ -46,8 +54,13 @@ import {
 } from "./geometry";
 import { CommandHistory, type Command } from "./history";
 import { MaskLayers, mergeAreas, type Area, type StrokeRecord } from "./mask-layers";
+import type { LetteringItem } from "../text/typesetter";
+import { LetteringObject, letteringIdOf } from "./lettering-object";
 
-type Tool = "select" | "rect" | "ellipse" | "polygon" | "brush";
+export type Tool = "select" | "rect" | "ellipse" | "polygon" | "brush";
+
+/** Regions: detection areas and the mask. Lettering: the translated text floating on the page. */
+export type EditMode = "regions" | "lettering";
 
 /** What the mouse wheel does without modifiers; Ctrl/Cmd + wheel always zooms, Shift switches direction. */
 type WheelMode = "zoom" | "vertical" | "horizontal";
@@ -85,13 +98,35 @@ const TOOL_HINTS: Record<Tool, string> = {
   brush: "Add paints text the detector missed, Erase paints art it caught; X swaps, [ ] resize; then Re-clean",
 };
 
+const LETTERING_HINT = "Drag lettering to move it, handles to resize, the top knob to rotate; double-click to edit the text";
+
+/** Lettering panel size: 300 wide; its content scrolls past 340, plus the grab bar and borders. */
+const PANEL_WIDTH = 300;
+const PANEL_OUTER_HEIGHT = 372;
+
+/** Lettering selection colour (violet, distinct from text/sfx regions). */
+const LETTERING_COLOR = "#a78bfa";
+
+/** What each region colour means, shown on the kind buttons. */
+const KIND_HINTS: Record<RegionKind, string> = {
+  text: "Text (blue): speech bubbles and captions. Read with OCR, translated, removed by Clean text, lettered with the translation",
+  sfx: "Sound effect (orange): drawn sound effects. Not read or translated; removed by Clean SFX when ticked; lettered only if you type new lettering",
+};
+
 const WHEEL_HINTS: Record<WheelMode, string> = {
   zoom: "Wheel zooms, Shift+wheel scrolls",
   vertical: "Wheel scrolls up/down, Shift sideways",
   horizontal: "Wheel scrolls sideways, Shift up/down",
 };
 
+/** What the page editor can ask the canvas to do. */
+export interface PageCanvasHandle {
+  /** Deletes a region through the canvas history, so it can be undone. */
+  deleteBlock: (id: number) => void;
+}
+
 interface PageCanvasProps {
+  ref?: Ref<PageCanvasHandle>;
   pageId: string;
   /** Background image (a stage image of the page). */
   imageUrl: string;
@@ -108,6 +143,17 @@ interface PageCanvasProps {
   toolbarStart?: ReactNode;
   /** A cleaned page image was rewritten (e.g. re-cleaning an area): reload the stage images. */
   onImagesChanged: () => void;
+  /** Lettering laid out by the shared typesetter, as the burn would place it. */
+  lettering: LetteringItem[];
+  /** In Regions mode the lettering shows only over a cleaned page (not over the original or the burned result). */
+  textPreviewAvailable: boolean;
+  /** Shows a style change right away, before the server has saved it. */
+  onStylePreview: (id: number, style: TextStyle | null) => void;
+  /** Lays one block out again in a new box, for live re-wrapping while it's resized. */
+  relayout: (id: number, box: { x: number; y: number; w: number; h: number }) => LetteringPaths | null;
+  onModeChange?: (mode: EditMode) => void;
+  /** Floating editor shown next to the selected block in Lettering mode. */
+  renderLetteringPanel?: (id: number) => ReactNode;
 }
 
 interface Entry {
@@ -140,7 +186,10 @@ const isTyping = (target: EventTarget | null): boolean =>
  * zoom and pan, undo and redo. The server is the source of truth: every change is sent right away and the canvas
  * redraws from the returned blocks.
  */
-export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedId, onSelect, onDetail, onReload, toolbarStart, onImagesChanged }: PageCanvasProps) {
+export function PageCanvas({
+  pageId, imageUrl, page, blocks, disabled, selectedId, onSelect, onDetail, onReload, toolbarStart, onImagesChanged,
+  lettering, textPreviewAvailable, onStylePreview, relayout, onModeChange, renderLetteringPanel, ref,
+}: PageCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<Canvas | null>(null);
   const entriesRef = useRef(new Map<number, Entry>());
@@ -161,6 +210,15 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
   const [layersNonce, setLayersNonce] = useState(0);
   const maskRef = useRef<MaskLayers | null>(null);
   const brushCursorRef = useRef<Circle | null>(null);
+  const [mode, setMode] = useState<EditMode>("regions");
+  const [showText, setShowText] = useState(true);
+  /** Floating lettering objects by block id. */
+  const letteringRef = useRef(new Map<number, LetteringObject>());
+  const panelHostRef = useRef<HTMLDivElement>(null);
+  const [panelPosition, setPanelPosition] = useState<{ left: number; top: number } | null>(null);
+  /** Where the user dragged the lettering panel; it stays there for every selection until it's set to follow again. */
+  const [panelPin, setPanelPin] = useState<{ left: number; top: number } | null>(null);
+  const panelDragRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [wheelMode, setWheelModeState] = useState<WheelMode>(readWheelMode);
   const setWheelMode = (mode: WheelMode) => {
     setWheelModeState(mode);
@@ -179,8 +237,15 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
   const history = historyRef.current;
 
   // Latest props for handlers registered once on the canvas
-  const live = useRef({ pageId, page, blocks, disabled, tool, kind, wheelMode, brushLayer, brushSize, showMask, onSelect, onDetail, onReload, onImagesChanged });
-  live.current = { pageId, page, blocks, disabled, tool, kind, wheelMode, brushLayer, brushSize, showMask, onSelect, onDetail, onReload, onImagesChanged };
+  const showTextLayer = mode === "lettering" || (showText && textPreviewAvailable);
+  const live = useRef({
+    pageId, page, blocks, disabled, tool, kind, wheelMode, brushLayer, brushSize, showMask, showTextLayer, mode, selectedId, lettering,
+    onSelect, onDetail, onReload, onImagesChanged, onStylePreview, relayout, onModeChange,
+  });
+  live.current = {
+    pageId, page, blocks, disabled, tool, kind, wheelMode, brushLayer, brushSize, showMask, showTextLayer, mode, selectedId, lettering,
+    onSelect, onDetail, onReload, onImagesChanged, onStylePreview, relayout, onModeChange,
+  };
 
   /** Runs server changes one after another; a failure shows the error, drops the history and reloads the page. */
   const enqueue = useCallback((task: () => Promise<void>) => {
@@ -194,6 +259,8 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
         setError(err instanceof Error ? err.message : String(err));
         history.clear();
         for (const entry of entriesRef.current.values()) entry.key = "";
+        // The reload brings back the server's styles: pending canvas baselines no longer apply
+        styleBaselineRef.current.clear();
         live.current.onReload();
         // A failed layer save leaves the overlay ahead of the server: show what the server has
         setLayersNonce((n) => n + 1);
@@ -208,6 +275,11 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       history.push(command);
     });
   }, [enqueue, history]);
+
+  /** Puts the keyboard in the floating panel's lettering text field. */
+  const focusLetteringText = () => {
+    requestAnimationFrame(() => panelHostRef.current?.querySelector<HTMLTextAreaElement>("[data-lettering-text]")?.focus());
+  };
 
   /** Highest block id in a detail: a newly created block always gets the next index. */
   const newestId = (detail: StudioPageDetail): number => Math.max(...detail.blocks.map((b) => b.id));
@@ -246,26 +318,45 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       kind: blockKind(block),
       // The canvas geometry is ahead of `blocks` while an edit is still being saved: undo must restore that shape
       geometry: entriesRef.current.get(id)?.geometry ?? blockGeometry(block),
-      content: { include: block.include, source_text: block.source_text, translated_text: block.translated_text },
+      content: {
+        include: block.include,
+        source_text: block.source_text,
+        translated_text: block.translated_text,
+        // Its lettering style (font, colours, rotation, offset, text box) comes back too, including a canvas change
+        // that hasn't reached `blocks` yet
+        style: currentStyle(id),
+      },
     };
+    // The deletion belongs to this page: queued work must not delete or recreate a block on a page opened meanwhile
+    const pageId = live.current.pageId;
     let current = id;
     perform({
       label: "Delete region",
       redo: async () => {
-        live.current.onDetail(await deleteBlock(live.current.pageId, history.resolve(current)));
+        const detail = await deleteBlock(pageId, history.resolve(current));
+        if (live.current.pageId !== pageId) return;
+        live.current.onDetail(detail);
         live.current.onSelect(null);
       },
       undo: async () => {
-        // One request brings back geometry, include flag and text together, so a failure can't leave a blank region
-        const detail = await createBlock(live.current.pageId, snapshot.kind, snapshot.geometry, snapshot.content);
+        // One request brings back geometry, include flag, text and style together, so a failure can't leave a blank region
+        const detail = await createBlock(pageId, snapshot.kind, snapshot.geometry, snapshot.content);
         const restored = newestId(detail);
         history.alias(history.resolve(current), restored);
         current = restored;
+        if (live.current.pageId !== pageId) return;
         live.current.onDetail(detail);
         live.current.onSelect(restored);
       },
     });
   }, [history, perform]);
+
+  useImperativeHandle(ref, () => ({
+    deleteBlock: (id: number) => {
+      if (live.current.disabled) return;
+      deleteRegion(id);
+    },
+  }), [deleteRegion]);
 
   /**
    * Saves the painted layers a stroke changed, to the page and layers it was painted on (the user may have moved to
@@ -313,6 +404,38 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
     });
     if (record.layer === "add") markForReclean();
   }, [perform, saveLayers]);
+
+  /** Moves, resizes or rotates a block's text box: previewed at once, saved as an undoable style change. */
+  /**
+   * The latest style each block was given on the canvas, kept until that change's own save lands: a second quick move
+   * must record the first move's result as its "before", even if a page refresh brings back the older style meanwhile
+   * (the editor is remounted per page, so entries never outlive their page).
+   */
+  const styleBaselineRef = useRef(new Map<number, TextStyle | null>());
+
+  /** The block's current lettering style, including canvas changes not rendered into `blocks` yet. */
+  const currentStyle = useCallback((id: number): TextStyle | null => {
+    const baseline = styleBaselineRef.current;
+    if (baseline.has(id)) return baseline.get(id) ?? null;
+    return (live.current.blocks.find((b) => b.id === id)?.style ?? null) as TextStyle | null;
+  }, []);
+
+  /** Moves, resizes or rotates a block's text box: previewed at once, saved as an undoable style change. */
+  const restyle = useCallback((id: number, before: TextStyle | null, after: TextStyle | null) => {
+    // The change belongs to this page: a queued save must not write to, or update, a page opened meanwhile
+    const pageId = live.current.pageId;
+    styleBaselineRef.current.set(id, after);
+    live.current.onStylePreview(id, after);
+    const apply = (style: TextStyle | null) => async () => {
+      const target = history.resolve(id);
+      if (live.current.pageId === pageId) live.current.onStylePreview(target, style);
+      const detail = await updateBlock(pageId, target, { style });
+      // Saved: the server now has this style, so the block's own value is current again
+      if (styleBaselineRef.current.get(id) === style) styleBaselineRef.current.delete(id);
+      if (live.current.pageId === pageId) live.current.onDetail(detail);
+    };
+    perform({ label: "Move, resize or rotate text", redo: apply(after), undo: apply(before) });
+  }, [history, perform]);
 
   // Canvas lifecycle: created by hand inside the host so React never reconciles Fabric's DOM; StrictMode-safe
   useEffect(() => {
@@ -444,7 +567,9 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
     };
 
     const deleteSelected = () => {
-      const id = blockIdOf(canvas.getActiveObject());
+      const active = canvas.getActiveObject();
+      // Lettering stands for its region: deleting it removes the region (undoable)
+      const id = blockIdOf(active) ?? letteringIdOf(active) ?? (live.current.mode === "lettering" ? live.current.selectedId ?? undefined : undefined);
       if (id !== undefined && !live.current.disabled) deleteRegion(id);
     };
 
@@ -500,12 +625,22 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       // A focused form control (e.g. the stage picker) would swallow Delete / Backspace and the tool keys
       const focused = document.activeElement;
       if (focused instanceof HTMLElement && isTyping(focused)) focused.blur();
-      // Pan: space-drag or middle-drag with any tool, or dragging empty space with the select tool
-      if (spaceRef.current || e.button === 1 || (live.current.tool === "select" && !opt.target)) {
+      // Lettering mode: pressing a region that has no lettering yet selects it (so its lettering can be typed)
+      if (live.current.mode === "lettering" && !opt.target && !spaceRef.current && e.button !== 1) {
+        const p = opt.scenePoint;
+        const hit = live.current.blocks
+          .filter((b) => (b.kind === "text" || b.kind === "sfx") && p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h)
+          .sort((a, b) => a.w * a.h - b.w * b.h)[0];
+        live.current.onSelect(hit ? hit.id : null);
+      }
+      // Pan: space-drag or middle-drag with any tool, or dragging empty space with the select tool or in Lettering mode
+      const panTool = live.current.mode === "lettering" || live.current.tool === "select";
+      if (spaceRef.current || e.button === 1 || (panTool && !opt.target)) {
         panning = { x: e.clientX, y: e.clientY };
         canvas.setCursor("grabbing");
         return;
       }
+      if (live.current.mode === "lettering") return;
       if (live.current.tool === "brush") {
         const mask = maskRef.current;
         if (live.current.disabled || !mask || e.button === 2) return;
@@ -544,7 +679,7 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
         return;
       }
       const p = pagePoint(opt.scenePoint, live.current.page);
-      if (live.current.tool === "brush") {
+      if (live.current.mode === "regions" && live.current.tool === "brush") {
         brushCursor.set({ left: p.x, top: p.y, radius: live.current.brushSize / 2, visible: true });
         canvas.bringObjectToFront(brushCursor);
         if (painting) maskRef.current?.strokeTo(p);
@@ -585,8 +720,31 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
     });
 
     canvas.on("mouse:dblclick", () => {
+      if (live.current.mode === "lettering") {
+        focusLetteringText();
+        return;
+      }
       if (live.current.tool === "polygon") finishPolygon();
     });
+
+    // Live re-wrap while a lettering box is resized (once per frame)
+    let relayoutFrame = 0;
+    canvas.on("object:scaling", (e) => {
+      const target = e.target;
+      const id = letteringIdOf(target);
+      if (id === undefined || !(target instanceof LetteringObject)) return;
+      cancelAnimationFrame(relayoutFrame);
+      relayoutFrame = requestAnimationFrame(() => {
+        const w = Math.max(4, Math.round(target.width * target.scaleX));
+        const h = Math.max(4, Math.round(target.height * target.scaleY));
+        const center = target.getCenterPoint();
+        target.setPaths(live.current.relayout(id, { x: Math.round(center.x - w / 2), y: Math.round(center.y - h / 2), w, h }));
+        canvas.requestRenderAll();
+      });
+    });
+
+    // The floating panel follows its lettering through pans, zooms and moves
+    canvas.on("after:render", () => updatePanelRef.current());
 
     canvas.on("mouse:out", () => {
       brushCursor.set({ visible: false });
@@ -595,7 +753,7 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
 
     // ── Selection and edits ───────────────────────────────────────────────────
     const selectFrom = (selected: FabricObject[] | undefined) => {
-      const id = blockIdOf(selected?.[0]);
+      const id = blockIdOf(selected?.[0]) ?? letteringIdOf(selected?.[0]);
       if (id !== undefined) live.current.onSelect(id);
     };
     canvas.on("selection:created", (e) => selectFrom(e.selected));
@@ -606,6 +764,41 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
     });
 
     canvas.on("object:modified", (e) => {
+      const letteringId = letteringIdOf(e.target);
+      if (letteringId !== undefined && e.target instanceof LetteringObject) {
+        const obj = e.target;
+        const item = live.current.lettering.find((i) => i.id === letteringId);
+        const block = live.current.blocks.find((b) => b.id === letteringId);
+        if (!item || !block) return;
+        const { width: pw, height: ph } = live.current.page;
+        const w = Math.max(4, Math.min(pw, Math.round(obj.width * obj.scaleX)));
+        const h = Math.max(4, Math.min(ph, Math.round(obj.height * obj.scaleY)));
+        const center = obj.getCenterPoint();
+        // The stored box is the unrotated rectangle around the rotation centre, kept inside the page
+        const x = Math.min(Math.max(0, Math.round(center.x - w / 2)), pw - w);
+        const y = Math.min(Math.max(0, Math.round(center.y - h / 2)), ph - h);
+        const rotation = Math.round((((((obj.angle ?? 0) + 180) % 360) + 360) % 360 - 180) * 10) / 10;
+        const before = currentStyle(letteringId);
+        const after: TextStyle = { ...(before ?? {}) };
+        const resized = w !== item.box.w || h !== item.box.h;
+        if (resized || item.hasExplicitBox) {
+          // A resized (or already free) box: the text wraps in this rectangle
+          after.box = { x, y, w, h };
+          delete after.offset;
+        } else {
+          // A plain move keeps the bubble-shaped wrapping: stored as an offset from the found area
+          const dx = x - item.baseBox.x, dy = y - item.baseBox.y;
+          if (dx || dy) after.offset = { x: dx, y: dy };
+          else delete after.offset;
+        }
+        if (rotation) after.rotation = rotation;
+        else delete after.rotation;
+        obj.set({ width: w, height: h, scaleX: 1, scaleY: 1 });
+        obj.setPositionByOrigin(new Point(x + w / 2, y + h / 2), "center", "center");
+        obj.setCoords();
+        restyle(letteringId, before, Object.keys(after).length > 0 ? after : null);
+        return;
+      }
       const id = blockIdOf(e.target);
       if (id === undefined) return;
       const entry = entriesRef.current.get(id);
@@ -624,15 +817,18 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
 
     return () => {
       resize.disconnect();
+      // A live re-wrap queued during a resize must not run against the disposed canvas
+      cancelAnimationFrame(relayoutFrame);
       actionsRef.current = null;
       canvasRef.current = null;
       brushCursorRef.current = null;
+      letteringRef.current.clear();
       entriesRef.current.clear();
       fittedRef.current = false;
       void canvas.dispose();
       host.replaceChildren();
     };
-  }, [createRegion, deleteRegion, reshapeRegion, paintStroke]);
+  }, [createRegion, deleteRegion, reshapeRegion, paintStroke, restyle]);
 
   // Background image: the chosen stage image at page scale; fit the page into view once
   useEffect(() => {
@@ -668,7 +864,7 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       .then(() => {
         if (controller.signal.aborted || canvasRef.current !== canvas) return;
         mask.attach(canvas);
-        mask.setVisible(live.current.showMask || live.current.tool === "brush");
+        mask.setVisible(live.current.mode === "regions" && (live.current.showMask || live.current.tool === "brush"));
         maskRef.current = mask;
         canvas.requestRenderAll();
       })
@@ -684,11 +880,78 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
     };
   }, [pageId, page.width, page.height, layersNonce, createRegion, deleteRegion, reshapeRegion, paintStroke]);
 
-  // The overlay shows while painting, or when asked for
+  // Lettering layer: one floating object per lettered block, interactive in Lettering mode
   useEffect(() => {
-    maskRef.current?.setVisible(showMask || tool === "brush");
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const objects = letteringRef.current;
+    const interactive = mode === "lettering" && !disabled;
+    const seen = new Set<number>();
+    for (const item of lettering) {
+      seen.add(item.id);
+      let obj = objects.get(item.id);
+      if (!obj) {
+        obj = new LetteringObject(item.id, {
+          originX: "center",
+          originY: "center",
+          objectCaching: false,
+          lockScalingFlip: true,
+          transparentCorners: false,
+          cornerColor: LETTERING_COLOR,
+          cornerSize: 9,
+          borderColor: LETTERING_COLOR,
+          borderDashArray: [6, 4],
+        });
+        objects.set(item.id, obj);
+        canvas.add(obj);
+      }
+      obj.set({
+        left: item.box.x + item.box.w / 2,
+        top: item.box.y + item.box.h / 2,
+        width: item.box.w,
+        height: item.box.h,
+        scaleX: 1,
+        scaleY: 1,
+        angle: item.rotation,
+        selectable: interactive,
+        evented: interactive,
+        hoverCursor: interactive ? "move" : "default",
+        visible: showTextLayer,
+        // Not placed yet: previewed in the region box until the server finds the bubble area
+        opacity: item.placed ? 1 : 0.6,
+      });
+      obj.showFrame = mode === "lettering";
+      obj.overflow = !item.fits;
+      obj.setPaths(item.paths);
+      obj.setCoords();
+      // Lettering sits above the regions while it's being edited, below them otherwise
+      if (mode === "lettering") canvas.bringObjectToFront(obj);
+      else canvas.sendObjectToBack(obj);
+    }
+    for (const [id, obj] of objects) {
+      if (seen.has(id)) continue;
+      if (canvas.getActiveObject() === obj) canvas.discardActiveObject();
+      canvas.remove(obj);
+      objects.delete(id);
+    }
+
+    const active = canvas.getActiveObject();
+    if (mode === "lettering") {
+      const target = selectedId !== null ? objects.get(selectedId) : undefined;
+      if (target && active !== target && !disabled) canvas.setActiveObject(target);
+      else if (!target && active) canvas.discardActiveObject();
+    } else if (letteringIdOf(active) !== undefined) {
+      canvas.discardActiveObject();
+    }
+    canvas.requestRenderAll();
+    updatePanelRef.current();
+  }, [lettering, mode, showTextLayer, disabled, selectedId, createRegion, deleteRegion, reshapeRegion, paintStroke, restyle]);
+
+  // The overlay shows while painting, or when asked for, and only in Regions mode
+  useEffect(() => {
+    maskRef.current?.setVisible(mode === "regions" && (showMask || tool === "brush"));
     canvasRef.current?.requestRenderAll();
-  }, [showMask, tool]);
+  }, [showMask, tool, mode]);
 
   // Regions: redraw only blocks whose geometry changed; keep the selection in sync with the panel
   useEffect(() => {
@@ -712,27 +975,41 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       canvas.remove(entry.obj);
       entries.delete(id);
     }
-    for (const { obj } of entries.values()) obj.set({ selectable: !disabled, evented: !disabled });
+    const regionsInteractive = !disabled && mode === "regions";
+    for (const { obj } of entries.values()) {
+      obj.set({ selectable: regionsInteractive, evented: regionsInteractive, opacity: mode === "lettering" ? 0.35 : 1 });
+    }
 
-    const target = selectedId !== null ? entries.get(selectedId)?.obj : undefined;
-    const active = canvas.getActiveObject();
-    if (target && active !== target) canvas.setActiveObject(target);
-    else if (!target && active) canvas.discardActiveObject();
+    if (mode === "regions") {
+      const target = selectedId !== null ? entries.get(selectedId)?.obj : undefined;
+      const active = canvas.getActiveObject();
+      if (target && active !== target) canvas.setActiveObject(target);
+      else if (!target && active) canvas.discardActiveObject();
+    }
+    // A region added or redrawn above the lettering must not cover it while the lettering is being edited
+    if (mode === "lettering") for (const obj of letteringRef.current.values()) canvas.bringObjectToFront(obj);
     canvas.requestRenderAll();
-  }, [blocks, disabled, selectedId, createRegion, deleteRegion, reshapeRegion, paintStroke]);
+  }, [blocks, disabled, selectedId, mode, createRegion, deleteRegion, reshapeRegion, paintStroke, restyle]);
 
   // Switching tools abandons a half-drawn region; the brush paints over regions instead of picking them
   useEffect(() => {
     actionsRef.current?.cancelDrawing();
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.defaultCursor = tool === "select" ? "default" : "crosshair";
-    canvas.skipTargetFind = tool === "brush";
-    if (tool !== "brush") {
+    // Drawing tools only draw in Regions mode; Lettering mode points and drags
+    canvas.defaultCursor = mode === "regions" && tool !== "select" ? "crosshair" : "default";
+    canvas.skipTargetFind = mode === "regions" && tool === "brush";
+    if (tool !== "brush" || mode !== "regions") {
       brushCursorRef.current?.set({ visible: false });
       canvas.requestRenderAll();
     }
-  }, [tool]);
+  }, [tool, mode]);
+
+  // Switching modes tells the editor (Lettering switches the background to the cleaned page)
+  useEffect(() => {
+    live.current.onModeChange?.(mode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   // A different page starts a fresh history and has nothing painted yet
   useEffect(() => {
@@ -770,11 +1047,21 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
         return;
       }
       if (mod || e.altKey) return;
-      if (key === "v") setTool("select");
-      else if (key === "r") setTool("rect");
-      else if (key === "e") setTool("ellipse");
-      else if (key === "p") setTool("polygon");
-      else if (key === "b") setTool("brush");
+      // Region tool keys switch back to Regions mode
+      const pickTool = (next: Tool) => {
+        setMode("regions");
+        setTool(next);
+      };
+      if (key === "v") pickTool("select");
+      else if (key === "r") pickTool("rect");
+      else if (key === "e") pickTool("ellipse");
+      else if (key === "p") pickTool("polygon");
+      else if (key === "b") pickTool("brush");
+      else if (key === "l") setMode((current) => (current === "lettering" ? "regions" : "lettering"));
+      else if (key === "enter" && live.current.mode === "lettering" && live.current.selectedId !== null) {
+        e.preventDefault();
+        focusLetteringText();
+      }
       else if (key === "x") setBrushLayer((layer) => (layer === "add" ? "erase" : "add"));
       else if (key === "[") setBrushSize((size) => Math.max(MIN_BRUSH, Math.round(size / 1.25)));
       else if (key === "]") setBrushSize((size) => Math.min(MAX_BRUSH, Math.round(size * 1.25)));
@@ -795,8 +1082,8 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       spaceRef.current = false;
       const canvas = canvasRef.current;
       if (canvas) {
-        canvas.skipTargetFind = live.current.tool === "brush";
-        canvas.setCursor(live.current.tool === "select" ? "default" : "crosshair");
+        canvas.skipTargetFind = live.current.mode === "regions" && live.current.tool === "brush";
+        canvas.setCursor(live.current.mode === "regions" && live.current.tool !== "select" ? "crosshair" : "default");
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -806,6 +1093,59 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
       window.removeEventListener("keyup", onKeyUp);
     };
   }, [enqueue, history]);
+
+  /** Keeps the floating lettering panel next to the selected block, above or below it depending on the room. */
+  const updatePanelRef = useRef<() => void>(() => {});
+  updatePanelRef.current = () => {
+    const canvas = canvasRef.current;
+    const host = panelHostRef.current;
+    // A pinned panel is re-clamped when the canvas area shrinks (window or side panel resize), so it stays reachable
+    if (host) {
+      setPanelPin((pin) => {
+        if (!pin) return pin;
+        const left = Math.min(pin.left, Math.max(0, host.clientWidth - PANEL_WIDTH));
+        const top = Math.min(pin.top, Math.max(0, host.clientHeight - PANEL_OUTER_HEIGHT));
+        return left === pin.left && top === pin.top ? pin : { left, top };
+      });
+    }
+    const block = selectedId !== null ? blocks.find((b) => b.id === selectedId) : undefined;
+    if (!canvas || !host || mode !== "lettering" || !block || !renderLetteringPanel || (block.kind !== "text" && block.kind !== "sfx")) {
+      setPanelPosition((current) => (current === null ? current : null));
+      return;
+    }
+    const obj = letteringRef.current.get(block.id);
+    const corners = obj
+      ? obj.getCoords()
+      : [new Point(block.x, block.y), new Point(block.x + block.w, block.y + block.h)];
+    const screen = corners.map((p) => util.transformPoint(p, canvas.viewportTransform));
+    const xs = screen.map((p) => p.x), ys = screen.map((p) => p.y);
+    const panelWidth = PANEL_WIDTH, panelHeight = PANEL_OUTER_HEIGHT, gap = 12;
+    const left = Math.min(Math.max(8, (Math.min(...xs) + Math.max(...xs)) / 2 - panelWidth / 2), Math.max(8, host.clientWidth - panelWidth - 8));
+    const below = Math.max(...ys) + gap;
+    const top = below + panelHeight <= host.clientHeight ? below : Math.max(8, Math.min(...ys) - gap - panelHeight);
+    setPanelPosition((current) =>
+      current && Math.abs(current.left - left) < 1 && Math.abs(current.top - top) < 1 ? current : { left: Math.round(left), top: Math.round(top) });
+  };
+
+  /** Dragging the lettering panel by its grab bar, kept inside the canvas area. */
+  const panelSpot = panelPin ?? panelPosition;
+  const startPanelDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!panelSpot || e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    panelDragRef.current = { x: e.clientX, y: e.clientY, left: panelSpot.left, top: panelSpot.top };
+  };
+  const movePanel = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = panelDragRef.current;
+    const host = panelHostRef.current;
+    if (!drag || !host) return;
+    // Kept fully inside the canvas area (it clips), so the panel's bottom controls stay reachable
+    const left = Math.min(Math.max(0, drag.left + e.clientX - drag.x), Math.max(0, host.clientWidth - PANEL_WIDTH));
+    const top = Math.min(Math.max(0, drag.top + e.clientY - drag.y), Math.max(0, host.clientHeight - PANEL_OUTER_HEIGHT));
+    setPanelPin({ left: Math.round(left), top: Math.round(top) });
+  };
+  const endPanelDrag = () => {
+    panelDragRef.current = null;
+  };
 
   // Re-clean targets: the painted spots when there are any, otherwise the selected region's box
   const selectedBlock = selectedId !== null ? blocks.find((b) => b.id === selectedId) : undefined;
@@ -862,6 +1202,25 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
     <section className="flex-1 min-w-0 min-h-0 flex flex-col">
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-gray-800">
         {toolbarStart}
+        <div className="flex items-center rounded-md border border-gray-700 overflow-hidden text-xs" role="group" aria-label="Edit mode">
+          {([
+            { value: "regions", icon: <Shapes size={14} />, label: "Regions", hint: "Regions (L toggles): draw and edit detection areas, paint the mask" },
+            { value: "lettering", icon: <Type size={14} />, label: "Lettering", hint: "Lettering (L toggles): move, resize, rotate and edit the translated text on the page" },
+          ] as const).map(({ value, icon, label, hint }) => (
+            <button
+              key={value}
+              onClick={() => setMode(value)}
+              aria-pressed={mode === value}
+              title={hint}
+              className={`flex items-center gap-1.5 px-2.5 py-1 ${mode === value ? "bg-violet-600 text-white" : "text-gray-400 hover:bg-gray-800"}`}
+            >
+              {icon}
+              {label}
+            </button>
+          ))}
+        </div>
+        {mode === "regions" && (
+        <>
         <div className="flex items-center gap-0.5" role="toolbar" aria-label="Region tools">
           {toolButton("select", <MousePointer2 size={15} />, "Select", "V")}
           {toolButton("rect", <Square size={15} />, "Rectangle", "R")}
@@ -910,6 +1269,7 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
                 key={value}
                 onClick={() => setKind(value)}
                 aria-pressed={kind === value}
+                title={KIND_HINTS[value]}
                 className={`px-2 py-1 ${kind === value ? "bg-gray-700 text-white" : "text-gray-400 hover:bg-gray-800"}`}
                 style={kind === value ? { boxShadow: `inset 0 -2px 0 ${REGION_COLORS[value].stroke}` } : undefined}
               >
@@ -930,6 +1290,18 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
             {showMask || tool === "brush" ? <Eye size={15} /> : <EyeOff size={15} />}
           </button>
           <button
+            onClick={() => setShowText((shown) => !shown)}
+            disabled={!textPreviewAvailable}
+            aria-pressed={showTextLayer}
+            aria-label="Show the lettering preview"
+            title={textPreviewAvailable
+              ? "Show the lettering as the burn would draw it"
+              : "The lettering preview shows over a cleaned page: pick Cleaned text or Cleaned SFX as the background"}
+            className={`p-1.5 rounded-md hover:bg-gray-800 disabled:opacity-40 ${showTextLayer ? "text-violet-300" : "text-gray-400"}`}
+          >
+            <ALargeSmall size={15} />
+          </button>
+          <button
             onClick={reclean}
             disabled={disabled || recleaning || recleanTargets.length === 0}
             title={recleanTitle}
@@ -939,6 +1311,8 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
             Re-clean{paintedAreas.length > 0 ? ` (${paintedAreas.length})` : ""}
           </button>
         </div>
+        </>
+        )}
         <div className="flex items-center gap-0.5">
           <button
             onClick={() => enqueue(() => history.undo())}
@@ -1000,10 +1374,43 @@ export function PageCanvas({ pageId, imageUrl, page, blocks, disabled, selectedI
           </button>
         </div>
         <span className="ml-auto text-xs truncate max-w-full">
-          {error ? <span className="text-red-400">{error}</span> : busyCount > 0 ? <span className="text-gray-400">{recleaning ? "Re-cleaning…" : "Saving…"}</span> : <span className="text-gray-500">{TOOL_HINTS[tool]} · {WHEEL_HINTS[wheelMode]}, Ctrl+wheel zooms, Space-drag pans</span>}
+          {error ? <span className="text-red-400">{error}</span> : busyCount > 0 ? <span className="text-gray-400">{recleaning ? "Re-cleaning…" : "Saving…"}</span> : <span className="text-gray-500">{mode === "lettering" ? LETTERING_HINT : TOOL_HINTS[tool]} · {WHEEL_HINTS[wheelMode]}, Ctrl+wheel zooms, Space-drag pans</span>}
         </span>
       </div>
-      <div ref={hostRef} className="relative flex-1 min-h-0 overflow-hidden" />
+      <div ref={panelHostRef} className="relative flex-1 min-h-0 overflow-hidden">
+        <div ref={hostRef} className="absolute inset-0" />
+        {mode === "lettering" && panelPosition && panelSpot && selectedId !== null && renderLetteringPanel && (
+          <div
+            className="absolute z-20 w-[300px] rounded-lg border border-violet-500/40 bg-gray-900/95 shadow-2xl backdrop-blur flex flex-col"
+            style={{ left: panelSpot.left, top: panelSpot.top }}
+          >
+            <div
+              onPointerDown={startPanelDrag}
+              onPointerMove={movePanel}
+              onPointerUp={endPanelDrag}
+              onPointerCancel={endPanelDrag}
+              title="Drag to move this panel out of the way"
+              className="flex items-center gap-1.5 px-2 py-1 border-b border-gray-800 text-[11px] text-gray-500 cursor-grab active:cursor-grabbing select-none touch-none"
+            >
+              <GripHorizontal size={14} />
+              {panelPin ? "Moved" : "Drag to move"}
+              {panelPin && (
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => setPanelPin(null)}
+                  title="Put the panel back next to the selected lettering"
+                  className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-violet-300 hover:bg-gray-800"
+                >
+                  <LocateFixed size={12} />
+                  Follow
+                </button>
+              )}
+            </div>
+            <div className="max-h-[340px] overflow-y-auto">{renderLetteringPanel(selectedId)}</div>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

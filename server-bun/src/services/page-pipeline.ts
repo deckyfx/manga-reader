@@ -16,7 +16,8 @@ import { labelComponents, maskFromImage, maskToPng, selectBlockMask, type BlockK
 import { getTextSegmenter, textSegModelPath } from "@/services/text-seg-service";
 import { getBubbleDetector } from "@/services/bubble-service";
 import { getInpainter, inpaintModelPath } from "@/services/inpaint-service";
-import { findTextArea, getTypesetter, separateAreas, type TextArea } from "@/services/typeset-service";
+import { findTextArea, getTypesetter, isDarkBackground, separateAreas, type TextArea } from "@/services/typeset-service";
+import { rectArea, shiftArea, storedArea, typesetPage, type StoredArea, type TextStyle, type TypesetEntry } from "@/shared/typeset";
 
 export type PageStage = "detecting" | "ocr" | "translating" | "cleaning" | "typesetting";
 
@@ -40,6 +41,10 @@ export interface PageBlock extends Box {
   translated_text: string | null;
   /** Filled by `render`: the typeset result, kept for review and later manual overrides. */
   render?: { font_size: number; lines: string[]; area: Box; fits: boolean };
+  /** Lettering overrides set in the Studio (font, size, colours, alignment, rotation, text box). */
+  style?: TextStyle;
+  /** Filled by `render`: where the text was placed, reused by the Studio's live preview. */
+  area?: StoredArea;
 }
 
 export interface PageJob {
@@ -379,58 +384,97 @@ export class PagePipeline {
     return { output, regions: clipped.length, total: clipped.length, flat, lama };
   }
 
-  /** Typeset translations inside each bubble on the latest cleaned page → result.png. */
-  async render(job: PageJob): Promise<RenderResult> {
+  /**
+   * Finds where each block's lettering may go on the latest cleaned page and stores it on the blocks: a text block's
+   * bubble interior (separated from neighbouring interiors), a sound effect's own box. Blocks with no room get no
+   * area. Returns the page and its pixels for a burn that follows.
+   */
+  private async findAreas(job: PageJob): Promise<{ input: string; page: Buffer; rgb: Buffer; width: number; height: number; areas: Map<number, TextArea> }> {
     const input = existsSync(this.path("clean-sfx.png")) ? "clean-sfx.png" : "clean-text.png";
     if (!existsSync(this.path(input))) throw new Error("No cleaned page yet — clean the text blocks first");
-    const targets = job.blocks.filter((b) => b.kind === "text" && b.translated_text?.trim());
-    this.report({ stage: "typesetting", message: `Typesetting ${targets.length} translations…`, fraction: 0 });
-
     const page = Buffer.from(await Bun.file(this.path(input)).arrayBuffer());
     const { data: rgb, info } = await sharp(page).removeAlpha().toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
     const { width, height } = info;
 
-    // Bubbles are detected again on the cleaned page: without the original lettering the outlines are unambiguous.
-    const detector = await getBubbleDetector();
+    // Bubbles are detected again on the cleaned page: without the original lettering the outlines are unambiguous
+    const detector = job.blocks.some((b) => b.kind === "text") ? await getBubbleDetector() : null;
     const bubbles = detector ? (await detector.detect(page)).bubbles : [];
-    const typesetter = await getTypesetter();
-    const maxFontSize = Math.round(height / 40);
+
+    const areas = new Map<number, TextArea>();
+    const detected: { block: PageBlock; area: TextArea }[] = [];
+    for (const b of job.blocks) {
+      delete b.area;
+      let area: TextArea | null = null;
+      if (b.kind === "sfx") area = rectArea(b, isDarkBackground(rgb, width, height, b));
+      else if (b.kind === "text") {
+        area = findTextArea(rgb, width, height, b, matchBubble(b, bubbles));
+        if (area) detected.push({ block: b, area });
+      }
+      if (area) areas.set(b.id, area);
+    }
+    separateAreas(detected);
+    for (const b of job.blocks) {
+      const area = areas.get(b.id);
+      if (area) b.area = storedArea(area);
+    }
+    return { input, page, rgb, width, height, areas };
+  }
+
+  /** Stores every block's text area without burning, so the Studio can preview lettering before any render. */
+  async placeText(job: PageJob): Promise<number> {
+    const { areas } = await this.findAreas(job);
+    await this.writeJob(job);
+    return areas.size;
+  }
+
+  /** Typeset translations inside each bubble on the latest cleaned page → result.png. */
+  async render(job: PageJob): Promise<RenderResult> {
+    // Text blocks carry translations; sound-effect regions are re-lettered when given text in the Studio
+    const targets = job.blocks.filter((b) => (b.kind === "text" || b.kind === "sfx") && b.translated_text?.trim());
+    this.report({ stage: "typesetting", message: `Typesetting ${targets.length} translations…`, fraction: 0 });
+
+    const { input, page, rgb, width, height, areas } = await this.findAreas(job);
     // A block this run doesn't typeset (skipped, or no translation any more) must not keep an older patch
     for (const b of job.blocks) delete b.render;
     rmSync(this.path("patches"), { recursive: true, force: true });
     mkdirSync(this.path("patches"), { recursive: true });
 
-    const entries: { block: PageBlock; area: TextArea }[] = [];
+    const entries: TypesetEntry[] = [];
     const skipped: number[] = [];
     for (const b of targets) {
-      const area = findTextArea(rgb, width, height, b, matchBubble(b, bubbles));
-      if (area) entries.push({ block: b, area });
+      const style = b.style ?? {};
+      const found = areas.get(b.id);
+      // An explicit box wins; otherwise the found area, moved by the block's offset
+      const area = style.box
+        ? rectArea(style.box, isDarkBackground(rgb, width, height, style.box))
+        : found ? shiftArea(found, style.offset) : null;
+      if (area) entries.push({ id: b.id, text: b.translated_text ?? "", area, style });
       else skipped.push(b.id);
     }
-    separateAreas(entries);
 
-    // Largest size each block could take, then a shared page size so the lettering looks consistent
-    const bestSizes = entries.map(({ block, area }) => typesetter.layout(block.translated_text ?? "", area, maxFontSize).fontSize);
-    // Size 0 means separateAreas left the area empty: it must not drag the page size down to the minimum
-    const sortedSizes = bestSizes.filter((size) => size > 0).sort((a, b) => a - b);
-    const pageFontSize = sortedSizes[Math.floor((sortedSizes.length - 1) / 2)] ?? maxFontSize;
+    const typesetter = await getTypesetter();
+    const typeset = typesetPage(typesetter, entries, { width, height });
+    skipped.push(...typeset.skipped);
+    const pageFontSize = typeset.pageFontSize;
 
     const patches: OverlayOptions[] = [];
     const rendered: RenderedBlock[] = [];
     const laidOut: TextArea[] = [];
-    for (const [i, { block: b, area }] of entries.entries()) {
-      if (bestSizes[i] <= 0) {
+    for (const result of typeset.blocks) {
+      const entry = entries.find((e) => e.id === result.id);
+      const b = job.blocks.find((block) => block.id === result.id);
+      if (!entry || !b) continue;
+      if (!result.patch) {
         skipped.push(b.id);
         continue;
       }
-      laidOut.push(area);
-      const layout = typesetter.layout(b.translated_text ?? "", area, Math.min(pageFontSize, bestSizes[i]));
-      const patch = await sharp(Buffer.from(typesetter.renderSvg(layout, area))).png().toBuffer();
+      laidOut.push(entry.area);
+      const patch = await sharp(Buffer.from(result.patch.svg)).png().toBuffer();
       await Bun.write(this.path(`patches/${b.id}.png`), patch);
-      patches.push({ input: patch, left: area.bound.x, top: area.bound.y });
-      const lines = layout.lines.map((l) => l.text);
-      b.render = { font_size: layout.fontSize, lines, area: area.bound, fits: layout.fits };
-      rendered.push({ id: b.id, fontSize: layout.fontSize, bestFontSize: bestSizes[i], lines, fits: layout.fits });
+      patches.push({ input: patch, left: result.patch.x, top: result.patch.y });
+      const lines = result.layout.lines.map((l) => l.text);
+      b.render = { font_size: result.layout.fontSize, lines, area: entry.area.bound, fits: result.layout.fits };
+      rendered.push({ id: b.id, fontSize: result.layout.fontSize, bestFontSize: result.bestFontSize, lines, fits: result.layout.fits });
     }
 
     await sharp(page).composite(patches).png().toFile(this.path("result.png"));
@@ -445,9 +489,13 @@ export class PagePipeline {
     const tinted = Buffer.from(rgb);
     for (const area of areas) {
       for (let y = 0; y < area.bound.h; y++) {
+        // A moved text area can hang off the page: skip what's outside rather than wrapping into other rows
+        const py = y + area.bound.y;
+        if (py < 0 || py >= height) continue;
         for (let x = 0; x < area.bound.w; x++) {
-          if (!area.mask[y * area.bound.w + x]) continue;
-          const p = ((y + area.bound.y) * width + x + area.bound.x) * 3;
+          const px = x + area.bound.x;
+          if (px < 0 || px >= width || !area.mask[y * area.bound.w + x]) continue;
+          const p = (py * width + px) * 3;
           tinted[p] = Math.round(tinted[p] * 0.6);
           tinted[p + 1] = Math.round(tinted[p + 1] * 0.6 + 100);
           tinted[p + 2] = Math.round(tinted[p + 2] * 0.6);

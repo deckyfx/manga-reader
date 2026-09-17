@@ -1,4 +1,5 @@
 import { treaty } from "@elysiajs/eden";
+import type { FontVariant, TextStyle } from "../../src/shared/typeset";
 import type { App } from "../../src/index";
 
 /** Type-safe API client via Eden Treaty; request and response shapes come from the server's route schemas. */
@@ -54,9 +55,23 @@ export const pageEventsUrl = (id: string) => `/api/translate-page/${id}/events`;
 
 export type { PageJobEvent } from "../../src/stores/translation-job-store";
 
-/** Edits a block's text, or whether the clean pass removes its lettering (`include`). */
-export const updateBlock = (id: string, idx: number, fields: { source_text?: string; translated_text?: string; include?: boolean }) =>
-  unwrap(api.studio.api.pages({ id }).blocks({ idx }).patch(fields));
+export type { FontVariant, LetteringPaths, TextAlign, TextPatch, TextStyle } from "../../src/shared/typeset";
+
+/**
+ * Edits a block's text, whether the clean pass removes its lettering (`include`), or its lettering style (`style`
+ * replaces the stored overrides; null or {} resets to automatic).
+ */
+export const updateBlock = (
+  id: string,
+  idx: number,
+  fields: { source_text?: string; translated_text?: string; include?: boolean; style?: TextStyle | null },
+) => unwrap(api.studio.api.pages({ id }).blocks({ idx }).patch(fields));
+
+/** Finds and stores each block's text area without burning, so lettering can be previewed right away. */
+export const placeText = (id: string) => unwrap(api.studio.api.pages({ id }).place.post());
+
+/** A lettering font, loaded by the Studio's live text preview. */
+export const fontUrl = (variant: FontVariant) => `/studio/api/fonts/${variant}`;
 
 /** Painted mask layers: `add` marks text the detector missed, `erase` marks art it wrongly took for text. */
 export type MaskLayerName = "add" | "erase";
@@ -89,6 +104,7 @@ export interface BlockContent {
   include?: boolean;
   source_text?: string | null;
   translated_text?: string | null;
+  style?: TextStyle | null;
 }
 
 /** Adds a region drawn on the canvas; returns the page detail with the new block. */

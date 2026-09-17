@@ -9,7 +9,9 @@
  * POST  /studio/api/pages/:id/blocks             add a region drawn in the Studio (rect / ellipse / polygon)
  * PUT   /studio/api/pages/:id/blocks/:idx        move / resize / reshape a region
  * DELETE /studio/api/pages/:id/blocks/:idx       remove a region
- * PATCH /studio/api/pages/:id/blocks/:idx        edit source text / translation / include-in-cleaning (marks later stages stale)
+ * PATCH /studio/api/pages/:id/blocks/:idx        edit source text / translation / include-in-cleaning / lettering style (marks later stages stale)
+ * GET   /studio/api/fonts/:variant               a lettering font (regular / bold / italic), for the Studio's live preview
+ * POST  /studio/api/pages/:id/place              find and store each block's text area (no burn), for the live preview
  * PUT   /studio/api/pages/:id/mask/:layer        save a painted mask layer (add / erase) as a PNG
  * DELETE /studio/api/pages/:id/mask/:layer       clear a painted mask layer
  * POST  /studio/api/pages/:id/reclean            re-clean only some areas of the latest cleaned page
@@ -34,6 +36,8 @@ import { enginesNotReady, pageEngines } from "@/services/page-engines";
 import { historyFile, listHistory, restoreResult, snapshotResult } from "@/services/page-history";
 import { decodeBase64Image, resultUrl, submitPageJob } from "@/services/page-jobs";
 import { MASK_LAYER_FILES, PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
+import { FONT_FILES } from "@/services/typeset-service";
+import { FONT_VARIANTS, TEXT_ALIGNS } from "@/shared/typeset";
 import { imageSize, maskFromImage, maskToPng } from "@/lib/mask";
 import { pageLive } from "@/stores/page-live-channel";
 import { PAGE_JOBS_DIR, pageDir, PageStore, type StageName } from "@/stores/page-store";
@@ -71,6 +75,33 @@ const IdParam = t.String({ pattern: "^[A-Za-z0-9-]+$" });
 const IdParams = t.Object({ id: IdParam });
 
 const BoxSchema = t.Object({ x: t.Number(), y: t.Number(), w: t.Number(), h: t.Number() });
+
+const HexColor = t.String({ pattern: "^#[0-9a-fA-F]{6}$" });
+
+/** Lettering overrides; see TextStyle in @/shared/typeset. */
+const StyleSchema = t.Object({
+  font: t.Optional(t.UnionEnum([...FONT_VARIANTS])),
+  font_size: t.Optional(t.Integer({ minimum: 6, maximum: 400 })),
+  fill: t.Optional(HexColor),
+  stroke: t.Optional(HexColor),
+  stroke_width: t.Optional(t.Number({ minimum: 0, maximum: 60 })),
+  align: t.Optional(t.UnionEnum([...TEXT_ALIGNS])),
+  line_height: t.Optional(t.Number({ minimum: 0.6, maximum: 3 })),
+  uppercase: t.Optional(t.Boolean()),
+  rotation: t.Optional(t.Number({ minimum: -180, maximum: 180 })),
+  box: t.Optional(t.Object({
+    x: t.Integer({ minimum: 0 }),
+    y: t.Integer({ minimum: 0 }),
+    w: t.Integer({ minimum: 4 }),
+    h: t.Integer({ minimum: 4 }),
+  })),
+  offset: t.Optional(t.Object({
+    x: t.Integer({ minimum: -20000, maximum: 20000 }),
+    y: t.Integer({ minimum: -20000, maximum: 20000 }),
+  })),
+}, { additionalProperties: false });
+
+const StoredAreaSchema = t.Object({ bound: BoxSchema, dark: t.Boolean(), mask: t.Array(t.Integer()) });
 
 const PointSchema = t.Object({ x: t.Number(), y: t.Number() });
 
@@ -150,6 +181,10 @@ const BlockSchema = t.Object({
   render: t.Nullable(t.Object({ font_size: t.Number(), lines: t.Array(t.String()), area: BoxSchema, fits: t.Boolean() })),
   /** Region outline; null for plain rectangles. */
   shape: t.Nullable(ShapeSchema),
+  /** Lettering overrides; null means automatic. */
+  style: t.Nullable(StyleSchema),
+  /** Where the last render placed the text (run-length mask), for the live preview; null before a render. */
+  area: t.Nullable(StoredAreaSchema),
 });
 
 const PageDetail = t.Object({ page: PageSummary, stages: t.Array(StageSchema), blocks: t.Array(BlockSchema) });
@@ -177,7 +212,7 @@ function toStage(row: PageStageRow) {
 }
 
 function toBlock(block: PageBlock) {
-  return { ...block, render: block.render ?? null, shape: block.shape ?? null };
+  return { ...block, render: block.render ?? null, shape: block.shape ?? null, style: block.style ?? null, area: block.area ?? null };
 }
 
 /** Everything the page editor shows, or null when the page doesn't exist. */
@@ -284,6 +319,14 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
   )
 
   .get(
+    "/fonts/:variant",
+    ({ params }) => new Response(Bun.file(FONT_FILES[params.variant]), {
+      headers: { "content-type": "font/ttf", "cache-control": "public, max-age=86400" },
+    }),
+    { params: t.Object({ variant: t.UnionEnum([...FONT_VARIANTS]) }) },
+  )
+
+  .get(
     "/pages/:id/files/:file",
     async ({ params, status, set }) => {
       const file = Bun.file(join(pageDir(params.id), params.file));
@@ -299,8 +342,12 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
     ({ params, body, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
-      if (body.source_text === undefined && body.translated_text === undefined && body.include === undefined) {
+      if (body.source_text === undefined && body.translated_text === undefined && body.include === undefined && body.style === undefined) {
         return status(422, { error: "nothing to update" });
+      }
+      const box = body.style?.box;
+      if (box && (box.x + box.w > check.page.width || box.y + box.h > check.page.height)) {
+        return status(422, { error: "text box extends outside the page" });
       }
       const block = (await PageStore.readJob(params.id))?.blocks.find((b) => b.id === params.idx);
       if (!block) return status(404, { error: "block not found" });
@@ -310,10 +357,14 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       const stale = new Set<StageName>();
       if (body.source_text !== undefined) stale.add("translate").add("render");
       if (body.translated_text !== undefined) stale.add("render");
+      // Lettering changes only need the text burned again
+      if (body.style !== undefined) stale.add("render");
       if (body.include !== undefined && body.include !== block.include) {
         for (const s of block.kind === "sfx" ? (["clean_sfx", "render"] as const) : (["clean_text", "clean_sfx", "render"] as const)) stale.add(s);
       }
-      const fields = { sourceText: body.source_text, translatedText: body.translated_text, include: body.include };
+      // An empty style is the automatic layout: stored as none
+      const style = body.style === undefined ? undefined : body.style && Object.keys(body.style).length > 0 ? body.style : null;
+      const fields = { sourceText: body.source_text, translatedText: body.translated_text, include: body.include, style };
       if (!(await PageStore.updateBlock(params.id, params.idx, fields, [...stale]))) return status(404, { error: "block not found" });
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
@@ -324,6 +375,8 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
         translated_text: t.Optional(t.String({ maxLength: 2000 })),
         /** Whether the clean pass removes this block's lettering. */
         include: t.Optional(t.Boolean()),
+        /** Lettering overrides, replacing the stored ones; null or {} resets to automatic. */
+        style: t.Optional(t.Nullable(StyleSchema)),
       }),
       response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
     },
@@ -334,11 +387,18 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
     ({ params, body, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
-      const { kind, include, source_text, translated_text, ...geometry } = body;
+      const { kind, include, source_text, translated_text, style, ...geometry } = body;
       const invalid = geometryError(check.page, geometry);
       if (invalid) return status(422, { error: invalid });
-      // Text is stored in the same insert, so restoring a deleted region (undo) is a single atomic request
-      await PageStore.insertBlock(params.id, kind, geometry, include ?? true, { sourceText: source_text, translatedText: translated_text }, stagesAffectedBy(kind));
+      if (style?.box && (style.box.x + style.box.w > check.page.width || style.box.y + style.box.h > check.page.height)) {
+        return status(422, { error: "text box extends outside the page" });
+      }
+      // Text and lettering style are stored in the same insert, so restoring a deleted region (undo) is one atomic request
+      await PageStore.insertBlock(
+        params.id, kind, geometry, include ?? true,
+        { sourceText: source_text, translatedText: translated_text, style },
+        stagesAffectedBy(kind),
+      );
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
     {
@@ -349,6 +409,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
         /** Restored with the region (e.g. undoing a delete). */
         source_text: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
         translated_text: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
+        style: t.Optional(t.Nullable(StyleSchema)),
         ...GeometryBody,
       }),
       response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
@@ -456,6 +517,27 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       }),
       response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody, 503: ErrBody },
     },
+  )
+
+  .post(
+    "/pages/:id/place",
+    ({ params, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      try {
+        await runExclusiveResult(async () => {
+          const job = await PageStore.readJob(params.id);
+          if (!job) throw new Error("page has no blocks yet");
+          const pipeline = new PagePipeline(pageDir(params.id), () => {}, PageStore.repository(params.id));
+          await pipeline.placeText(job);
+        });
+      } catch (err) {
+        // Nothing to place on yet (e.g. not cleaned): the preview simply waits
+        return status(409, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
+    }),
+    { params: IdParams, response: { 200: PageDetail, 404: ErrBody, 409: ErrBody } },
   )
 
   .put(

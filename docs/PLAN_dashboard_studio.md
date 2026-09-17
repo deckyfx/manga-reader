@@ -323,6 +323,37 @@ Library: Fabric.js 7.4.0 (D7 confirmed: manga-reader's studio is Fabric).
 - **Include toggles:** a "clean" checkbox on each text block card and on a new sound-effects list. Excluded regions are drawn dashed and unfilled.
 - **Editor actions:** Clean text / Clean SFX buttons (amber while stale). "Detected text mask" is added to the image pickers.
 
+### Phase 4 design (2026-09-17, branch `feat/studio-text-overlays`)
+
+Decided (user): **shared layout** for the preview (D3), all of phase 4 in one PR.
+
+**Shared typesetter** (`src/shared/typeset.ts`, browser-safe: `opentype.js` + `hyphen`, no file system or sharp):
+- `Typesetter.fromBuffers({ regular, bold, italic })` holds the three Anime Ace fonts; `layout(text, area, maxFontSize, style)` and `renderPatch(layout, area, style, page)` produce an SVG patch placed at page coordinates.
+- `typesetPage(typesetter, entries, page)` letters a whole page: blocks on the automatic size share the page size (median of their best sizes, capped at page height / 40); a fixed size is kept as set.
+- Per-block `TextStyle` overrides, all optional: `font` (regular / bold / italic, default bold), `font_size` (fixed px, else auto), `fill` / `stroke` (`#rrggbb`, else black/white by background), `stroke_width` (0 = none, else 14% of the size), `align`, `line_height` (default 1.1), `uppercase` (default true), `rotation` (degrees around the text box centre), `box` (explicit text area instead of the detected bubble interior), `offset` (moves the detected interior, keeping its shape; ignored with a box).
+- `paths()` returns the glyph outlines and resolved colours; the burn's SVG and the Studio's canvas objects both draw them. `typesetBlock()` letters one block at the page's shared size (live re-wrap while resizing).
+- Text that doesn't fit wraps to the area's width and spills over (`fits: false`); rotated and spilling patches are padded and clipped to the page.
+
+**Server**
+- `page_blocks.style_json` and `area_json` (migration `0005_block_text_style`).
+- `placeText` finds and stores every block's area (bound, dark, run-length mask): the flood-filled bubble interior for text blocks (`separateAreas` among them), a sound effect's own box. `POST /studio/api/pages/:id/place` runs it without burning or marking stages (409 when there's no cleaned page yet).
+- `render` is the burn: it places again, then letters each block with text in its style's `box`, or its found area moved by `offset`, through `typesetPage`, and composites the patches.
+- Sound-effect blocks with text are lettered too: this is how SFX are re-lettered (and a region with cleaning unticked plus text is a free patch). No separate `patch` block kind.
+- `PATCH …/blocks/:idx` takes `style` (replaces the stored overrides; `null` or `{}` resets); a box outside the page is 422; marks only `render` stale. Unknown style fields are dropped by Elysia's body normalisation.
+- Changing a region's geometry clears its stored area (its interior must be found again on the next burn).
+- `GET /studio/api/fonts/:variant` serves the fonts to the Studio.
+- Deviation from the original plan: `render` isn't split into `layout` and `burn` stages. The stored areas give the preview what a layout stage would have, and burning is already a manual action.
+
+**Client** (reworked after the first browser test, 2026-09-17: the first version needed a burn before any preview, a separate Text box tool acting on a proxy rectangle, and a cleaned background chosen by hand; the user asked for WordArt-style lettering floating on the page)
+- `client/studio/text/typesetter.ts` loads the fonts once and builds the lettering plan from the same `typesetPage`: each block's stored area (moved by its offset) or its box. A block not placed yet is laid out in its region box (dimmed) until the Studio places it: the editor calls `place` automatically when blocks lack an area (on open, and after a region moves), once per set of missing blocks.
+- Canvas **Regions | Lettering** modes (L toggles; region tool keys return to Regions). In Lettering mode regions fade and each lettered block is a floating `LetteringObject` (custom Fabric object drawing the vector glyph paths; sharp at any zoom): drag it anywhere to move, handles to resize (the text re-wraps live), the knob to rotate. A plain move is stored as an `offset` (keeps the bubble-shaped wrapping); a resize, or moving a free box, stores a `box`. Each change is an undoable style change, previewed at once. Delete removes the whole region (undoable). Entering Lettering mode switches the background to the cleaned page; in Regions mode the lettering shows over a cleaned background (toggle "Aa").
+- A floating **lettering panel** follows the selected block (double-click or Enter focuses it): the text, drawn live on the page as you type and saved after 600 ms, and the style controls. Clicking a region without lettering selects it so its lettering can be typed.
+- Side panel: a **Lettering** section on each text block and on sound effects given new lettering (same controls); a legend explains blue (text) vs orange (sound effect).
+- The lettering panel can be dragged by its grab bar (it then stays put for every selection until **Follow** re-attaches it) and has a **Delete** button; text and sound-effect cards in the side panel have one too (undoable through the canvas; with a confirmation in Compare view). The side panel collapses to a thin strip for more room (remembered per browser).
+- The menu's Re-render is now **Burn lettering**; there's no separate burn button, since the preview already shows the result.
+- Known approximation: with an explicit box, the preview's default black/white colour comes from the found area's brightness, while the burn measures the box's own background.
+- Tested in-process on a sample page: placing stores areas without burning; the preview built from stored areas gives the same font sizes and lines as the burn, with and without styles, an explicit rotated box, a moved and rotated bubble (offset) and SFX lettering.
+
 ## 11. Adopt from manga-reader / avoid
 
 **Adopt** (`/home/decky/Documents/funs/bun/manga-reader`):
