@@ -100,6 +100,10 @@ const TOOL_HINTS: Record<Tool, string> = {
 
 const LETTERING_HINT = "Drag lettering to move it, handles to resize, the top knob to rotate; double-click to edit the text";
 
+/** Lettering panel size: 300 wide; its content scrolls past 340, plus the grab bar and borders. */
+const PANEL_WIDTH = 300;
+const PANEL_OUTER_HEIGHT = 372;
+
 /** Lettering selection colour (violet, distinct from text/sfx regions). */
 const LETTERING_COLOR = "#a78bfa";
 
@@ -1102,7 +1106,7 @@ export function PageCanvas({
       : [new Point(block.x, block.y), new Point(block.x + block.w, block.y + block.h)];
     const screen = corners.map((p) => util.transformPoint(p, canvas.viewportTransform));
     const xs = screen.map((p) => p.x), ys = screen.map((p) => p.y);
-    const panelWidth = 300, panelHeight = 360, gap = 12;
+    const panelWidth = PANEL_WIDTH, panelHeight = PANEL_OUTER_HEIGHT, gap = 12;
     const left = Math.min(Math.max(8, (Math.min(...xs) + Math.max(...xs)) / 2 - panelWidth / 2), Math.max(8, host.clientWidth - panelWidth - 8));
     const below = Math.max(...ys) + gap;
     const top = below + panelHeight <= host.clientHeight ? below : Math.max(8, Math.min(...ys) - gap - panelHeight);
@@ -1121,8 +1125,9 @@ export function PageCanvas({
     const drag = panelDragRef.current;
     const host = panelHostRef.current;
     if (!drag || !host) return;
-    const left = Math.min(Math.max(0, drag.left + e.clientX - drag.x), Math.max(0, host.clientWidth - 300));
-    const top = Math.min(Math.max(0, drag.top + e.clientY - drag.y), Math.max(0, host.clientHeight - 40));
+    // Kept fully inside the canvas area (it clips), so the panel's bottom controls stay reachable
+    const left = Math.min(Math.max(0, drag.left + e.clientX - drag.x), Math.max(0, host.clientWidth - PANEL_WIDTH));
+    const top = Math.min(Math.max(0, drag.top + e.clientY - drag.y), Math.max(0, host.clientHeight - PANEL_OUTER_HEIGHT));
     setPanelPin({ left: Math.round(left), top: Math.round(top) });
   };
   const endPanelDrag = () => {
