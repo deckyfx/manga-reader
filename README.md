@@ -2,25 +2,28 @@
 
 > Forked from [brian-girko/image-reader](https://github.com/brian-girko/image-reader) — original OCR Image Reader extension by Brian Girko, licensed under MPL 2.0.
 
-A browser extension (MV3) that lets you select any region on screen and extract text via OCR. Supports two engines: **Tesseract.js** (runs entirely in-browser, no server needed) or a **self-hosted C# server** for GPU-accelerated OCR with optional translation.
+A browser extension (MV3) that lets you select any region on screen and extract text via OCR. Supports two engines: **Tesseract.js** (runs entirely in-browser, no server needed) or a **self-hosted Bun server** with ONNX OCR, translation, whole-page manga translation and a Studio for editing translated pages.
 
 ## Features
 
 - Click the toolbar button, drag to select a region — text appears instantly
-- **Dual engine**: Tesseract.js (offline, in-browser) or self-hosted server (faster, optional DeepL translation)
+- **Dual engine**: Tesseract.js (offline, in-browser) or the self-hosted server (faster, optional DeepL translation)
 - **Japanese vertical text** support via `jpn_vert` traineddata (reads columns right-to-left)
 - Per-word dictionary panel (Jisho or local Jitendex) with romaji and JLPT tags
 - Draggable, resizable result panel
 - DeepL translation (client-side or server-side)
+- **Page translation**: detect text, OCR, translate, clean the lettering and typeset the translation, replacing the image in the open tab
+- **Studio** (`/studio`): edit detected regions, paint the text mask, re-clean areas, and move / resize / rotate / restyle the lettering with a live preview that matches the final image
 - Manifest V3 — works on Chrome, Edge, and Firefox
 
 ## Project Structure
 
 ```
+server/        Self-hosted server: OCR, translation, page pipeline, Studio (Bun + Elysia + ONNX)
 extension/     Browser extension (TypeScript + Bun)
-server/        Self-hosted OCR + translation server (ASP.NET Core + ONNX)
 desktop/       Desktop companion app (Avalonia / C#)
-WebOcr.slnx    .NET 10 solution file
+docs/          Studio / reader plan
+WebOcr.slnx    .NET solution for the desktop app
 ```
 
 ## Extension Setup
@@ -49,26 +52,28 @@ Supported languages include Japanese (`jpn`), Japanese vertical (`jpn_vert`), En
 
 ### Self-hosted Server Engine
 
-Requires running the C# server locally. On first run it automatically downloads all required ONNX models (~500 MB) and the Jitendex dictionary.
+Requires the Bun server running locally. On first run it downloads the ONNX models it needs (OCR, translation, text detection, inpainting, bubble detection) and the Jitendex dictionary.
 
 ```bash
 cd server
-dotnet run
+bun install
+bun run dev
 ```
 
-Default address: `http://localhost:3579`
+Default address: `http://localhost:3579` (Studio at `http://localhost:3579/studio`). Put settings such as `DEEPL_API_KEY` in `server/.env`.
 
 In extension settings, choose the **Remote Server** tab, enter the server URL, click **Test Connection**, then save.
 
+To build a single executable: `bun run build` (outputs `server/app`).
+
 ## Server Features
 
-- ONNX-based OCR via Manga-OCR (`mayocream/manga-ocr-onnx`)
-- Local Japanese→English translation via Opus-MT (`Xenova/opus-mt-ja-en`)
-- Jitendex dictionary with Jisho HTTP fallback
-- NMeCab morphological tokenization
-- Optional DeepL translation (requires `DEEPL_API_KEY`)
-- `/health` endpoint reports readiness (`starting` / `ok` / `degraded`)
-- Background inference queue — HTTP server accepts requests immediately while models load
+- ONNX OCR (Manga-OCR) and local Japanese→English translation (Opus-MT), with optional DeepL
+- Jitendex dictionary lookups with Kuromoji tokenization (`/analyze`)
+- Page pipeline: comic text detection, block OCR and translation, LaMa inpainting to clean lettering, bubble-aware typesetting
+- Studio for correcting and re-lettering pages, with per-stage state, partial re-runs, publish history and rollback
+- SQLite (Drizzle) with migrations embedded in the build
+- `/health` reports readiness while models load
 
 ## Desktop App
 

@@ -1,9 +1,9 @@
 /**
  * Typed client for the web-ocr Bun server via Eden Treaty. `Api` comes from the declarations the server
- * emits (`bun run --cwd ../server-bun types:api`), so request and response shapes are checked at build time.
+ * emits (`bun run --cwd ../server types:api`), so request and response shapes are checked at build time.
  */
 import { treaty } from "@elysiajs/eden";
-import type { Api, PageJobEvent, PageLiveEvent } from "../../server-bun/types/src/api";
+import type { Api, PageJobEvent, PageLiveEvent } from "../../server/types/src/api";
 
 export type { PageJobEvent, PageLiveEvent };
 

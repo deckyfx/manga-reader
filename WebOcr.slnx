@@ -2,7 +2,4 @@
   <Folder Name="/desktop/">
     <Project Path="desktop/WebOcrDesktop.csproj" />
   </Folder>
-  <Folder Name="/server/">
-    <Project Path="server/server-csharp.csproj" />
-  </Folder>
 </Solution>

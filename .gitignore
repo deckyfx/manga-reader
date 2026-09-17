@@ -1,10 +1,7 @@
-# ── C# / .NET ────────────────────────────────────────────────────────────────
+# ── C# / .NET (desktop) ───────────────────────────────────────────────────────
 desktop/bin/
 desktop/obj/
 desktop/publish/
-server/bin/
-server/obj/
-server/publish/
 *.user
 
 # ── Rust ──────────────────────────────────────────────────────────────────────
@@ -24,9 +21,6 @@ dist/
 .env.*.local
 
 # ── Project-specific ──────────────────────────────────────────────────────────
-server/models/
-server/ocr.db
-server/ocr.db-wal
 extension/selfhost-ocr.tar.gz
 
 # ── OS ────────────────────────────────────────────────────────────────────────
@@ -40,9 +34,7 @@ docs/cr-workflow.md
 TODO.txt
 
 # ── etc ────────────────────────────────────────────────────────────────────────
-server/server
 mighty-wiggling-cascade.md
 server/data/
-server/result.txt
 manga-reader/
 extension/selfhost-ocr.zip

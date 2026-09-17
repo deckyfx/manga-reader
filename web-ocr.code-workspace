@@ -5,10 +5,6 @@
       "name": "web-ocr"
     },
     {
-      "path": "../manga-reader",
-      "name": "manga-reader"
-    },
-    {
       "path": "manga-reader",
       "name": "manga-reader (reference)"
     }
@@ -19,7 +15,7 @@
       "manga-reader": true
     },
 
-    // C# / .NET
+    // C# / .NET (desktop app)
     "dotnet.defaultSolution": "WebOcr.slnx",
     "omnisharp.enableEditorConfigSupport": true,
     "csharp.semanticHighlighting.enabled": true,
@@ -59,9 +55,7 @@
       "**/bin": true,
       "**/obj": true,
       "**/dist": true,
-      "server/data": true,
-      "server/wwwroot/js": true,
-      "server/Migrations": true
+      "server/data": true
     },
     "files.watcherExclude": {
       "**/node_modules/**": true,
@@ -70,8 +64,7 @@
       "server/data/**": true
     },
 
-    // Tailwind: server ClientApp uses Tailwind
-    "tailwindCSS.experimental.configFile": "server/ClientApp/tailwind.config.ts",
+    // Tailwind v4 (server/client imports it from CSS; no config file)
     "tailwindCSS.includeLanguages": {
       "typescript": "javascript",
       "typescriptreact": "javascript"
@@ -91,11 +84,12 @@
   },
   "extensions": {
     "recommendations": [
-      // C# / .NET
+      // C# / .NET (desktop app)
       "ms-dotnettools.csdevkit",
       "ms-dotnettools.csharp",
       "ms-dotnettools.vscode-dotnet-runtime",
-      // TypeScript / JavaScript
+      // Bun / TypeScript / JavaScript
+      "oven.bun-vscode",
       "dbaeumer.vscode-eslint",
       "esbenp.prettier-vscode",
       // Styling
