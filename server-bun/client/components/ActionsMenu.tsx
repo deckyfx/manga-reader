@@ -34,10 +34,10 @@ export function ActionsMenu({ actions, label = "Actions" }: { actions: MenuActio
 
   const attention = actions.some((a) => a.attention && !a.unavailable);
   const pending = actions.some((a) => a.pending);
-  const enabled = actions.filter((a) => !a.unavailable);
 
+  // Unavailable items stay focusable (aria-disabled), so keyboard users can reach them and read why they can't run
   const focusItem = (index: number) => {
-    const target = enabled[(index + enabled.length) % enabled.length];
+    const target = actions[(index + actions.length) % actions.length];
     if (target) itemRefs.current.get(target.key)?.focus();
   };
 
@@ -46,9 +46,9 @@ export function ActionsMenu({ actions, label = "Actions" }: { actions: MenuActio
     if (refocus) triggerRef.current?.focus();
   };
 
-  // Focus the first available item when the menu opens
+  // Focus the first action that can run (or the first item) when the menu opens
   useEffect(() => {
-    if (open) focusItem(0);
+    if (open) focusItem(Math.max(0, actions.findIndex((a) => !a.unavailable)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -66,11 +66,14 @@ export function ActionsMenu({ actions, label = "Actions" }: { actions: MenuActio
     if (e.key === "ArrowDown" && !open) {
       e.preventDefault();
       setOpen(true);
+    } else if (e.key === "Escape" && open) {
+      e.preventDefault();
+      close(true);
     }
   };
 
   const onMenuKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const current = enabled.findIndex((a) => itemRefs.current.get(a.key) === document.activeElement);
+    const current = actions.findIndex((a) => itemRefs.current.get(a.key) === document.activeElement);
     if (e.key === "ArrowDown") focusItem(current + 1);
     else if (e.key === "ArrowUp") focusItem(current < 0 ? -1 : current - 1);
     else if (e.key === "Home") focusItem(0);
@@ -119,12 +122,13 @@ export function ActionsMenu({ actions, label = "Actions" }: { actions: MenuActio
                     else itemRefs.current.delete(action.key);
                   }}
                   role="menuitem"
-                  disabled={disabled}
+                  aria-disabled={disabled || undefined}
                   onClick={() => {
+                    if (disabled) return;
                     close(true);
                     action.onSelect();
                   }}
-                  className={`w-full flex items-start gap-2.5 px-3 py-2 text-left text-sm outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={`w-full flex items-start gap-2.5 px-3 py-2 text-left text-sm outline-none aria-disabled:opacity-50 aria-disabled:cursor-not-allowed ${
                     action.danger ? "text-red-300 hover:bg-red-900/40 focus:bg-red-900/40" : "text-gray-200 hover:bg-gray-800 focus:bg-gray-800"
                   }`}
                 >
