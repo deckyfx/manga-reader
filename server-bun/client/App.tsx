@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Routes, Route } from "react-router";
+import { BrowserRouter, Navigate, Routes, Route, useParams } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConfirmProvider } from "./components/ConfirmDialog";
 import { Layout } from "./components/Layout";
@@ -24,7 +24,7 @@ export function App() {
             <Route index element={<Navigate to="/home" replace />} />
             <Route path="home" element={<HomePage />} />
             <Route path="studio" element={<StudioPagesPage />} />
-            <Route path="studio/pages/:id" element={<StudioPageEditor />} />
+            <Route path="studio/pages/:id" element={<StudioPageEditorRoute />} />
             <Route path="read" element={<ReadPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
@@ -33,4 +33,13 @@ export function App() {
       </ConfirmProvider>
     </QueryClientProvider>
   );
+}
+
+/**
+ * The page editor keyed by page id: moving to another page mounts a fresh editor, so nothing queued or pending for the
+ * previous page (debounced saves, canvas history, placement) can act on the new one.
+ */
+function StudioPageEditorRoute() {
+  const { id = "" } = useParams();
+  return <StudioPageEditor key={id} />;
 }

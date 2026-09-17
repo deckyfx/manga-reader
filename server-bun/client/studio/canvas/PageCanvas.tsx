@@ -321,19 +321,24 @@ export function PageCanvas({
         style: currentStyle(id),
       },
     };
+    // The deletion belongs to this page: queued work must not delete or recreate a block on a page opened meanwhile
+    const pageId = live.current.pageId;
     let current = id;
     perform({
       label: "Delete region",
       redo: async () => {
-        live.current.onDetail(await deleteBlock(live.current.pageId, history.resolve(current)));
+        const detail = await deleteBlock(pageId, history.resolve(current));
+        if (live.current.pageId !== pageId) return;
+        live.current.onDetail(detail);
         live.current.onSelect(null);
       },
       undo: async () => {
         // One request brings back geometry, include flag, text and style together, so a failure can't leave a blank region
-        const detail = await createBlock(live.current.pageId, snapshot.kind, snapshot.geometry, snapshot.content);
+        const detail = await createBlock(pageId, snapshot.kind, snapshot.geometry, snapshot.content);
         const restored = newestId(detail);
         history.alias(history.resolve(current), restored);
         current = restored;
+        if (live.current.pageId !== pageId) return;
         live.current.onDetail(detail);
         live.current.onSelect(restored);
       },

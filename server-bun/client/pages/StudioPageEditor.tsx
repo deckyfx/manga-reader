@@ -134,7 +134,8 @@ export function StudioPageEditor() {
   /** Deletes a region: undoable through the canvas when it's open, otherwise after a confirmation. */
   const removeBlock = async (blockId: number) => {
     if (canvasHandle.current) {
-      canvasHandle.current.deleteBlock(blockId);
+      // After pending text saves, so the undo snapshot holds the saved text rather than the old one
+      afterSaves(`delete:${blockId}`, () => canvasHandle.current?.deleteBlock(blockId));
       return;
     }
     const confirmed = await confirm({
@@ -196,7 +197,7 @@ export function StudioPageEditor() {
     if (!current.page.has_result && !current.stages.some((stage) => stage.stage === "clean_text")) return;
     const missing = current.blocks.filter((b) => (b.kind === "text" || b.kind === "sfx") && !b.area);
     if (missing.length === 0) return;
-    const signature = JSON.stringify(missing.map((b) => [b.id, b.x, b.y, b.w, b.h]));
+    const signature = JSON.stringify([id, missing.map((b) => [b.id, b.x, b.y, b.w, b.h])]);
     if (placeTried.current === signature) return;
     const timer = setTimeout(() => {
       // Marked before the request so an in-flight placement isn't started twice; cleared on failure so it's retried
@@ -772,7 +773,14 @@ function useDebouncedSave<T>(
   const [error, setError] = useState<string | null>(null);
   const latest = useRef({ save, trackSave, onError });
   latest.current = { save, trackSave, onError };
-  const pending = useRef<{ value: T; resolve: () => void; reject: (err: unknown) => void } | null>(null);
+  /** The value to save with the callbacks it was scheduled with, so it always goes to its original target. */
+  const pending = useRef<{
+    value: T;
+    save: (value: T) => Promise<unknown>;
+    onError?: (err: unknown) => void;
+    resolve: () => void;
+    reject: (err: unknown) => void;
+  } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlight = useRef(false);
   /** A flush was asked for while a save was running: run it when that save ends. */
@@ -790,7 +798,7 @@ function useDebouncedSave<T>(
     pending.current = null;
     inFlight.current = true;
     setSaving(true);
-    latest.current.save(next.value)
+    next.save(next.value)
       .then(
         () => {
           setError(null);
@@ -798,7 +806,7 @@ function useDebouncedSave<T>(
         },
         (err: unknown) => {
           setError(err instanceof Error ? err.message : String(err));
-          latest.current.onError?.(err);
+          next.onError?.(err);
           next.reject(err);
         },
       )
@@ -816,12 +824,14 @@ function useDebouncedSave<T>(
   const schedule = (value: T) => {
     if (pending.current) {
       pending.current.value = value;
+      pending.current.save = latest.current.save;
+      pending.current.onError = latest.current.onError;
     } else {
       let settle: { resolve: () => void; reject: (err: unknown) => void } = { resolve: () => {}, reject: () => {} };
       const promise = new Promise<void>((resolve, reject) => {
         settle = { resolve, reject };
       });
-      pending.current = { value, ...settle };
+      pending.current = { value, save: latest.current.save, onError: latest.current.onError, ...settle };
       latest.current.trackSave(promise);
     }
     if (timer.current) clearTimeout(timer.current);
