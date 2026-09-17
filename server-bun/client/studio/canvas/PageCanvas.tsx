@@ -817,6 +817,8 @@ export function PageCanvas({
 
     return () => {
       resize.disconnect();
+      // A live re-wrap queued during a resize must not run against the disposed canvas
+      cancelAnimationFrame(relayoutFrame);
       actionsRef.current = null;
       canvasRef.current = null;
       brushCursorRef.current = null;
