@@ -255,6 +255,8 @@ export function PageCanvas({
         setError(err instanceof Error ? err.message : String(err));
         history.clear();
         for (const entry of entriesRef.current.values()) entry.key = "";
+        // The reload brings back the server's styles: pending canvas baselines no longer apply
+        styleBaselineRef.current.clear();
         live.current.onReload();
         // A failed layer save leaves the overlay ahead of the server: show what the server has
         setLayersNonce((n) => n + 1);
@@ -401,11 +403,11 @@ export function PageCanvas({
 
   /** Moves, resizes or rotates a block's text box: previewed at once, saved as an undoable style change. */
   /**
-   * The latest style each block was given on the canvas, ahead of `blocks` until the preview renders: a second quick
-   * move must record the first move's result as its "before", or undoing it would skip the first move.
+   * The latest style each block was given on the canvas, kept until that change's own save lands: a second quick move
+   * must record the first move's result as its "before", even if a page refresh brings back the older style meanwhile
+   * (the editor is remounted per page, so entries never outlive their page).
    */
   const styleBaselineRef = useRef(new Map<number, TextStyle | null>());
-  useEffect(() => styleBaselineRef.current.clear(), [blocks]);
 
   /** The block's current lettering style, including canvas changes not rendered into `blocks` yet. */
   const currentStyle = useCallback((id: number): TextStyle | null => {
@@ -424,6 +426,8 @@ export function PageCanvas({
       const target = history.resolve(id);
       if (live.current.pageId === pageId) live.current.onStylePreview(target, style);
       const detail = await updateBlock(pageId, target, { style });
+      // Saved: the server now has this style, so the block's own value is current again
+      if (styleBaselineRef.current.get(id) === style) styleBaselineRef.current.delete(id);
       if (live.current.pageId === pageId) live.current.onDetail(detail);
     };
     perform({ label: "Move, resize or rotate text", redo: apply(after), undo: apply(before) });
@@ -854,7 +858,7 @@ export function PageCanvas({
       .then(() => {
         if (controller.signal.aborted || canvasRef.current !== canvas) return;
         mask.attach(canvas);
-        mask.setVisible(live.current.showMask || live.current.tool === "brush");
+        mask.setVisible(live.current.mode === "regions" && (live.current.showMask || live.current.tool === "brush"));
         maskRef.current = mask;
         canvas.requestRenderAll();
       })
@@ -937,11 +941,11 @@ export function PageCanvas({
     updatePanelRef.current();
   }, [lettering, mode, showTextLayer, disabled, selectedId, createRegion, deleteRegion, reshapeRegion, paintStroke, restyle]);
 
-  // The overlay shows while painting, or when asked for
+  // The overlay shows while painting, or when asked for, and only in Regions mode
   useEffect(() => {
-    maskRef.current?.setVisible(showMask || tool === "brush");
+    maskRef.current?.setVisible(mode === "regions" && (showMask || tool === "brush"));
     canvasRef.current?.requestRenderAll();
-  }, [showMask, tool]);
+  }, [showMask, tool, mode]);
 
   // Regions: redraw only blocks whose geometry changed; keep the selection in sync with the panel
   useEffect(() => {
