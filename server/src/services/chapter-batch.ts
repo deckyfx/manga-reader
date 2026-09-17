@@ -59,11 +59,11 @@ export async function startChapterRun(chapterId: number, options: { force: boole
   const current = runs.get(chapterId);
   if (current?.running) return null;
 
-  const pages = await pagesToRun(chapterId, options.force);
+  // Registered before the first await: a second request now sees a running state and is refused
   const state: ChapterRunState = {
     chapterId,
     running: true,
-    total: pages.length,
+    total: 0,
     done: 0,
     failed: 0,
     currentPageId: null,
@@ -72,6 +72,17 @@ export async function startChapterRun(chapterId: number, options: { force: boole
     error: null,
   };
   runs.set(chapterId, state);
+
+  let pages: Page[];
+  try {
+    pages = await pagesToRun(chapterId, options.force);
+  } catch (err) {
+    state.running = false;
+    state.finishedAt = new Date().toISOString();
+    state.error = err instanceof Error ? err.message : String(err);
+    return state;
+  }
+  state.total = pages.length;
 
   void (async () => {
     for (const page of pages) {

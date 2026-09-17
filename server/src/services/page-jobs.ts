@@ -69,11 +69,12 @@ async function failJob(id: string, err: unknown): Promise<void> {
 }
 
 /** Removes a page's pipeline files before a fresh run; its publish history (`history/`) is kept. */
-async function clearPipelineFiles(id: string): Promise<void> {
+async function clearPipelineFiles(id: string, keepOriginal = false): Promise<void> {
   const dir = pageDir(id);
   await mkdir(dir, { recursive: true });
+  const kept = new Set(["history", ...(keepOriginal ? ["original.png"] : [])]);
   for (const entry of await readdir(dir)) {
-    if (entry !== "history") await rm(join(dir, entry), { recursive: true, force: true });
+    if (!kept.has(entry)) await rm(join(dir, entry), { recursive: true, force: true });
   }
 }
 
@@ -122,7 +123,7 @@ async function runJob(id: string, page: Buffer, options: SubmitPageOptions): Pro
  * and the global queue. Returns once it's queued; `done` resolves when the run has finished (used by batch runs).
  * Releases the pending-page slot when the run ends.
  */
-async function startRun(id: string, page: Buffer, options: SubmitPageOptions): Promise<{ done: Promise<void> }> {
+async function startRun(id: string, page: Buffer, options: SubmitPageOptions, keepOriginal = false): Promise<{ done: Promise<void> }> {
   translationJobs.emit(id, { type: "log", stage: "queued", message: "Queued for translation", progress: 0 });
   // Mark the page queued first, so Studio mutations that start from now on are refused
   await PageStore.update(id, { status: "queued", errorMessage: null });
@@ -130,7 +131,7 @@ async function startRun(id: string, page: Buffer, options: SubmitPageOptions): P
   // holding the lock finishes before this run clears the page's files, stages and blocks
   const done = withPageLock(id, async () => {
     try {
-      await clearPipelineFiles(id);
+      await clearPipelineFiles(id, keepOriginal);
     } catch (err) {
       await failJob(id, err);
       return;
@@ -174,9 +175,16 @@ export async function runStoredPage(id: string, options: SubmitPageOptions): Pro
   try {
     const page = Buffer.from(await Bun.file(original).arrayBuffer());
     translationJobs.create(id, options.cleanSfx);
-    const { done } = await startRun(id, page, options);
-    queued = true;
-    return { ok: true, job_id: id, done };
+    try {
+      // The stored original is this page's only copy (imported pages): it stays while the run rebuilds the rest
+      const { done } = await startRun(id, page, options, true);
+      queued = true;
+      return { ok: true, job_id: id, done };
+    } catch (err) {
+      // Never leave the reserved job "queued": it would make every later request for this page wait on it
+      await failJob(id, err);
+      throw err;
+    }
   } finally {
     if (!queued) pendingPages--;
   }

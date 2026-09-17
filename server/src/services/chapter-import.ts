@@ -52,9 +52,40 @@ export function naturalCompare(a: string, b: string): number {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }) || (a < b ? -1 : a > b ? 1 : 0);
 }
 
-function unzipArchive(bytes: Uint8Array): Promise<Unzipped> {
+/**
+ * Expands only the image entries of an archive, and only while the import's size budget lasts: the filter runs on each
+ * entry's declared uncompressed size, so an archive that would inflate past the cap is never decompressed.
+ */
+function unzipImages(bytes: Uint8Array, budget: { remaining: number }, skipped: { name: string; reason: string }[]): Promise<Unzipped> {
+  let ignored = 0;
   return new Promise((resolve, reject) => {
-    unzip(bytes, (err, files) => (err ? reject(err) : resolve(files)));
+    unzip(
+      bytes,
+      {
+        filter: (file) => {
+          if (isJunk(file.name)) return false;
+          if (!IMAGE_EXTENSIONS.test(file.name)) {
+            ignored++;
+            return false;
+          }
+          if (file.originalSize > MAX_IMAGE_BYTES) {
+            skipped.push({ name: file.name, reason: "image too large (max 15 MB)" });
+            return false;
+          }
+          if (file.originalSize > budget.remaining) {
+            skipped.push({ name: file.name, reason: "import too large" });
+            return false;
+          }
+          budget.remaining -= file.originalSize;
+          return true;
+        },
+      },
+      (err, files) => {
+        if (err) return reject(err);
+        if (ignored > 0) skipped.push({ name: "archive", reason: `${ignored} non-image entr${ignored === 1 ? "y" : "ies"} ignored` });
+        resolve(files);
+      },
+    );
   });
 }
 
@@ -65,31 +96,22 @@ function unzipArchive(bytes: Uint8Array): Promise<Unzipped> {
 async function collectImages(sources: readonly ImportSource[]): Promise<ImportReport & { images: ImportSource[] }> {
   const images: ImportSource[] = [];
   const skipped: { name: string; reason: string }[] = [];
-  let archiveBytes = 0;
+  const budget = { remaining: MAX_ARCHIVE_BYTES };
 
   for (const source of sources) {
     if (ARCHIVE_EXTENSIONS.test(source.name)) {
       let entries: Unzipped;
       try {
-        entries = await unzipArchive(source.bytes);
+        entries = await unzipImages(source.bytes, budget, skipped);
       } catch (err) {
         log.warn({ err, archive: source.name }, "Archive could not be read");
         skipped.push({ name: source.name, reason: "archive could not be read" });
         continue;
       }
-      const names = Object.keys(entries).filter((name) => !isJunk(name) && IMAGE_EXTENSIONS.test(name)).sort(naturalCompare);
-      for (const name of names) {
+      for (const name of Object.keys(entries).sort(naturalCompare)) {
         const bytes = entries[name];
-        if (!bytes || bytes.byteLength === 0) continue;
-        archiveBytes += bytes.byteLength;
-        if (archiveBytes > MAX_ARCHIVE_BYTES) {
-          skipped.push({ name, reason: "import too large" });
-          continue;
-        }
-        images.push({ name, bytes });
+        if (bytes && bytes.byteLength > 0) images.push({ name, bytes });
       }
-      const ignored = Object.keys(entries).filter((name) => !isJunk(name) && !IMAGE_EXTENSIONS.test(name));
-      if (ignored.length > 0) skipped.push({ name: source.name, reason: `${ignored.length} non-image entr${ignored.length === 1 ? "y" : "ies"} ignored` });
       continue;
     }
     if (!IMAGE_EXTENSIONS.test(source.name)) {

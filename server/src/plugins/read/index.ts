@@ -196,10 +196,12 @@ export const readPlugin = new Elysia({ prefix: "/read/api" })
     async ({ body, status }) => {
       if (!(await VolumeStore.findById(body.volume_id))) return status(404, { error: "volume not found" });
       const existing = await VolumeStore.listChapters(body.volume_id);
+      // Append after the highest order in use, so deleting a chapter can't make two share a position
+      const nextOrder = existing.reduce((max, chapter) => Math.max(max, chapter.sortOrder), 0) + 1;
       const chapter = await VolumeStore.insertChapter({
         volumeId: body.volume_id,
         title: body.title,
-        sortOrder: body.sort_order ?? existing.length + 1,
+        sortOrder: body.sort_order ?? nextOrder,
       });
       return toChapter(chapter, 0);
     },
@@ -297,7 +299,8 @@ export const readPlugin = new Elysia({ prefix: "/read/api" })
       const { bytes, pages, missing } = await exportChapter(params.id);
       if (pages === 0) return status(409, { error: "this chapter has no page images to export" });
       if (missing > 0) log.warn({ chapterId: params.id, missing }, "Exported a chapter with missing page images");
-      const name = chapter.title.replace(/[\\/:*?"<>|]+/g, "_").trim() || `chapter-${chapter.id}`;
+      // Control characters would break (or let someone forge) the Content-Disposition header
+      const name = chapter.title.replace(/[\\/:*?"<>|]+/g, "_").replace(/[\u0000-\u001f\u007f]/g, "").trim() || `chapter-${chapter.id}`;
       return new Response(bytes.buffer as ArrayBuffer, {
         headers: {
           "content-type": "application/zip",
