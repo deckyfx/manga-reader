@@ -984,6 +984,8 @@ export function PageCanvas({
       if (target && active !== target) canvas.setActiveObject(target);
       else if (!target && active) canvas.discardActiveObject();
     }
+    // A region added or redrawn above the lettering must not cover it while the lettering is being edited
+    if (mode === "lettering") for (const obj of letteringRef.current.values()) canvas.bringObjectToFront(obj);
     canvas.requestRenderAll();
   }, [blocks, disabled, selectedId, mode, createRegion, deleteRegion, reshapeRegion, paintStroke, restyle]);
 
@@ -1095,6 +1097,15 @@ export function PageCanvas({
   updatePanelRef.current = () => {
     const canvas = canvasRef.current;
     const host = panelHostRef.current;
+    // A pinned panel is re-clamped when the canvas area shrinks (window or side panel resize), so it stays reachable
+    if (host) {
+      setPanelPin((pin) => {
+        if (!pin) return pin;
+        const left = Math.min(pin.left, Math.max(0, host.clientWidth - PANEL_WIDTH));
+        const top = Math.min(pin.top, Math.max(0, host.clientHeight - PANEL_OUTER_HEIGHT));
+        return left === pin.left && top === pin.top ? pin : { left, top };
+      });
+    }
     const block = selectedId !== null ? blocks.find((b) => b.id === selectedId) : undefined;
     if (!canvas || !host || mode !== "lettering" || !block || !renderLetteringPanel || (block.kind !== "text" && block.kind !== "sfx")) {
       setPanelPosition((current) => (current === null ? current : null));
