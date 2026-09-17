@@ -40,6 +40,8 @@ export interface TextStyle {
   rotation?: number;
   /** Explicit text box in page pixels, used instead of the detected bubble interior. */
   box?: Box;
+  /** Moves the detected area by this many page pixels, keeping its shape; ignored with an explicit box. */
+  offset?: { x: number; y: number };
 }
 
 /** Where text may be placed: a mask local to `bound` (1 = allowed). */
@@ -70,6 +72,14 @@ export interface TextLayout {
   lines: LayoutLine[];
   /** False when the text overflowed its area (auto: even at the minimum size; fixed: at the chosen size). */
   fits: boolean;
+}
+
+/** A layout's glyph outlines (local to the area's bound) with the colours to draw them in: stroke first, then fill. */
+export interface LetteringPaths {
+  d: string;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
 }
 
 /** Text rendered as a transparent SVG placed at (x, y) on the page. */
@@ -166,6 +176,15 @@ export function decodeMask(runs: readonly number[], length: number): Uint8Array 
   });
   return mask;
 }
+
+/** The same area moved by `offset` (the mask keeps its shape). */
+export function shiftArea(area: TextArea, offset?: { x: number; y: number }): TextArea {
+  if (!offset || (!offset.x && !offset.y)) return area;
+  return { ...area, bound: { ...area.bound, x: area.bound.x + offset.x, y: area.bound.y + offset.y } };
+}
+
+/** Largest automatic font size for a page (page height / 40). */
+export const pageMaxFontSize = (pageHeight: number): number => Math.round(pageHeight / PAGE_SIZE_DIVISOR);
 
 export function storedArea(area: TextArea): StoredArea {
   return { bound: area.bound, dark: area.dark, mask: encodeMask(area.mask) };
@@ -405,22 +424,32 @@ export class Typesetter {
     return null;
   }
 
+  /** The layout's glyph outlines and resolved colours, or null when there is nothing to draw. */
+  paths(layout: TextLayout, area: TextArea, style: TextStyle = {}): LetteringPaths | null {
+    if (layout.lines.length === 0 || layout.fontSize <= 0) return null;
+    const font = this.fontFor(style);
+    const d = layout.lines.map((line) => font.getPath(line.text, line.x, line.baseline, layout.fontSize).toPathData(2)).join(" ").trim();
+    if (!d) return null;
+    return {
+      d,
+      fill: safeColor(style.fill, area.dark ? "#ffffff" : "#000000"),
+      stroke: safeColor(style.stroke, area.dark ? "#000000" : "#ffffff"),
+      strokeWidth: Math.max(0, style.stroke_width ?? Math.max(2, Math.round(layout.fontSize * STROKE_RATIO))),
+    };
+  }
+
   /**
-   * The layout as a transparent SVG patch: outline stroke under the fill for readability, rotated around the area's
+   * Lettering as a transparent SVG patch: outline stroke under the fill for readability, rotated around the area's
    * centre. The patch covers the rotated area plus room for the stroke, clipped to `page` when given; null when it
    * has nothing to draw.
    */
   renderPatch(layout: TextLayout, area: TextArea, style: TextStyle = {}, page?: { width: number; height: number }): TextPatch | null {
-    if (layout.lines.length === 0 || layout.fontSize <= 0) return null;
-    const font = this.fontFor(style);
-    const fill = safeColor(style.fill, area.dark ? "#ffffff" : "#000000");
-    const stroke = safeColor(style.stroke, area.dark ? "#000000" : "#ffffff");
-    const strokeWidth = Math.max(0, style.stroke_width ?? Math.max(2, Math.round(layout.fontSize * STROKE_RATIO)));
-    const d = layout.lines.map((line) => font.getPath(line.text, line.x, line.baseline, layout.fontSize).toPathData(2)).join(" ").trim();
-    if (!d) return null;
+    const paths = this.paths(layout, area, style);
+    if (!paths) return null;
+    const { d, fill, stroke, strokeWidth } = paths;
 
     const { bound } = area;
-    const rotation = ((((style.rotation ?? 0) + 180) % 360) + 360) % 360 - 180;
+    const rotation = normalizeRotation(style.rotation ?? 0);
     const radians = (rotation * Math.PI) / 180;
     // Room for the stroke, and for lines that spill past the area when the text doesn't fit
     const spill = layout.fits ? 0 : layout.fontSize * 2;
@@ -450,6 +479,11 @@ export class Typesetter {
   }
 }
 
+/** Degrees folded into [-180, 180). */
+export function normalizeRotation(degrees: number): number {
+  return ((((degrees + 180) % 360) + 360) % 360) - 180;
+}
+
 /** One block to letter: its translation, where it goes, and its style. */
 export interface TypesetEntry {
   id: number;
@@ -463,7 +497,33 @@ export interface TypesetBlock {
   layout: TextLayout;
   /** Largest size the block could take on its own (its fixed size when set). */
   bestFontSize: number;
+  paths: LetteringPaths | null;
   patch: TextPatch | null;
+}
+
+/**
+ * Letters one block given the page's shared size: the block's own best size (at most the page cap) limits an
+ * automatic size, a fixed size is kept. Null when the area has no room.
+ */
+export function typesetBlock(
+  typesetter: Typesetter,
+  entry: TypesetEntry,
+  page: { width: number; height: number },
+  pageFontSize: number,
+  bestFontSize?: number,
+): TypesetBlock | null {
+  const maxFontSize = pageMaxFontSize(page.height);
+  const best = bestFontSize ?? entry.style.font_size ?? typesetter.layout(entry.text, entry.area, maxFontSize, entry.style).fontSize;
+  if (best <= 0) return null;
+  const cap = entry.style.font_size === undefined ? Math.min(pageFontSize, best) : maxFontSize;
+  const layout = typesetter.layout(entry.text, entry.area, cap, entry.style);
+  return {
+    id: entry.id,
+    layout,
+    bestFontSize: best,
+    paths: typesetter.paths(layout, entry.area, entry.style),
+    patch: typesetter.renderPatch(layout, entry.area, entry.style, page),
+  };
 }
 
 /**
@@ -476,7 +536,7 @@ export function typesetPage(
   entries: readonly TypesetEntry[],
   page: { width: number; height: number },
 ): { pageFontSize: number; blocks: TypesetBlock[]; skipped: number[] } {
-  const maxFontSize = Math.round(page.height / PAGE_SIZE_DIVISOR);
+  const maxFontSize = pageMaxFontSize(page.height);
   const bestSizes = entries.map((e) => e.style.font_size ?? typesetter.layout(e.text, e.area, maxFontSize, e.style).fontSize);
   // Size 0 means the area has no room: it must not drag the page size down to the minimum
   const autoSizes = entries
@@ -487,13 +547,9 @@ export function typesetPage(
   const blocks: TypesetBlock[] = [];
   const skipped: number[] = [];
   for (const [i, entry] of entries.entries()) {
-    if (bestSizes[i] <= 0) {
-      skipped.push(entry.id);
-      continue;
-    }
-    const cap = entry.style.font_size === undefined ? Math.min(pageFontSize, bestSizes[i]) : maxFontSize;
-    const layout = typesetter.layout(entry.text, entry.area, cap, entry.style);
-    blocks.push({ id: entry.id, layout, bestFontSize: bestSizes[i], patch: typesetter.renderPatch(layout, entry.area, entry.style, page) });
+    const result = typesetBlock(typesetter, entry, page, pageFontSize, bestSizes[i]);
+    if (result) blocks.push(result);
+    else skipped.push(entry.id);
   }
   return { pageFontSize, blocks, skipped };
 }

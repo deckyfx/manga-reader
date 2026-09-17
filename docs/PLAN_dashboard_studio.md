@@ -330,23 +330,28 @@ Decided (user): **shared layout** for the preview (D3), all of phase 4 in one PR
 **Shared typesetter** (`src/shared/typeset.ts`, browser-safe: `opentype.js` + `hyphen`, no file system or sharp):
 - `Typesetter.fromBuffers({ regular, bold, italic })` holds the three Anime Ace fonts; `layout(text, area, maxFontSize, style)` and `renderPatch(layout, area, style, page)` produce an SVG patch placed at page coordinates.
 - `typesetPage(typesetter, entries, page)` letters a whole page: blocks on the automatic size share the page size (median of their best sizes, capped at page height / 40); a fixed size is kept as set.
-- Per-block `TextStyle` overrides, all optional: `font` (regular / bold / italic, default bold), `font_size` (fixed px, else auto), `fill` / `stroke` (`#rrggbb`, else black/white by background), `stroke_width` (0 = none, else 14% of the size), `align`, `line_height` (default 1.1), `uppercase` (default true), `rotation` (degrees around the text box centre), `box` (explicit text area instead of the detected bubble interior).
+- Per-block `TextStyle` overrides, all optional: `font` (regular / bold / italic, default bold), `font_size` (fixed px, else auto), `fill` / `stroke` (`#rrggbb`, else black/white by background), `stroke_width` (0 = none, else 14% of the size), `align`, `line_height` (default 1.1), `uppercase` (default true), `rotation` (degrees around the text box centre), `box` (explicit text area instead of the detected bubble interior), `offset` (moves the detected interior, keeping its shape; ignored with a box).
+- `paths()` returns the glyph outlines and resolved colours; the burn's SVG and the Studio's canvas objects both draw them. `typesetBlock()` letters one block at the page's shared size (live re-wrap while resizing).
 - Text that doesn't fit wraps to the area's width and spills over (`fits: false`); rotated and spilling patches are padded and clipped to the page.
 
 **Server**
 - `page_blocks.style_json` and `area_json` (migration `0005_block_text_style`).
-- `render` is the burn. For each block with text it picks the area: the style's `box`, a sound effect's own box, or the flood-filled bubble interior (text blocks; `separateAreas` only among those). It stores the area on the block (bound, dark, run-length mask), then letters through `typesetPage` and composites the patches.
+- `placeText` finds and stores every block's area (bound, dark, run-length mask): the flood-filled bubble interior for text blocks (`separateAreas` among them), a sound effect's own box. `POST /studio/api/pages/:id/place` runs it without burning or marking stages (409 when there's no cleaned page yet).
+- `render` is the burn: it places again, then letters each block with text in its style's `box`, or its found area moved by `offset`, through `typesetPage`, and composites the patches.
 - Sound-effect blocks with text are lettered too: this is how SFX are re-lettered (and a region with cleaning unticked plus text is a free patch). No separate `patch` block kind.
 - `PATCH …/blocks/:idx` takes `style` (replaces the stored overrides; `null` or `{}` resets); a box outside the page is 422; marks only `render` stale. Unknown style fields are dropped by Elysia's body normalisation.
 - Changing a region's geometry clears its stored area (its interior must be found again on the next burn).
 - `GET /studio/api/fonts/:variant` serves the fonts to the Studio.
 - Deviation from the original plan: `render` isn't split into `layout` and `burn` stages. The stored areas give the preview what a layout stage would have, and burning is already a manual action.
 
-**Client**
-- `client/studio/text/typesetter.ts` loads the fonts once and builds the preview from the same `typesetPage`, using each block's stored area (or its box). A text block never rendered, or moved since, isn't previewed until the next burn.
-- Canvas: the lettering preview is drawn as images under the regions, only over a cleaned background (toggle "Aa"). The **Text box** tool (T) selects a lettered region and shows its text box to move, resize and rotate; each change is an undoable style change, previewed at once. Picking the tool switches the background to the cleaned page.
-- Side panel: a **Lettering** section on each text block and on sound effects given new lettering: font, size, fill / outline colour, outline width, line height, alignment, rotation, capitals, bubble area vs custom box, reset. Edits preview instantly and save after 400 ms (page actions wait for the save).
-- Tested in-process on a sample page: the preview built from stored areas gives the same font sizes and lines as the burn, with and without styles, an explicit rotated box and SFX lettering.
+**Client** (reworked after the first browser test, 2026-09-17: the first version needed a burn before any preview, a separate Text box tool acting on a proxy rectangle, and a cleaned background chosen by hand; the user asked for WordArt-style lettering floating on the page)
+- `client/studio/text/typesetter.ts` loads the fonts once and builds the lettering plan from the same `typesetPage`: each block's stored area (moved by its offset) or its box. A block not placed yet is laid out in its region box (dimmed) until the Studio places it: the editor calls `place` automatically when blocks lack an area (on open, and after a region moves), once per set of missing blocks.
+- Canvas **Regions | Lettering** modes (L toggles; region tool keys return to Regions). In Lettering mode regions fade and each lettered block is a floating `LetteringObject` (custom Fabric object drawing the vector glyph paths; sharp at any zoom): drag it anywhere to move, handles to resize (the text re-wraps live), the knob to rotate. A plain move is stored as an `offset` (keeps the bubble-shaped wrapping); a resize, or moving a free box, stores a `box`. Each change is an undoable style change, previewed at once. Delete removes the whole region (undoable). Entering Lettering mode switches the background to the cleaned page; in Regions mode the lettering shows over a cleaned background (toggle "Aa").
+- A floating **lettering panel** follows the selected block (double-click or Enter focuses it): the text, drawn live on the page as you type and saved after 600 ms, and the style controls. Clicking a region without lettering selects it so its lettering can be typed.
+- Side panel: a **Lettering** section on each text block and on sound effects given new lettering (same controls); a legend explains blue (text) vs orange (sound effect).
+- Burn state: an amber **Burn lettering** chip appears in the top bar while the result is behind; the menu's Re-render is now Burn lettering.
+- Known approximation: with an explicit box, the preview's default black/white colour comes from the found area's brightness, while the burn measures the box's own background.
+- Tested in-process on a sample page: placing stores areas without burning; the preview built from stored areas gives the same font sizes and lines as the burn, with and without styles, an explicit rotated box, a moved and rotated bubble (offset) and SFX lettering.
 
 ## 11. Adopt from manga-reader / avoid
 

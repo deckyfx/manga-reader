@@ -9,6 +9,7 @@ import {
   listHistory,
   PAGE_IMAGES,
   pageFileUrl,
+  placeText,
   publishPage,
   rollbackPage,
   runStage,
@@ -26,7 +27,7 @@ import { JobProgress } from "../components/JobProgress";
 import { StatusBadge } from "../components/StatusBadge";
 import { usePageJobEvents } from "../hooks/usePageJobEvents";
 import { PageCanvas } from "../studio/canvas/PageCanvas";
-import { buildTextPreview, useTypesetter } from "../studio/text/typesetter";
+import { buildLettering, relayoutBlock, useTypesetter } from "../studio/text/typesetter";
 
 const isBusy = (status: string | undefined) => status === "queued" || status === "running";
 
@@ -123,13 +124,42 @@ export function StudioPageEditor() {
       current && { ...current, blocks: current.blocks.map((b) => (b.id === blockId ? { ...b, style } : b)) });
   }, [qc, id]);
 
+  /** Shows typed lettering right away; the save that follows replaces it with the server's answer. */
+  const setBlockText = useCallback((blockId: number, text: string) => {
+    qc.setQueryData<StudioPageDetail>(["studio-page", id], (current) =>
+      current && { ...current, blocks: current.blocks.map((b) => (b.id === blockId ? { ...b, translated_text: text } : b)) });
+  }, [qc, id]);
+
   // Lettering as the burn would draw it, from the same shared typesetter the server uses
   const { typesetter, error: typesetterError } = useTypesetter();
   const previewDetail = pageQ.data;
-  const textPreview = useMemo(
-    () => (typesetter && previewDetail ? buildTextPreview(previewDetail, typesetter) : []),
+  const letteringPlan = useMemo(
+    () => (typesetter && previewDetail ? buildLettering(previewDetail, typesetter) : { items: [], pageFontSize: 0 }),
     [typesetter, previewDetail],
   );
+  const relayout = useCallback(
+    (blockId: number, box: { x: number; y: number; w: number; h: number }) =>
+      typesetter && previewDetail ? relayoutBlock(typesetter, previewDetail, blockId, box, letteringPlan.pageFontSize) : null,
+    [typesetter, previewDetail, letteringPlan.pageFontSize],
+  );
+
+  // Blocks without a found text area (never placed, or moved since) are placed automatically, without a burn, so the
+  // lettering preview doesn't wait for one. Each set of missing blocks is tried once, so a block with no room can't loop.
+  const placeTried = useRef("");
+  useEffect(() => {
+    const current = pageQ.data;
+    if (!current || isBusy(current.page.status)) return;
+    if (!current.page.has_result && !current.stages.some((stage) => stage.stage === "clean_text")) return;
+    const missing = current.blocks.filter((b) => (b.kind === "text" || b.kind === "sfx") && !b.area);
+    if (missing.length === 0) return;
+    const signature = JSON.stringify(missing.map((b) => [b.id, b.x, b.y, b.w, b.h]));
+    if (placeTried.current === signature) return;
+    const timer = setTimeout(() => {
+      placeTried.current = signature;
+      placeText(id).then((next) => qc.setQueryData(["studio-page", id], next), () => {});
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [pageQ.data, id, qc]);
 
   const detail = pageQ.data;
   if (pageQ.isLoading) return <Loader2 className="m-4 animate-spin text-gray-500" />;
@@ -195,9 +225,9 @@ export function StudioPageEditor() {
     },
     {
       key: "render",
-      label: "Re-render",
+      label: "Burn lettering",
       icon: <RefreshCw size={14} />,
-      hint: "Burn the placed lettering into the page",
+      hint: "Draw the lettering into the page image",
       onSelect: () => afterSaves("render", () => renderM.mutate()),
       unavailable: unavailableWhen(translating, [renderM.isPending, "Already rendering"], [queued.has("render"), "Waiting for edits to save"]),
       pending: renderM.isPending,
@@ -271,6 +301,17 @@ export function StudioPageEditor() {
               Published rev {published.revision} · {published.notified} open tab{published.notified === 1 ? "" : "s"} updated
             </span>
           )}
+          {renderStage?.status === "stale" && blocks.some((b) => b.translated_text?.trim()) && (
+            <button
+              onClick={() => afterSaves("render", () => renderM.mutate())}
+              disabled={busy || renderM.isPending || queued.has("render")}
+              title="The page image doesn't show your latest lettering yet: burn it to update the result"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-amber-600 hover:bg-amber-500 disabled:opacity-50 transition-colors"
+            >
+              {renderM.isPending ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+              Burn lettering
+            </button>
+          )}
           <ActionsMenu actions={pageActions} />
         </div>
       </div>
@@ -291,14 +332,30 @@ export function StudioPageEditor() {
             onDetail={setDetail}
             onReload={() => void qc.invalidateQueries({ queryKey: ["studio-page", id] })}
             onImagesChanged={() => setImagesNonce((n) => n + 1)}
-            textPreview={textPreview}
+            lettering={letteringPlan.items}
             textPreviewAvailable={canvasImage === "clean-text.png" || canvasImage === "clean-sfx.png"}
             onStylePreview={setBlockStyle}
-            onToolChange={(tool) => {
-              // Placing lettering is judged against the cleaned page, where the preview is drawn
-              if (tool === "text" && canvasImage !== "clean-text.png" && canvasImage !== "clean-sfx.png") {
+            relayout={relayout}
+            onModeChange={(mode) => {
+              // Lettering is judged against the cleaned page, where it will be burned
+              if (mode === "lettering" && canvasImage !== "clean-text.png" && canvasImage !== "clean-sfx.png") {
                 setCanvasImage(stageStatus("clean_sfx") === "fresh" ? "clean-sfx.png" : "clean-text.png");
               }
+            }}
+            renderLetteringPanel={(blockId) => {
+              const block = blocks.find((b) => b.id === blockId);
+              return block ? (
+                <LetteringPanel
+                  key={block.id}
+                  pageId={page.id}
+                  block={block}
+                  disabled={busy}
+                  onChanged={setDetail}
+                  trackSave={trackSave}
+                  setBlockStyle={setBlockStyle}
+                  setBlockText={setBlockText}
+                />
+              ) : null;
             }}
             toolbarStart={
               <select
@@ -324,6 +381,14 @@ export function StudioPageEditor() {
         <aside className="lg:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-gray-800 overflow-y-auto p-3 space-y-3">
           <div className="text-xs text-gray-500">
             {textBlocks.length} text block{textBlocks.length === 1 ? "" : "s"} · {sfxBlocks.length} sound effect{sfxBlocks.length === 1 ? "" : "s"}
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500">
+            <span title="Speech bubbles and captions: read with OCR, translated, removed by Clean text, lettered with the translation">
+              <span className="inline-block h-2 w-2 rounded-sm bg-sky-400 mr-1 align-middle" />Text: OCR → translate → Clean text
+            </span>
+            <span title="Drawn sound effects: not read or translated; removed by Clean SFX when ticked; lettered only when you type new lettering">
+              <span className="inline-block h-2 w-2 rounded-sm bg-orange-400 mr-1 align-middle" />Sound effect: Clean SFX, optional new lettering
+            </span>
           </div>
           {typesetterError && <p className="text-xs text-red-400">Lettering preview unavailable: {typesetterError}</p>}
           {textBlocks.map((block) => (
@@ -622,13 +687,15 @@ function compactStyle(style: TextStyle): TextStyle | null {
  * Lettering overrides for one block. Changes show in the canvas preview at once and are saved after a short pause
  * (page actions wait for the save); a save still pending when the panel goes away is sent right then.
  */
-function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockStyle }: {
+function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockStyle, open = false }: {
   pageId: string;
   block: StudioBlock;
   disabled: boolean;
   onChanged: (detail: StudioPageDetail) => void;
   trackSave: (save: Promise<unknown>) => void;
   setBlockStyle: (blockId: number, style: TextStyle | null) => void;
+  /** Starts expanded (the floating lettering panel). */
+  open?: boolean;
 }) {
   const style = (block.style ?? {}) as TextStyle;
   const [error, setError] = useState<string | null>(null);
@@ -672,11 +739,11 @@ function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockSt
   const previewable = !!style.box || !!block.area || block.kind === "sfx";
 
   return (
-    <details className="rounded-md border border-gray-800 bg-gray-950/40">
+    <details open={open || undefined} className="rounded-md border border-gray-800 bg-gray-950/40">
       <summary className="cursor-pointer select-none px-2 py-1 text-xs text-gray-400 flex items-center gap-2">
         Lettering
         {custom && <span className="text-violet-300">custom</span>}
-        {!previewable && <span className="text-gray-600">· burn once to preview</span>}
+        {!previewable && <span className="text-gray-600">· placing…</span>}
         {saving && <Loader2 size={11} className="animate-spin" />}
       </summary>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2 px-2 pb-2 pt-1 text-xs text-gray-400">
@@ -732,18 +799,18 @@ function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockSt
           Capitals
         </label>
         <div className="flex items-center justify-end">
-          {style.box ? (
-            <button type="button" disabled={disabled} onClick={() => change({ box: undefined })} className="text-violet-300 hover:text-violet-200 disabled:opacity-40">
-              Use bubble area
+          {style.box || style.offset ? (
+            <button type="button" disabled={disabled} onClick={() => change({ box: undefined, offset: undefined })} className="text-violet-300 hover:text-violet-200 disabled:opacity-40">
+              Back to bubble
             </button>
           ) : (
-            <span className="text-gray-600" title="Use the Text box tool (T) on the canvas to place the text freely">Box: bubble</span>
+            <span className="text-gray-600" title="In Lettering mode (L), drag the lettering to move it or its handles to resize and rotate">In bubble</span>
           )}
         </div>
         <button
           type="button"
           disabled={disabled || !custom}
-          onClick={() => change({ font: undefined, font_size: undefined, fill: undefined, stroke: undefined, stroke_width: undefined, align: undefined, line_height: undefined, uppercase: undefined, rotation: undefined, box: undefined })}
+          onClick={() => change({ font: undefined, font_size: undefined, fill: undefined, stroke: undefined, stroke_width: undefined, align: undefined, line_height: undefined, uppercase: undefined, rotation: undefined, box: undefined, offset: undefined })}
           className="col-span-2 justify-self-start text-gray-400 hover:text-white disabled:opacity-40"
         >
           Reset to automatic
@@ -751,6 +818,93 @@ function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockSt
       </div>
       {error && <p className="px-2 pb-2 text-xs text-red-400">{error}</p>}
     </details>
+  );
+}
+
+/**
+ * The floating editor next to selected lettering (Lettering mode): its text, drawn live on the page as you type and
+ * saved after a short pause, and its style.
+ */
+function LetteringPanel({ pageId, block, disabled, onChanged, trackSave, setBlockStyle, setBlockText }: {
+  pageId: string;
+  block: StudioBlock;
+  disabled: boolean;
+  onChanged: (detail: StudioPageDetail) => void;
+  trackSave: (save: Promise<unknown>) => void;
+  setBlockStyle: (blockId: number, style: TextStyle | null) => void;
+  setBlockText: (blockId: number, text: string) => void;
+}) {
+  const saved = block.translated_text ?? "";
+  const [text, setText] = useState(saved);
+  const editing = useRef(false);
+  // Follow the server value unless the user is typing here
+  useEffect(() => {
+    if (!editing.current) setText(saved);
+  }, [saved]);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const pending = useRef<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latest = useRef({ pageId, blockId: block.id, onChanged, trackSave });
+  latest.current = { pageId, blockId: block.id, onChanged, trackSave };
+
+  const flush = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    const next = pending.current;
+    if (next === null) return;
+    pending.current = null;
+    const { pageId: page, blockId, onChanged: changed, trackSave: track } = latest.current;
+    setSaving(true);
+    const save = updateBlock(page, blockId, { translated_text: next })
+      .then((detail) => {
+        changed(detail);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : String(err));
+        throw err;
+      })
+      .finally(() => setSaving(false));
+    track(save);
+  }, []);
+  useEffect(() => flush, [flush]);
+
+  const isSfx = block.kind === "sfx";
+  return (
+    <div className="p-2.5 space-y-2 text-xs">
+      <div className="flex items-center gap-2">
+        <span className={`font-semibold ${isSfx ? "text-orange-400" : "text-sky-400"}`}>#{block.id}</span>
+        <span className="text-gray-400">{isSfx ? "Sound effect lettering" : "Text lettering"}</span>
+        {saving && <Loader2 size={11} className="animate-spin text-gray-500" />}
+      </div>
+      <textarea
+        data-lettering-text
+        value={text}
+        disabled={disabled}
+        rows={3}
+        onFocus={() => {
+          editing.current = true;
+        }}
+        onBlur={() => {
+          editing.current = false;
+          flush();
+        }}
+        onChange={(e) => {
+          const next = e.target.value;
+          setText(next);
+          setBlockText(block.id, next);
+          pending.current = next;
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(flush, 600);
+        }}
+        placeholder={isSfx ? "New lettering for this sound effect" : "Translation"}
+        className="w-full resize-y bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-violet-500"
+      />
+      {error && <p className="text-red-400">{error}</p>}
+      {text.trim() === "" && <p className="text-gray-500">Type to letter this {isSfx ? "sound effect" : "block"}.</p>}
+      <StyleEditor pageId={pageId} block={block} disabled={disabled} onChanged={onChanged} trackSave={trackSave} setBlockStyle={setBlockStyle} open />
+    </div>
   );
 }
 

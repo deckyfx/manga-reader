@@ -55,7 +55,7 @@ export const pageEventsUrl = (id: string) => `/api/translate-page/${id}/events`;
 
 export type { PageJobEvent } from "../../src/stores/translation-job-store";
 
-export type { FontVariant, TextAlign, TextPatch, TextStyle } from "../../src/shared/typeset";
+export type { FontVariant, LetteringPaths, TextAlign, TextPatch, TextStyle } from "../../src/shared/typeset";
 
 /**
  * Edits a block's text, whether the clean pass removes its lettering (`include`), or its lettering style (`style`
@@ -66,6 +66,9 @@ export const updateBlock = (
   idx: number,
   fields: { source_text?: string; translated_text?: string; include?: boolean; style?: TextStyle | null },
 ) => unwrap(api.studio.api.pages({ id }).blocks({ idx }).patch(fields));
+
+/** Finds and stores each block's text area without burning, so lettering can be previewed right away. */
+export const placeText = (id: string) => unwrap(api.studio.api.pages({ id }).place.post());
 
 /** A lettering font, loaded by the Studio's live text preview. */
 export const fontUrl = (variant: FontVariant) => `/studio/api/fonts/${variant}`;

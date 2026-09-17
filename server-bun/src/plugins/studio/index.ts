@@ -11,6 +11,7 @@
  * DELETE /studio/api/pages/:id/blocks/:idx       remove a region
  * PATCH /studio/api/pages/:id/blocks/:idx        edit source text / translation / include-in-cleaning / lettering style (marks later stages stale)
  * GET   /studio/api/fonts/:variant               a lettering font (regular / bold / italic), for the Studio's live preview
+ * POST  /studio/api/pages/:id/place              find and store each block's text area (no burn), for the live preview
  * PUT   /studio/api/pages/:id/mask/:layer        save a painted mask layer (add / erase) as a PNG
  * DELETE /studio/api/pages/:id/mask/:layer       clear a painted mask layer
  * POST  /studio/api/pages/:id/reclean            re-clean only some areas of the latest cleaned page
@@ -93,6 +94,10 @@ const StyleSchema = t.Object({
     y: t.Integer({ minimum: 0 }),
     w: t.Integer({ minimum: 4 }),
     h: t.Integer({ minimum: 4 }),
+  })),
+  offset: t.Optional(t.Object({
+    x: t.Integer({ minimum: -20000, maximum: 20000 }),
+    y: t.Integer({ minimum: -20000, maximum: 20000 }),
   })),
 }, { additionalProperties: false });
 
@@ -504,6 +509,27 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       }),
       response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody, 503: ErrBody },
     },
+  )
+
+  .post(
+    "/pages/:id/place",
+    ({ params, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      try {
+        await runExclusiveResult(async () => {
+          const job = await PageStore.readJob(params.id);
+          if (!job) throw new Error("page has no blocks yet");
+          const pipeline = new PagePipeline(pageDir(params.id), () => {}, PageStore.repository(params.id));
+          await pipeline.placeText(job);
+        });
+      } catch (err) {
+        // Nothing to place on yet (e.g. not cleaned): the preview simply waits
+        return status(409, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
+    }),
+    { params: IdParams, response: { 200: PageDetail, 404: ErrBody, 409: ErrBody } },
   )
 
   .put(
