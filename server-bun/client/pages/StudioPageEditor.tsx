@@ -127,6 +127,9 @@ export function StudioPageEditor() {
   const cleaning = cleanTextM.isPending || cleanSfxM.isPending;
   const actionError = cleanTextM.error ?? cleanSfxM.error ?? renderM.error ?? translateAllM.error ?? publishM.error ?? deleteM.error;
 
+  /** A stage's status in the latest page data: queued actions re-check it, since the saves they waited for can outdate it. */
+  const latestStageStatus = (name: string) =>
+    qc.getQueryData<StudioPageDetail>(["studio-page", id])?.stages.find((s) => s.stage === name)?.status;
   /** First reason in the list that applies, or undefined when the action can run. */
   const unavailableWhen = (...checks: [boolean, string][]): string | undefined => checks.find(([applies]) => applies)?.[1];
   const translating: [boolean, string] = [busy, "The page is being translated"];
@@ -147,7 +150,11 @@ export function StudioPageEditor() {
       label: "Clean SFX",
       icon: <Megaphone size={14} />,
       hint: "Remove the ticked sound effects",
-      onSelect: () => afterSaves("clean-sfx", () => cleanSfxM.mutate()),
+      onSelect: () => afterSaves("clean-sfx", () => {
+        const textPass = latestStageStatus("clean_text");
+        // A save it waited for (e.g. a "clean" toggle) may have outdated the text pass: the menu then shows why
+        if (textPass === undefined || textPass === "fresh") cleanSfxM.mutate();
+      }),
       // Sound effects are cleaned on top of the text pass: that one has to be current first
       unavailable: unavailableWhen(
         translating,
@@ -183,7 +190,10 @@ export function StudioPageEditor() {
       label: "Publish",
       icon: <Send size={14} />,
       hint: "Replace the image in open extension tabs",
-      onSelect: () => afterSaves("publish", () => publishM.mutate()),
+      onSelect: () => afterSaves("publish", () => {
+        // A text edit it waited for may have made the render stale: publishing would push the old image
+        if (latestStageStatus("render") !== "stale") publishM.mutate();
+      }),
       unavailable: unavailableWhen(
         translating,
         [publishM.isPending, "Already publishing"],
