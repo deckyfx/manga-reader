@@ -104,6 +104,7 @@ export interface BlockContent {
   include?: boolean;
   source_text?: string | null;
   translated_text?: string | null;
+  style?: TextStyle | null;
 }
 
 /** Adds a region drawn on the canvas; returns the page detail with the new block. */

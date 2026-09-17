@@ -281,7 +281,7 @@ export class PageStore {
     kind: PageBlock["kind"],
     geometry: BlockGeometry,
     include = true,
-    text: { sourceText?: string | null; translatedText?: string | null } = {},
+    text: { sourceText?: string | null; translatedText?: string | null; style?: TextStyle | null } = {},
     staleStages: readonly StageName[] = [],
   ): Promise<number> {
     return db.transaction((tx) => {
@@ -304,6 +304,7 @@ export class PageStore {
           shapeJson: shapeToJson(geometry.shape),
           sourceText: text.sourceText ?? null,
           translatedText: text.translatedText ?? null,
+          styleJson: text.style && Object.keys(text.style).length > 0 ? JSON.stringify(text.style) : null,
         })
         .run();
       markStaleIn(tx, pageId, staleStages);

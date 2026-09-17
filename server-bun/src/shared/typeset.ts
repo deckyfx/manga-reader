@@ -80,6 +80,8 @@ export interface LetteringPaths {
   fill: string;
   stroke: string;
   strokeWidth: number;
+  /** Bounding box of the glyphs (local to the area's bound, stroke not included). */
+  bounds: { x1: number; y1: number; x2: number; y2: number };
 }
 
 /** Text rendered as a transparent SVG placed at (x, y) on the page. */
@@ -428,10 +430,22 @@ export class Typesetter {
   paths(layout: TextLayout, area: TextArea, style: TextStyle = {}): LetteringPaths | null {
     if (layout.lines.length === 0 || layout.fontSize <= 0) return null;
     const font = this.fontFor(style);
-    const d = layout.lines.map((line) => font.getPath(line.text, line.x, line.baseline, layout.fontSize).toPathData(2)).join(" ").trim();
-    if (!d) return null;
+    const bounds = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
+    const d = layout.lines.map((line) => {
+      const path = font.getPath(line.text, line.x, line.baseline, layout.fontSize);
+      const box = path.getBoundingBox();
+      if (!box.isEmpty()) {
+        bounds.x1 = Math.min(bounds.x1, box.x1);
+        bounds.y1 = Math.min(bounds.y1, box.y1);
+        bounds.x2 = Math.max(bounds.x2, box.x2);
+        bounds.y2 = Math.max(bounds.y2, box.y2);
+      }
+      return path.toPathData(2);
+    }).join(" ").trim();
+    if (!d || bounds.x1 > bounds.x2) return null;
     return {
       d,
+      bounds,
       fill: safeColor(style.fill, area.dark ? "#ffffff" : "#000000"),
       stroke: safeColor(style.stroke, area.dark ? "#000000" : "#ffffff"),
       strokeWidth: Math.max(0, style.stroke_width ?? Math.max(2, Math.round(layout.fontSize * STROKE_RATIO))),
@@ -451,15 +465,22 @@ export class Typesetter {
     const { bound } = area;
     const rotation = normalizeRotation(style.rotation ?? 0);
     const radians = (rotation * Math.PI) / 180;
-    // Room for the stroke, and for lines that spill past the area when the text doesn't fit
-    const spill = layout.fits ? 0 : layout.fontSize * 2;
-    const pad = Math.ceil(strokeWidth / 2) + 2 + spill;
-    const halfW = bound.w / 2 + pad, halfH = bound.h / 2 + pad;
-    const cx = bound.x + bound.w / 2, cy = bound.y + bound.h / 2;
-    const extentX = Math.abs(halfW * Math.cos(radians)) + Math.abs(halfH * Math.sin(radians));
-    const extentY = Math.abs(halfW * Math.sin(radians)) + Math.abs(halfH * Math.cos(radians));
-    let x0 = Math.floor(cx - extentX), y0 = Math.floor(cy - extentY);
-    let x1 = Math.ceil(cx + extentX), y1 = Math.ceil(cy + extentY);
+    // The patch covers the glyphs themselves (text that doesn't fit can spill well past the area), plus the stroke,
+    // rotated around the area's centre like the text
+    const pad = Math.ceil(strokeWidth / 2) + 2;
+    const local = {
+      x1: Math.min(0, paths.bounds.x1) - pad,
+      y1: Math.min(0, paths.bounds.y1) - pad,
+      x2: Math.max(bound.w, paths.bounds.x2) + pad,
+      y2: Math.max(bound.h, paths.bounds.y2) + pad,
+    };
+    const cos = Math.cos(radians), sin = Math.sin(radians);
+    const corners = [[local.x1, local.y1], [local.x2, local.y1], [local.x2, local.y2], [local.x1, local.y2]].map(([lx, ly]) => {
+      const rx = lx - bound.w / 2, ry = ly - bound.h / 2;
+      return { x: bound.x + bound.w / 2 + rx * cos - ry * sin, y: bound.y + bound.h / 2 + rx * sin + ry * cos };
+    });
+    let x0 = Math.floor(Math.min(...corners.map((c) => c.x))), y0 = Math.floor(Math.min(...corners.map((c) => c.y)));
+    let x1 = Math.ceil(Math.max(...corners.map((c) => c.x))), y1 = Math.ceil(Math.max(...corners.map((c) => c.y)));
     if (page) {
       x0 = Math.max(0, x0);
       y0 = Math.max(0, y0);

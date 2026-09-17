@@ -189,6 +189,7 @@ export function StudioPageEditor() {
   // Blocks without a found text area (never placed, or moved since) are placed automatically, without a burn, so the
   // lettering preview doesn't wait for one. Each set of missing blocks is tried once, so a block with no room can't loop.
   const placeTried = useRef("");
+  const [placeError, setPlaceError] = useState<string | null>(null);
   useEffect(() => {
     const current = pageQ.data;
     if (!current || isBusy(current.page.status)) return;
@@ -198,8 +199,18 @@ export function StudioPageEditor() {
     const signature = JSON.stringify(missing.map((b) => [b.id, b.x, b.y, b.w, b.h]));
     if (placeTried.current === signature) return;
     const timer = setTimeout(() => {
+      // Marked before the request so an in-flight placement isn't started twice; cleared on failure so it's retried
       placeTried.current = signature;
-      placeText(id).then((next) => qc.setQueryData(["studio-page", id], next), () => {});
+      placeText(id).then(
+        (next) => {
+          setPlaceError(null);
+          qc.setQueryData(["studio-page", id], next);
+        },
+        (err: unknown) => {
+          if (placeTried.current === signature) placeTried.current = "";
+          setPlaceError(err instanceof Error ? err.message : String(err));
+        },
+      );
     }, 700);
     return () => clearTimeout(timer);
   }, [pageQ.data, id, qc]);
@@ -449,6 +460,7 @@ export function StudioPageEditor() {
             </span>
           </div>
           {typesetterError && <p className="text-xs text-red-400">Lettering preview unavailable: {typesetterError}</p>}
+          {placeError && <p className="text-xs text-amber-400">Couldn't place the lettering yet: {placeError}</p>}
           {textBlocks.map((block) => (
             <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} setBlockStyle={setBlockStyle} onDelete={() => void removeBlock(block.id)} />
           ))}
@@ -746,22 +758,37 @@ function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, 
 /**
  * Saves the latest value after `delay` ms without changes. The save is registered with `trackSave` as soon as it's
  * scheduled (not when the timer fires), so page actions such as Burn lettering or Publish wait for edits made just
- * before them. A save still pending when the component goes away is sent right then.
+ * before them. Only one save runs at a time: values changed meanwhile are coalesced into one save that starts after
+ * it, so an older response can never overwrite a newer value. A save still pending when the component goes away is
+ * sent right then. `onError` runs when a save fails (e.g. to reload the server's state over optimistic updates).
  */
-function useDebouncedSave<T>(delay: number, save: (value: T) => Promise<unknown>, trackSave: (save: Promise<unknown>) => void) {
+function useDebouncedSave<T>(
+  delay: number,
+  save: (value: T) => Promise<unknown>,
+  trackSave: (save: Promise<unknown>) => void,
+  onError?: (err: unknown) => void,
+) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const latest = useRef({ save, trackSave });
-  latest.current = { save, trackSave };
+  const latest = useRef({ save, trackSave, onError });
+  latest.current = { save, trackSave, onError };
   const pending = useRef<{ value: T; resolve: () => void; reject: (err: unknown) => void } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlight = useRef(false);
+  /** A flush was asked for while a save was running: run it when that save ends. */
+  const flushAfter = useRef(false);
 
-  const flush = useCallback(() => {
+  const flush = useCallback(function flushPending() {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
+    if (inFlight.current) {
+      flushAfter.current = true;
+      return;
+    }
     const next = pending.current;
     if (!next) return;
     pending.current = null;
+    inFlight.current = true;
     setSaving(true);
     latest.current.save(next.value)
       .then(
@@ -771,10 +798,18 @@ function useDebouncedSave<T>(delay: number, save: (value: T) => Promise<unknown>
         },
         (err: unknown) => {
           setError(err instanceof Error ? err.message : String(err));
+          latest.current.onError?.(err);
           next.reject(err);
         },
       )
-      .finally(() => setSaving(false));
+      .finally(() => {
+        inFlight.current = false;
+        setSaving(false);
+        if (flushAfter.current) {
+          flushAfter.current = false;
+          flushPending();
+        }
+      });
   }, []);
   useEffect(() => flush, [flush]);
 
@@ -822,6 +857,7 @@ function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockSt
    * reset before the save lands), so quick successive changes can't drop each other. Cleared once that save is done.
    */
   const draft = useRef<{ style: TextStyle | null } | null>(null);
+  const qc = useQueryClient();
   const style = (draft.current ? draft.current.style ?? {} : block.style ?? {}) as TextStyle;
   const { schedule, saving, error } = useDebouncedSave<TextStyle | null>(
     400,
@@ -829,6 +865,8 @@ function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockSt
       if (draft.current?.style === next) draft.current = null;
     }),
     trackSave,
+    // The preview showed the unsaved style: go back to what the server has
+    () => void qc.invalidateQueries({ queryKey: ["studio-page", pageId] }),
   );
 
   const change = (patch: Partial<TextStyle>) => {
@@ -938,6 +976,7 @@ function LetteringPanel({ pageId, block, disabled, onChanged, trackSave, setBloc
   setBlockText: (blockId: number, text: string) => void;
   onDelete: () => void;
 }) {
+  const qc = useQueryClient();
   const saved = block.translated_text ?? "";
   const [text, setText] = useState(saved);
   const editing = useRef(false);
@@ -949,6 +988,8 @@ function LetteringPanel({ pageId, block, disabled, onChanged, trackSave, setBloc
     600,
     (next) => updateBlock(pageId, block.id, { translated_text: next }).then(onChanged),
     trackSave,
+    // The preview showed the unsaved text: go back to what the server has
+    () => void qc.invalidateQueries({ queryKey: ["studio-page", pageId] }),
   );
 
   const isSfx = block.kind === "sfx";

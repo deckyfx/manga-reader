@@ -387,11 +387,18 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
     ({ params, body, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
-      const { kind, include, source_text, translated_text, ...geometry } = body;
+      const { kind, include, source_text, translated_text, style, ...geometry } = body;
       const invalid = geometryError(check.page, geometry);
       if (invalid) return status(422, { error: invalid });
-      // Text is stored in the same insert, so restoring a deleted region (undo) is a single atomic request
-      await PageStore.insertBlock(params.id, kind, geometry, include ?? true, { sourceText: source_text, translatedText: translated_text }, stagesAffectedBy(kind));
+      if (style?.box && (style.box.x + style.box.w > check.page.width || style.box.y + style.box.h > check.page.height)) {
+        return status(422, { error: "text box extends outside the page" });
+      }
+      // Text and lettering style are stored in the same insert, so restoring a deleted region (undo) is one atomic request
+      await PageStore.insertBlock(
+        params.id, kind, geometry, include ?? true,
+        { sourceText: source_text, translatedText: translated_text, style },
+        stagesAffectedBy(kind),
+      );
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
     }),
     {
@@ -402,6 +409,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
         /** Restored with the region (e.g. undoing a delete). */
         source_text: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
         translated_text: t.Optional(t.Nullable(t.String({ maxLength: 2000 }))),
+        style: t.Optional(t.Nullable(StyleSchema)),
         ...GeometryBody,
       }),
       response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },

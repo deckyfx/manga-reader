@@ -312,7 +312,13 @@ export function PageCanvas({
       kind: blockKind(block),
       // The canvas geometry is ahead of `blocks` while an edit is still being saved: undo must restore that shape
       geometry: entriesRef.current.get(id)?.geometry ?? blockGeometry(block),
-      content: { include: block.include, source_text: block.source_text, translated_text: block.translated_text },
+      content: {
+        include: block.include,
+        source_text: block.source_text,
+        translated_text: block.translated_text,
+        // Its lettering style (font, colours, rotation, offset, text box) comes back too
+        style: (block.style ?? null) as TextStyle | null,
+      },
     };
     let current = id;
     perform({
@@ -322,7 +328,7 @@ export function PageCanvas({
         live.current.onSelect(null);
       },
       undo: async () => {
-        // One request brings back geometry, include flag and text together, so a failure can't leave a blank region
+        // One request brings back geometry, include flag, text and style together, so a failure can't leave a blank region
         const detail = await createBlock(live.current.pageId, snapshot.kind, snapshot.geometry, snapshot.content);
         const restored = newestId(detail);
         history.alias(history.resolve(current), restored);
