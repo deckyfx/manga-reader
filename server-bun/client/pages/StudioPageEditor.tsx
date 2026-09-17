@@ -216,7 +216,7 @@ export function StudioPageEditor() {
   const sfxBlocks = blocks.filter((b) => b.kind !== "text");
   const version = `${page.updated_at}-${page.revision}-${renderStage?.updated_at ?? ""}-${imagesNonce}`;
   const cleaning = cleanTextM.isPending || cleanSfxM.isPending;
-  const actionError = cleanTextM.error ?? cleanSfxM.error ?? renderM.error ?? translateAllM.error ?? publishM.error ?? deleteM.error;
+  const actionError = cleanTextM.error ?? cleanSfxM.error ?? renderM.error ?? translateAllM.error ?? publishM.error ?? deleteM.error ?? deleteBlockM.error;
 
   /** A stage's status in the latest page data: queued actions re-check it, since the saves they waited for can outdate it. */
   const latestStageStatus = (name: string) =>
@@ -741,6 +741,59 @@ function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, 
   );
 }
 
+/**
+ * Saves the latest value after `delay` ms without changes. The save is registered with `trackSave` as soon as it's
+ * scheduled (not when the timer fires), so page actions such as Burn lettering or Publish wait for edits made just
+ * before them. A save still pending when the component goes away is sent right then.
+ */
+function useDebouncedSave<T>(delay: number, save: (value: T) => Promise<unknown>, trackSave: (save: Promise<unknown>) => void) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const latest = useRef({ save, trackSave });
+  latest.current = { save, trackSave };
+  const pending = useRef<{ value: T; resolve: () => void; reject: (err: unknown) => void } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flush = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    const next = pending.current;
+    if (!next) return;
+    pending.current = null;
+    setSaving(true);
+    latest.current.save(next.value)
+      .then(
+        () => {
+          setError(null);
+          next.resolve();
+        },
+        (err: unknown) => {
+          setError(err instanceof Error ? err.message : String(err));
+          next.reject(err);
+        },
+      )
+      .finally(() => setSaving(false));
+  }, []);
+  useEffect(() => flush, [flush]);
+
+  const schedule = (value: T) => {
+    if (pending.current) {
+      pending.current.value = value;
+    } else {
+      let settle: { resolve: () => void; reject: (err: unknown) => void } = { resolve: () => {}, reject: () => {} };
+      const promise = new Promise<void>((resolve, reject) => {
+        settle = { resolve, reject };
+      });
+      pending.current = { value, ...settle };
+      latest.current.trackSave(promise);
+    }
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(flush, delay);
+  };
+
+  return { schedule, flush, saving, error };
+}
+
 /** Drops unset fields; an empty style means automatic lettering. */
 function compactStyle(style: TextStyle): TextStyle | null {
   const next = { ...style } as Record<string, unknown>;
@@ -763,41 +816,16 @@ function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockSt
   open?: boolean;
 }) {
   const style = (block.style ?? {}) as TextStyle;
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const pending = useRef<{ style: TextStyle | null } | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latest = useRef({ pageId, blockId: block.id, onChanged, trackSave });
-  latest.current = { pageId, blockId: block.id, onChanged, trackSave };
-
-  const flush = useCallback(() => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-    const next = pending.current;
-    if (!next) return;
-    pending.current = null;
-    const { pageId: page, blockId, onChanged: changed, trackSave: track } = latest.current;
-    setSaving(true);
-    const save = updateBlock(page, blockId, { style: next.style })
-      .then((detail) => {
-        changed(detail);
-        setError(null);
-      })
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : String(err));
-        throw err;
-      })
-      .finally(() => setSaving(false));
-    track(save);
-  }, []);
-  useEffect(() => flush, [flush]);
+  const { schedule, saving, error } = useDebouncedSave<TextStyle | null>(
+    400,
+    (next) => updateBlock(pageId, block.id, { style: next }).then(onChanged),
+    trackSave,
+  );
 
   const change = (patch: Partial<TextStyle>) => {
     const next = compactStyle({ ...style, ...patch });
     setBlockStyle(block.id, next);
-    pending.current = { style: next };
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(flush, 400);
+    schedule(next);
   };
 
   const custom = block.style !== null && Object.keys(style).length > 0;
@@ -907,34 +935,11 @@ function LetteringPanel({ pageId, block, disabled, onChanged, trackSave, setBloc
   useEffect(() => {
     if (!editing.current) setText(saved);
   }, [saved]);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const pending = useRef<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latest = useRef({ pageId, blockId: block.id, onChanged, trackSave });
-  latest.current = { pageId, blockId: block.id, onChanged, trackSave };
-
-  const flush = useCallback(() => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-    const next = pending.current;
-    if (next === null) return;
-    pending.current = null;
-    const { pageId: page, blockId, onChanged: changed, trackSave: track } = latest.current;
-    setSaving(true);
-    const save = updateBlock(page, blockId, { translated_text: next })
-      .then((detail) => {
-        changed(detail);
-        setError(null);
-      })
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : String(err));
-        throw err;
-      })
-      .finally(() => setSaving(false));
-    track(save);
-  }, []);
-  useEffect(() => flush, [flush]);
+  const { schedule: scheduleText, flush: flushText, saving, error } = useDebouncedSave<string>(
+    600,
+    (next) => updateBlock(pageId, block.id, { translated_text: next }).then(onChanged),
+    trackSave,
+  );
 
   const isSfx = block.kind === "sfx";
   return (
@@ -964,15 +969,13 @@ function LetteringPanel({ pageId, block, disabled, onChanged, trackSave, setBloc
         }}
         onBlur={() => {
           editing.current = false;
-          flush();
+          flushText();
         }}
         onChange={(e) => {
           const next = e.target.value;
           setText(next);
           setBlockText(block.id, next);
-          pending.current = next;
-          if (timer.current) clearTimeout(timer.current);
-          timer.current = setTimeout(flush, 600);
+          scheduleText(next);
         }}
         placeholder={isSfx ? "New lettering for this sound effect" : "Translation"}
         className="w-full resize-y bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-violet-500"

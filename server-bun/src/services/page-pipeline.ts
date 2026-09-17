@@ -489,9 +489,13 @@ export class PagePipeline {
     const tinted = Buffer.from(rgb);
     for (const area of areas) {
       for (let y = 0; y < area.bound.h; y++) {
+        // A moved text area can hang off the page: skip what's outside rather than wrapping into other rows
+        const py = y + area.bound.y;
+        if (py < 0 || py >= height) continue;
         for (let x = 0; x < area.bound.w; x++) {
-          if (!area.mask[y * area.bound.w + x]) continue;
-          const p = ((y + area.bound.y) * width + x + area.bound.x) * 3;
+          const px = x + area.bound.x;
+          if (px < 0 || px >= width || !area.mask[y * area.bound.w + x]) continue;
+          const p = (py * width + px) * 3;
           tinted[p] = Math.round(tinted[p] * 0.6);
           tinted[p + 1] = Math.round(tinted[p + 1] * 0.6 + 100);
           tinted[p + 2] = Math.round(tinted[p + 2] * 0.6);
