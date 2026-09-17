@@ -817,15 +817,23 @@ function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockSt
   /** Starts expanded (the floating lettering panel). */
   open?: boolean;
 }) {
-  const style = (block.style ?? {}) as TextStyle;
+  /**
+   * The latest style scheduled for saving: later edits build on it (not on `block.style`, which a page refresh can
+   * reset before the save lands), so quick successive changes can't drop each other. Cleared once that save is done.
+   */
+  const draft = useRef<{ style: TextStyle | null } | null>(null);
+  const style = (draft.current ? draft.current.style ?? {} : block.style ?? {}) as TextStyle;
   const { schedule, saving, error } = useDebouncedSave<TextStyle | null>(
     400,
-    (next) => updateBlock(pageId, block.id, { style: next }).then(onChanged),
+    (next) => updateBlock(pageId, block.id, { style: next }).then(onChanged).finally(() => {
+      if (draft.current?.style === next) draft.current = null;
+    }),
     trackSave,
   );
 
   const change = (patch: Partial<TextStyle>) => {
     const next = compactStyle({ ...style, ...patch });
+    draft.current = { style: next };
     setBlockStyle(block.id, next);
     schedule(next);
   };
