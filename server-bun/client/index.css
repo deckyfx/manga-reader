@@ -23,4 +23,39 @@
   label:has(> input:disabled) {
     cursor: not-allowed;
   }
+
+  /*
+   * Thin scrollbars that suit the dark UI: a slim grey thumb on a transparent track, brighter on hover so it stays easy
+   * to spot and grab. Firefox uses scrollbar-width / scrollbar-color; Chromium and Safari use the ::-webkit-scrollbar
+   * rules (newer Chromium also honours the standard properties, which then take precedence).
+   */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(75 85 99 / 0.8) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: rgb(75 85 99 / 0.7);
+    border-radius: 9999px;
+    /* A transparent border keeps the visible thumb slimmer than the hit area */
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(139 92 246 / 0.85);
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
