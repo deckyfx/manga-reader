@@ -951,7 +951,8 @@ export function PageCanvas({
     actionsRef.current?.cancelDrawing();
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.defaultCursor = tool === "select" ? "default" : "crosshair";
+    // Drawing tools only draw in Regions mode; Lettering mode points and drags
+    canvas.defaultCursor = mode === "regions" && tool !== "select" ? "crosshair" : "default";
     canvas.skipTargetFind = mode === "regions" && tool === "brush";
     if (tool !== "brush" || mode !== "regions") {
       brushCursorRef.current?.set({ visible: false });
@@ -1037,7 +1038,7 @@ export function PageCanvas({
       const canvas = canvasRef.current;
       if (canvas) {
         canvas.skipTargetFind = live.current.mode === "regions" && live.current.tool === "brush";
-        canvas.setCursor(live.current.tool === "select" ? "default" : "crosshair");
+        canvas.setCursor(live.current.mode === "regions" && live.current.tool !== "select" ? "crosshair" : "default");
       }
     };
     window.addEventListener("keydown", onKeyDown);
