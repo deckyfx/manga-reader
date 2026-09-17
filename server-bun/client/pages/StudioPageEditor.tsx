@@ -426,7 +426,8 @@ export function StudioPageEditor() {
         </aside>
         ) : (
         <aside className="lg:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-gray-800 overflow-y-auto p-3 space-y-3">
-          <div className="flex items-center gap-2 text-xs text-gray-500">
+          {/* Stays in view while the list scrolls, so the panel can be collapsed from anywhere */}
+          <div className="sticky -top-3 z-10 -mx-3 -mt-3 px-3 pt-3 pb-2 flex items-center gap-2 text-xs text-gray-500 bg-gray-950/95 backdrop-blur border-b border-gray-800/60">
             {textBlocks.length} text block{textBlocks.length === 1 ? "" : "s"} · {sfxBlocks.length} sound effect{sfxBlocks.length === 1 ? "" : "s"}
             <button
               onClick={() => setPanelCollapsed(true)}
