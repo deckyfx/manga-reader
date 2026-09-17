@@ -6,7 +6,7 @@
   "scripts": {
     "build": "bun run typecheck && bun run build.ts",
     "build:dev": "bun run build.ts",
-    "typecheck": "bun run --cwd ../server-bun types:api && tsc --noEmit"
+    "typecheck": "bun run --cwd ../server types:api && tsc --noEmit"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

@@ -1,13 +1,17 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "jsx": "preserve",
-    "jsxImportSource": "solid-js",
+    "lib": ["ESNext", "DOM"],
+    "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,
-    "types": ["node", "vite/client"]
+    "types": ["bun-types"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@client/*": ["./client/*"]
+    }
   },
-  "include": ["ClientApp/src/**/*", "vite.config.ts"]
+  "include": ["src/**/*", "client/**/*", "scripts/**/*", "build.ts", "drizzle.config.ts"]
 }

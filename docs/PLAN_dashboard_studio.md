@@ -1,4 +1,4 @@
-# Dashboard & Studio — Plan (server-bun)
+# Dashboard & Studio — Plan (server)
 
 Status: **phases 0–1 built** (PR #15; see the phase status notes in section 10) · Written 2026-09-13, updated 2026-09-14 · Supersedes the C#-era studio and portal plans (ASP.NET + SolidJS, burn via `window.postMessage`), since removed.
 

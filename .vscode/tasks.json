@@ -1,35 +1,9 @@
 {
   "version": "2.0.0",
   "tasks": [
-    // ── Server ────────────────────────────────────────────────────────────────
+    // ── Server (Bun) ──────────────────────────────────────────────────────────
     {
-      "label": "server: dotnet build",
-      "type": "shell",
-      "command": "dotnet build WebOcr.slnx",
-      "group": "build",
-      "options": { "cwd": "${workspaceFolder}" },
-      "presentation": { "reveal": "always", "panel": "shared" },
-      "problemMatcher": "$msCompile"
-    },
-    {
-      "label": "server: dotnet run",
-      "type": "shell",
-      "command": "dotnet run --project server/WebOcrServer.csproj",
-      "group": "none",
-      "options": { "cwd": "${workspaceFolder}" },
-      "presentation": { "reveal": "always", "panel": "dedicated" },
-      "isBackground": true,
-      "problemMatcher": {
-        "pattern": { "regexp": "^.*$", "file": 1, "line": 2, "message": 3 },
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": "^.*Starting.*$",
-          "endsPattern": "^.*Now listening on.*$"
-        }
-      }
-    },
-    {
-      "label": "server: vite dev",
+      "label": "server: dev",
       "type": "shell",
       "command": "bun run dev",
       "group": "none",
@@ -39,7 +13,16 @@
       "problemMatcher": []
     },
     {
-      "label": "server: vite build",
+      "label": "server: typecheck",
+      "type": "shell",
+      "command": "bun run typecheck",
+      "group": "test",
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": "$tsc"
+    },
+    {
+      "label": "server: build",
       "type": "shell",
       "command": "bun run build",
       "group": "build",
@@ -48,9 +31,9 @@
       "problemMatcher": []
     },
     {
-      "label": "server: dotnet ef migrate",
+      "label": "server: db generate",
       "type": "shell",
-      "command": "dotnet ef database update",
+      "command": "bun run db:generate",
       "group": "none",
       "options": { "cwd": "${workspaceFolder}/server" },
       "presentation": { "reveal": "always", "panel": "shared" },

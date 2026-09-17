@@ -2,26 +2,19 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Server: Attach (dotnet)",
-      "type": "coreclr",
-      "request": "attach",
-      "processId": "${command:pickProcess}",
-      "justMyCode": true
+      "name": "Server: Launch (bun)",
+      "type": "bun",
+      "request": "launch",
+      "program": "src/index.ts",
+      "cwd": "${workspaceFolder}/server",
+      "stopOnEntry": false,
+      "watchMode": false
     },
     {
-      "name": "Server: Launch (dotnet)",
-      "type": "coreclr",
-      "request": "launch",
-      "preLaunchTask": "server: dotnet build",
-      "program": "${workspaceFolder}/server/bin/Debug/net10.0/WebOcrServer.dll",
-      "args": [],
-      "cwd": "${workspaceFolder}/server",
-      "stopAtEntry": false,
-      "env": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
-      },
-      "console": "integratedTerminal",
-      "justMyCode": true
+      "name": "Server: Attach (bun)",
+      "type": "bun",
+      "request": "attach",
+      "url": "ws://localhost:6499/"
     },
     {
       "name": "Desktop: Launch (dotnet)",
@@ -34,14 +27,6 @@
       "stopAtEntry": false,
       "console": "integratedTerminal",
       "justMyCode": true
-    }
-  ],
-  "compounds": [
-    {
-      "name": "Full Stack (server + vite)",
-      "configurations": ["Server: Launch (dotnet)"],
-      "preLaunchTask": "server: vite dev",
-      "stopAll": true
     }
   ]
 }

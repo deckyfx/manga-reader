@@ -5,15 +5,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Repo layout
 
 ```
-extension/   TypeScript + Bun browser extension (MV3)
-server/      ASP.NET Core Minimal API + Blazor (C#, .NET 10)
-desktop/     Avalonia desktop companion (C#, .NET 10)
-WebOcr.slnx  .NET 10 solution (open with `dotnet build WebOcr.slnx`)
+server/      Bun server: OCR, translation, page pipeline, Studio + reader SPA (TypeScript, Elysia, Drizzle, onnxruntime-node)
+extension/   Browser extension (MV3, TypeScript + Bun)
+desktop/     Avalonia desktop companion (C#, .NET 10); talks to the server's /health, /ocr, /analyze
+docs/        PLAN_dashboard_studio.md: the Studio / reader plan with per-phase design notes
+WebOcr.slnx  .NET solution for the desktop app
 ```
 
-Two languages only: **TypeScript** (extension) and **C#** (server + desktop).
+The ASP.NET Core (C#) server was removed; its last version is tagged `csharp-server-final`.
 
 ## Common commands
+
+### Server
+
+```bash
+cd server
+bun install
+bun run dev              # bun --hot src/index.ts, listens on :3579 (the user runs the server; don't start it yourself)
+bun run typecheck        # tsc --noEmit (covers src/, client/, scripts/)
+bun run build            # embed migrations → typecheck → single executable ./app
+bun run db:generate      # after changing src/db/schema.ts: drizzle-kit generate + re-embed migrations
+bun run page <image>     # run the page pipeline from the CLI (scripts/page.ts)
+bun run types:api        # emit API types for the extension's Eden client (server/types/)
+```
 
 ### Extension
 
@@ -22,17 +36,7 @@ cd extension
 bun install
 bun run build        # production (type-check + build, bumps version)
 bun run build:dev    # dev build only
-bun run typecheck    # tsc --noEmit
-```
-
-### Server
-
-```bash
-cd server
-dotnet build                         # compile check
-dotnet run                           # starts on :3579; downloads models on first run
-dotnet ef migrations add <name>      # after schema changes to src/Data/AppDbContext.cs
-dotnet ef database update            # apply locally
+bun run typecheck    # regenerates ../server types:api, then tsc --noEmit
 ```
 
 ### Desktop
@@ -43,111 +47,42 @@ dotnet build
 dotnet run
 ```
 
-### Both C# projects together
-
-```bash
-dotnet build WebOcr.slnx
-```
-
 ## Server architecture
 
-**Startup is non-blocking.** `BootBackgroundService` (a `BackgroundService`) runs scaffolding, DB migrations, model downloads, and service init in the background. The HTTP server accepts requests immediately; `/health` returns `"starting"` until `BootState.IsReady = true`.
+**Boot** (`src/index.ts`): run embedded Drizzle migrations, fail page jobs interrupted by the last shutdown and sweep leftover deleted-page folders, download and load models (`bootState` tracks readiness; `/health` reports it), then listen. `env.ts` is the typed config (port, `DATABASE_URL`, model repos/dirs/enabled flags, `DEEPL_API_KEY`, …).
 
-**`BootState`** is a singleton with per-model readiness flags:
-- `IsReady` — true after OCR + Translate services have loaded
-- `DictionaryReady` — true only if `DictionaryService.InitializeAsync()` succeeded (failure is non-fatal; `/health` returns `"degraded"`)
-- `InpaintReady`, `BubbleReady` — set only when those models are enabled and downloaded
-- `InpaintEnabled`, `BubbleEnabled` — mirrors enabled flag from `ModelSettingsStore` so `/health` can distinguish "disabled" from "pending"
+**HTTP** is Elysia, one plugin per area:
+- `src/api.ts` + `src/plugins/route-*.ts`: extension and desktop routes (`/health`, `/ocr`, `/translate`, `/analyze`, `/api/translate-page/*` with SSE progress, `/api/settings`). The extension imports these types through Eden Treaty.
+- `src/plugins/studio/`: `/studio/api/*`, covering page detail, block edits, mask layers, re-clean, stage runs, text placement, publish, history and fonts.
+- `src/plugins/read/`: the `/read/api/*` reader skeleton.
+- `src/plugins/route-spa.ts`: the React SPA (`client/`) is served through Bun's `serve.routes` (`/home`, `/studio/*`, `/read/*`, `/settings`); `/` redirects to `/home`.
 
-**`ModelSettingsStore`** is a singleton that holds runtime-configurable model settings (repo, local dir, enabled, file list). On startup it merges env vars → persisted `data/model-settings.json` → hard-coded defaults. Settings can be updated at runtime via `PUT /api/settings` (persisted to JSON; model changes take effect on next restart).
+**Database**: SQLite through Drizzle (`src/db/schema.ts`). Migrations live in `src/db/migrations/` and are embedded into `src/db/migrations-embedded.ts` so the single executable carries them. Stores in `src/stores/` (e.g. `PageStore`: pages, per-stage state, blocks with style / area JSON) are the source of truth; page folders under `data/jobs/<id>/` hold images only.
 
-**Inference queue** — ONNX sessions are CPU-bound. All OCR and translate work is routed through `InferenceQueue` (a `Channel<InferenceJob>`) processed by `InferenceWorker` (a `BackgroundService`). Route handlers enqueue a job and `await` a `TaskCompletionSource<object>`.
+**Page pipeline** (`src/services/page-pipeline.ts`): detect → OCR → translate → clean text (→ clean SFX) → render (burn). Each stage has a fresh / stale / error state; edits mark later stages stale. Work is serialized through `src/queue/page-queue.ts` (`withPageLock` per page, `runExclusiveResult` for CPU/ONNX work).
 
-**Service registration** is in `ServiceExtensions.cs` (`AddWebOcrServices` + `MapWebOcrRoutes`). Route files are in `src/Routes/`, one extension class per endpoint group.
+**Lettering** is shared code: `src/shared/typeset.ts` (browser-safe, opentype.js + hyphen) lays out and draws text for both the server burn and the Studio's live preview, so they match. Text areas are stored unshifted on blocks; style offset / box are applied on top (see `.coderabbit.yaml`).
 
-**Config** is split across two places:
-
-`src/Config.cs` — server/infrastructure config (env vars):
-
-| Var | Default |
-|-----|---------|
-| `PORT` | `3579` |
-| `SOCKET_PATH` | `""` (unset — TCP mode) |
-| `DATABASE_URL` | `./data/ocr.db` |
-| `DEEPL_API_KEY` | `""` |
-
-`src/ModelSettingsStore.cs` — model config (env vars, also persisted to `data/model-settings.json`):
-
-| Var | Default |
-|-----|---------|
-| `OCR_MODEL_REPO` | `mayocream/manga-ocr-onnx` |
-| `OCR_MODELS_DIR` | `./data/models/ocr` |
-| `OCR_MODEL_ENABLED` | `true` |
-| `OCR_MODEL_FILES` | `encoder_model.onnx,decoder_model.onnx,vocab.txt` |
-| `TRANSLATE_MODEL_REPO` | `Xenova/opus-mt-ja-en` |
-| `TRANSLATE_MODELS_DIR` | `./data/models/translate` |
-| `TRANSLATE_MODEL_ENABLED` | `true` |
-| `TRANSLATE_MODEL_FILES` | `onnx/encoder_model.onnx,onnx/decoder_model.onnx,tokenizer.json` |
-| `INPAINT_MODEL_REPO` | `""` (disabled) |
-| `INPAINT_MODELS_DIR` | `./data/models/inpaint` |
-| `INPAINT_MODEL_ENABLED` | `false` |
-| `INPAINT_MODEL_FILES` | `model.onnx` |
-| `BUBBLE_MODEL_REPO` | `""` (disabled) |
-| `BUBBLE_MODELS_DIR` | `./data/models/bubble` |
-| `BUBBLE_MODEL_ENABLED` | `false` |
-| `BUBBLE_MODEL_FILES` | `model.onnx` |
-| `DICT_DIR` | `./data/models/jdict` |
-
-**Database** uses EF Core + SQLite. `AppDbContext` has `OcrLogs` and `TranslateLogs`. Migrations live in `server/Migrations/` and are applied automatically at boot via `db.Database.MigrateAsync()`.
-
-**JSON serialization** uses `snake_case` policy (`JsonNamingPolicy.SnakeCaseLower`) — all API field names are lowercase snake_case.
-
-**Blazor** — `server/` also serves a Blazor Interactive Server app (UI for future admin/dashboard use). The minimal API routes and Blazor coexist; routes are registered before `MapRazorComponents`. The React/Vite client (`server/src/` TypeScript) is a separate frontend bundled by Vite.
-
-### Server Vite client
-
-`server/` has a **SolidJS + Vite** frontend under `server/ClientApp/src/` (TypeScript). Entry point is `solid-app.tsx`; it exposes `window.AppBridge.mount/unmount` consumed by the Blazor `Index.razor` page. Output lands in `wwwroot/js/app.js` + `app.css`.
-
-The `vite.config.ts` uses the arrow-function form:
-
-```typescript
-export default defineConfig(({ mode }) => ({
-  // ...
-}));   // Note: closing })); not });
-```
-
-```bash
-cd server
-bun install
-bun run dev   # Vite dev server
-bun run build # Vite production build → wwwroot/js/app.js + app.css
-```
-
-## Desktop architecture
-
-**State machine** — `MainViewModel` drives the app through `AppStatus` states: `Idle → Capturing → Selecting → Analyzing → Error`.
-
-**Services:**
-- `HotkeyService` — SharpHook global hotkey (`Super+Shift+O`)
-- `ScreenCaptureService` — captures the primary monitor via `System.Drawing`
-- `LocalTesseractService` — on-device Tesseract 5 OCR (fallback when server is unavailable); downloads `tessdata` on first use
-- `ServerClient` — typed `HttpClient` wrapper for `/ocr`, `/analyze`, `/health`; attaches `X-Api-Key` header when `ApiKey` is set in `AppSettings`
-
-**Settings** are persisted to disk via `SettingsStore` and include `ServerUrl` (default `http://localhost:3579`) and `ApiKey`.
-
-**UI** — Avalonia XAML, `OverlayWindow` is a fullscreen transparent window for region selection.
+**Client** (`client/`): React 19 + TanStack Query + Tailwind v4, Fabric.js canvas for the Studio editor (`client/studio/canvas/`).
 
 ## Extension architecture
 
 MV3 extension with two OCR engines:
-- **Tesseract.js** — runs entirely in-browser via `engine.ts`
-- **Remote server** — calls the C# server's `/ocr` + `/analyze` endpoints
+- **Tesseract.js**: runs entirely in-browser via `engine.ts`
+- **Remote server**: calls the Bun server's routes through a typed Eden client (`src/api.ts`)
 
 Key files: `background.ts` (service worker), `content.ts` (overlay + selection), `options.ts` (settings page), `types.ts` (shared types).
 
+## Desktop architecture
+
+**State machine**: `MainViewModel` drives the app through `AppStatus` states: `Idle → Capturing → Selecting → Analyzing → Error`.
+
+**Services:** `HotkeyService` (SharpHook global hotkey `Super+Shift+O`), `ScreenCaptureService`, `LocalTesseractService` (on-device fallback), `ServerClient` (typed `HttpClient` for `/ocr`, `/analyze`, `/health`, with `X-Api-Key` when set). Settings (`ServerUrl`, default `http://localhost:3579`, and `ApiKey`) persist through `SettingsStore`.
+
 ## Key invariants
 
-- **Never pre-create `{dictDir}/extracted/`** — `DictionaryService.InitializeAsync()` detects a fresh extraction by the absence of that directory; creating it beforehand makes it think extraction already succeeded.
-- **`dotnet ef` migrations must be committed** — `server/Migrations/` is tracked in git; never delete migration files.
-- **`server/data/` is gitignored** — models, database, and extracted dictionary are runtime-only.
-- **`server/bin/`, `server/obj/`, `desktop/bin/`, `desktop/obj/`, `*/publish/`** are gitignored — never commit build output.
+- **Never commit `server/.env`**: it holds a real DeepL API key. Stage specific files, never `git add -A`.
+- **Drizzle migrations are committed and embedded**: change `src/db/schema.ts`, then `bun run db:generate` (it re-embeds). Never edit or delete existing migration files.
+- **`server/data/` is gitignored**: models, the SQLite database, page folders and logs are runtime-only.
+- **Don't run the server**: the user runs it. Test in-process with `app.handle()` and a scratch `DATABASE_URL`; never delete anything under `data/` that a test didn't create.
+- **`desktop/bin/`, `desktop/obj/`, `*/publish/`** are gitignored build output.

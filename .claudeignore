@@ -1,4 +1,4 @@
-# ── C# / .NET Build Artifacts ──────────────────────────────────────────────────
+# ── C# / .NET Build Artifacts (desktop) ────────────────────────────────────────
 **/bin/
 **/obj/
 **/publish/
@@ -24,7 +24,6 @@ package-lock.json
 server/data/
 **/data/models/
 **/data/jobs/
-server/samples/
 *.db
 *.db-wal
 *.db-shm
@@ -36,4 +35,3 @@ server/samples/
 .env.*
 *.log
 mighty-wiggling-cascade.md
-server/result.txt
