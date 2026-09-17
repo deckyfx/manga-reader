@@ -8,6 +8,7 @@ import { api } from "@/api";
 import { routeSettings } from "@/plugins/route-settings";
 import { studioPlugin } from "@/plugins/studio/index";
 import { readPlugin } from "@/plugins/read/index";
+import { managePlugin } from "@/plugins/manage/index";
 import { routeRoot, spaRoutes } from "@/plugins/route-spa";
 
 const bootLog = childLogger("boot");
@@ -149,6 +150,7 @@ const app = new Elysia({ serve: { routes: spaRoutes } })
   .use(routeSettings)
   .use(studioPlugin)
   .use(readPlugin)
+  .use(managePlugin)
   .use(routeRoot);
 
 const listen = env.SOCKET_PATH

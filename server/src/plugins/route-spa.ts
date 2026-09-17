@@ -16,6 +16,8 @@ export const spaRoutes = {
   "/studio/*": index,
   "/read": index,
   "/read/*": index,
+  "/manage": index,
+  "/manage/*": index,
   "/settings": index,
 };
 

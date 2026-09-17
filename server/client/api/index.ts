@@ -131,66 +131,122 @@ export const rollbackPage = (id: string, revision: number) =>
 
 export const historyImageUrl = (id: string, revision: number) => `/studio/api/pages/${id}/history/${revision}`;
 
-// ── Read (library + reader) ───────────────────────────────────────────────────
+// ── Read (library + reader, read-only) ────────────────────────────────────────
 
-export const listVolumes = () => unwrap(api.read.api.volumes.get());
+export type ReadingDirection = "rtl" | "ltr";
+export type SeriesStatus = "ongoing" | "completed" | "hiatus";
 
-export const createVolume = (body: { title: string; reading_direction?: ReadingDirection }) =>
-  unwrap(api.read.api.volumes.post(body));
+export interface SeriesQuery {
+  q?: string;
+  /** A series must carry all of these. */
+  tags?: string[];
+  /** A series carrying any of these is left out. */
+  exclude?: string[];
+  has_chapters?: boolean;
+  status?: SeriesStatus;
+  sort?: "title" | "recent";
+}
 
-export const getVolume = (id: number) => unwrap(api.read.api.volumes({ id }).get());
+export const listSeries = (query: SeriesQuery = {}) =>
+  unwrap(api.read.api.series.get({
+    query: {
+      ...(query.q ? { q: query.q } : {}),
+      ...(query.tags?.length ? { tags: query.tags.join(",") } : {}),
+      ...(query.exclude?.length ? { exclude: query.exclude.join(",") } : {}),
+      ...(query.has_chapters ? { has_chapters: "true" } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.sort ? { sort: query.sort } : {}),
+    },
+  }));
 
-export const updateVolume = (id: number, body: { title?: string; reading_direction?: ReadingDirection; cover_path?: string | null }) =>
-  unwrap(api.read.api.volumes({ id }).put(body));
+export const listSeriesTags = () => unwrap(api.read.api.series.tags.get());
 
-export const deleteVolume = (id: number) => unwrap(api.read.api.volumes({ id }).delete());
-
-export const createChapter = (body: { volume_id: number; title: string; sort_order?: number }) =>
-  unwrap(api.read.api.chapters.post(body));
+export const getSeries = (id: number) => unwrap(api.read.api.series({ id }).get());
 
 export const getChapter = (id: number) => unwrap(api.read.api.chapters({ id }).get());
 
-export const updateChapter = (id: number, body: { title?: string; sort_order?: number }) =>
-  unwrap(api.read.api.chapters({ id }).put(body));
+/** Series cover: uploaded, else the first page of its first chapter. */
+export const seriesCoverUrl = (id: number, version?: string | number) =>
+  `/read/api/series/${id}/cover${version !== undefined ? `?v=${encodeURIComponent(String(version))}` : ""}`;
 
-export const deleteChapter = (id: number) => unwrap(api.read.api.chapters({ id }).delete());
-
-/** Files images or ZIP / CBZ archives into a chapter; returns the chapter with its pages and what was skipped. */
-export const importChapterPages = (id: number, files: File[]) => unwrap(api.read.api.chapters({ id }).pages.post({ files }));
-
-export const reorderChapterPages = (id: number, ids: string[]) =>
-  unwrap(api.read.api.chapters({ id }).pages.reorder.put({ ids }));
-
-/** Pages that aren't in a chapter yet (extension jobs and uploads). */
-export const listInbox = () => unwrap(api.read.api.inbox.get());
-
-/** Moves a page between chapters (null = Inbox), renames it, or sets its reading position. */
-export const filePage = (id: string, body: { chapter_id?: number | null; sort_order?: number; name?: string | null }) =>
-  unwrap(api.read.api.pages({ id }).put(body));
-
-/** Takes a page out of its chapter, keeping the page and its images. */
-export const unfilePage = (id: string) => unwrap(api.read.api.pages({ id }).delete());
-
-/** Page image for the reader: the published result, else the original. `version` busts the browser cache. */
+/** Page image for the reader: the published result, else the original. */
 export const readPageImageUrl = (id: string, version?: string | number) =>
   `/read/api/pages/${id}/image${version !== undefined ? `?v=${encodeURIComponent(String(version))}` : ""}`;
 
-export const chapterExportUrl = (id: number) => `/read/api/chapters/${id}/export`;
+// ── Manage (library editing) ──────────────────────────────────────────────────
+
+export const createSeries = (body: {
+  title: string;
+  synopsis?: string | null;
+  author?: string | null;
+  status?: SeriesStatus;
+  reading_direction?: ReadingDirection;
+  tags?: string[];
+}) => unwrap(api.manage.api.series.post(body));
+
+export const updateSeries = (id: number, body: {
+  title?: string;
+  synopsis?: string | null;
+  author?: string | null;
+  status?: SeriesStatus;
+  reading_direction?: ReadingDirection;
+  /** Replaces the whole tag set. */
+  tags?: string[];
+}) => unwrap(api.manage.api.series({ id }).put(body));
+
+export const uploadSeriesCover = (id: number, cover: File) => unwrap(api.manage.api.series({ id }).cover.put({ cover }));
+
+export const removeSeriesCover = (id: number) => unwrap(api.manage.api.series({ id }).cover.delete());
+
+export const deleteSeries = (id: number) => unwrap(api.manage.api.series({ id }).delete());
+
+export const createVolume = (body: { series_id: number; title: string; number?: string | null }) =>
+  unwrap(api.manage.api.volumes.post(body));
+
+export const updateVolume = (id: number, body: { title?: string; number?: string | null; sort_order?: number }) =>
+  unwrap(api.manage.api.volumes({ id }).put(body));
+
+export const deleteVolume = (id: number) => unwrap(api.manage.api.volumes({ id }).delete());
+
+export const createChapter = (body: { series_id: number; volume_id?: number | null; title: string; number?: string | null }) =>
+  unwrap(api.manage.api.chapters.post(body));
+
+export const updateChapter = (id: number, body: { title?: string; number?: string | null; sort_order?: number; volume_id?: number | null }) =>
+  unwrap(api.manage.api.chapters({ id }).put(body));
+
+export const deleteChapter = (id: number) => unwrap(api.manage.api.chapters({ id }).delete());
+
+/** Files images or ZIP / CBZ archives into a chapter. */
+export const importChapterPages = (id: number, files: File[]) => unwrap(api.manage.api.chapters({ id }).pages.post({ files }));
+
+export const reorderChapterPages = (id: number, ids: string[]) => unwrap(api.manage.api.chapters({ id }).pages.reorder.put({ ids }));
+
+export const chapterExportUrl = (id: number) => `/manage/api/chapters/${id}/export`;
 
 /** Translates a chapter's pages: skips finished ones unless `force`. */
 export const startChapterRun = (id: number, body?: { force?: boolean; clean_sfx?: boolean }) =>
-  unwrap(api.studio.api.chapters({ id }).run.post(body ?? {}));
+  unwrap(api.manage.api.chapters({ id }).run.post(body ?? {}));
 
-export const getChapterRun = (id: number) => unwrap(api.studio.api.chapters({ id }).run.get());
+export const getChapterRun = (id: number) => unwrap(api.manage.api.chapters({ id }).run.get());
+
+/** Pages that aren't in a chapter yet (extension jobs and uploads). */
+export const listInbox = () => unwrap(api.manage.api.inbox.get());
+
+/** Moves a page between chapters (null = Inbox), renames it, or sets its reading position. */
+export const filePage = (id: string, body: { chapter_id?: number | null; sort_order?: number; name?: string | null }) =>
+  unwrap(api.manage.api.pages({ id }).put(body));
+
+/** Takes a page out of its chapter, keeping the page and its images. */
+export const unfilePage = (id: string) => unwrap(api.manage.api.pages({ id }).delete());
 
 /** Runs the whole pipeline again for one page, from its stored original. */
 export const rerunPage = (id: string, body?: { clean_sfx?: boolean }) =>
   unwrap(api.studio.api.pages({ id }).rerun.post(body ?? {}));
 
-export type ReadingDirection = "rtl" | "ltr";
-export type VolumeSummary = Awaited<ReturnType<typeof listVolumes>>[number];
-export type VolumeDetail = Awaited<ReturnType<typeof getVolume>>;
-export type ChapterSummary = VolumeDetail["chapters"][number];
+export type SeriesSummary = Awaited<ReturnType<typeof listSeries>>[number];
+export type SeriesDetail = Awaited<ReturnType<typeof getSeries>>;
+export type VolumeWithChapters = SeriesDetail["volumes"][number];
+export type ChapterSummary = SeriesDetail["unsorted"][number];
 export type ChapterDetail = Awaited<ReturnType<typeof getChapter>>;
 export type ReadPage = ChapterDetail["pages"][number];
 export type ChapterRunState = Awaited<ReturnType<typeof getChapterRun>>;

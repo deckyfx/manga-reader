@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, Maximize, Minimize, MoveHorizontal, MoveVertical, Scan } from "lucide-react";
-import { getChapter, getVolume, readPageImageUrl, type ReadPage } from "../api";
+import { getChapter, readPageImageUrl, type ReadPage } from "../api";
 
 type FitMode = "height" | "width" | "original";
 
@@ -44,8 +44,6 @@ export function ReaderPage() {
   const navigate = useNavigate();
 
   const chapterQ = useQuery({ queryKey: ["chapter", chapterId], queryFn: () => getChapter(chapterId), enabled: Number.isFinite(chapterId) });
-  const volumeId = chapterQ.data?.volume.id;
-  const volumeQ = useQuery({ queryKey: ["volume", volumeId], queryFn: () => getVolume(volumeId as number), enabled: volumeId !== undefined });
 
   const [fit, setFitState] = useState<FitMode>(readFitMode);
   const setFit = (mode: FitMode) => {
@@ -60,12 +58,16 @@ export function ReaderPage() {
   const frameRef = useRef<HTMLDivElement>(null);
 
   const pages = chapterQ.data?.pages ?? [];
-  const rtl = (volumeQ.data?.volume.reading_direction ?? chapterQ.data?.volume.reading_direction ?? "rtl") === "rtl";
+  const rtl = (chapterQ.data?.series.reading_direction ?? "rtl") === "rtl";
   const page: ReadPage | undefined = pages[pageNumber - 1];
-  const chapters = useMemo(() => [...(volumeQ.data?.chapters ?? [])].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id), [volumeQ.data]);
+  // Chapters of the series in order, so the ends of this one step into its neighbours (skipping empty ones)
+  const chapters = useMemo(
+    () => [...(chapterQ.data?.siblings ?? [])].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id),
+    [chapterQ.data],
+  );
   const chapterIndex = chapters.findIndex((c) => c.id === chapterId);
-  const nextChapter = chapterIndex >= 0 ? chapters[chapterIndex + 1] : undefined;
-  const previousChapter = chapterIndex > 0 ? chapters[chapterIndex - 1] : undefined;
+  const nextChapter = chapterIndex >= 0 ? chapters.slice(chapterIndex + 1).find((c) => c.pages > 0) : undefined;
+  const previousChapter = chapterIndex > 0 ? [...chapters.slice(0, chapterIndex)].reverse().find((c) => c.pages > 0) : undefined;
 
   useEffect(() => {
     if (page) saveProgress(chapterId, pageNumber);
@@ -87,12 +89,12 @@ export function ReaderPage() {
   /** Next in reading order: the following page, or the first page of the next chapter. */
   const next = useCallback(() => {
     if (pageNumber < pages.length) goToPage(pageNumber + 1);
-    else if (nextChapter && nextChapter.pages > 0) navigate(`/read/chapters/${nextChapter.id}/pages/1`);
+    else if (nextChapter) navigate(`/read/chapters/${nextChapter.id}/pages/1`);
   }, [pageNumber, pages.length, goToPage, nextChapter, navigate]);
 
   const previous = useCallback(() => {
     if (pageNumber > 1) goToPage(pageNumber - 1);
-    else if (previousChapter && previousChapter.pages > 0) navigate(`/read/chapters/${previousChapter.id}/pages/${previousChapter.pages}`);
+    else if (previousChapter) navigate(`/read/chapters/${previousChapter.id}/pages/${previousChapter.pages}`);
   }, [pageNumber, goToPage, previousChapter, navigate]);
 
   // Arrow keys follow the reading direction; space pages forward, Home / End jump to the ends
@@ -138,7 +140,7 @@ export function ReaderPage() {
   if (pages.length === 0) {
     return (
       <div className="p-4 space-y-3">
-        <Link to={`/read/chapters/${chapterId}`} className="text-sm text-indigo-300 hover:text-indigo-200">← Back to the chapter</Link>
+        <Link to={`/read/series/${chapterQ.data?.series.id ?? ""}`} className="text-sm text-indigo-300 hover:text-indigo-200">← Back to the series</Link>
         <p className="text-sm text-gray-500">This chapter has no pages yet.</p>
       </div>
     );
@@ -146,7 +148,7 @@ export function ReaderPage() {
   if (!page) {
     return (
       <div className="p-4 space-y-3">
-        <Link to={`/read/chapters/${chapterId}`} className="text-sm text-indigo-300 hover:text-indigo-200">← Back to the chapter</Link>
+        <Link to={`/read/series/${chapterQ.data?.series.id ?? ""}`} className="text-sm text-indigo-300 hover:text-indigo-200">← Back to the series</Link>
         <p className="text-sm text-gray-500">Page {pageNumber} doesn't exist; this chapter has {pages.length}.</p>
       </div>
     );
@@ -167,7 +169,7 @@ export function ReaderPage() {
   return (
     <div ref={frameRef} className="flex flex-col h-full bg-gray-950">
       <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-gray-800">
-        <Link to={`/read/chapters/${chapterId}`} className="text-gray-400 hover:text-white" title="Back to the chapter">
+        <Link to={`/read/series/${chapterQ.data.series.id}`} className="text-gray-400 hover:text-white" title="Back to the series">
           <ArrowLeft size={18} />
         </Link>
         <span className="text-sm font-medium truncate">{chapterQ.data.chapter.title}</span>

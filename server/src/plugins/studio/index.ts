@@ -17,8 +17,6 @@
  * POST  /studio/api/pages/:id/reclean            re-clean only some areas of the latest cleaned page
  * POST  /studio/api/pages/:id/run                re-run ocr / translate (all or some blocks), clean_text / clean_sfx, or render
  * POST  /studio/api/pages/:id/rerun              run the whole pipeline again from the page's stored original
- * POST  /studio/api/chapters/:id/run             translate a chapter's pages (skipping finished ones unless forced)
- * GET   /studio/api/chapters/:id/run             progress of that chapter run
  * POST  /studio/api/pages/:id/publish            snapshot the result and push it to extension tabs showing the page
  * GET   /studio/api/pages/:id/history            published snapshots, newest first
  * GET   /studio/api/pages/:id/history/:revision  a snapshot image
@@ -37,7 +35,6 @@ import { runExclusiveResult, withPageLock } from "@/queue/page-queue";
 import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
 import { historyFile, listHistory, restoreResult, snapshotResult } from "@/services/page-history";
-import { chapterRun, pagesToRun, startChapterRun } from "@/services/chapter-batch";
 import { decodeBase64Image, resultUrl, runStoredPage, submitPageJob } from "@/services/page-jobs";
 import { MASK_LAYER_FILES, PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
 import { FONT_FILES } from "@/services/typeset-service";
@@ -45,7 +42,6 @@ import { FONT_VARIANTS, TEXT_ALIGNS } from "@/shared/typeset";
 import { imageSize, maskFromImage, maskToPng } from "@/lib/mask";
 import { pageLive } from "@/stores/page-live-channel";
 import { PAGE_JOBS_DIR, pageDir, PageStore, type StageName } from "@/stores/page-store";
-import { VolumeStore } from "@/stores/volume-store";
 
 const log = childLogger("studio");
 
@@ -196,19 +192,6 @@ const BlockSchema = t.Object({
 });
 
 const PageDetail = t.Object({ page: PageSummary, stages: t.Array(StageSchema), blocks: t.Array(BlockSchema) });
-
-/** Progress of a chapter batch run (in memory; a restart cancels it). */
-const ChapterRunSchema = t.Object({
-  chapterId: t.Integer(),
-  running: t.Boolean(),
-  total: t.Integer(),
-  done: t.Integer(),
-  failed: t.Integer(),
-  currentPageId: t.Nullable(t.String()),
-  startedAt: t.String(),
-  finishedAt: t.Nullable(t.String()),
-  error: t.Nullable(t.String()),
-});
 
 const PublishResult = t.Object({ revision: t.Integer(), notified: t.Integer() });
 
@@ -677,37 +660,6 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       params: IdParams,
       body: t.Optional(t.Object({ clean_sfx: t.Optional(t.Boolean()) })),
       response: { 202: t.Object({ job_id: t.String() }), 404: ErrBody, 409: ErrBody, 422: ErrBody, 429: ErrBody, 503: ErrBody },
-    },
-  )
-
-  .post(
-    "/chapters/:id/run",
-    async ({ params, body, status }) => {
-      const chapter = await VolumeStore.findChapterById(params.id);
-      if (!chapter) return status(404, { error: "chapter not found" });
-      const state = await startChapterRun(params.id, { force: body?.force ?? false, cleanSfx: body?.clean_sfx ?? false });
-      if (!state) return status(409, { error: "this chapter is already being translated" });
-      return status(202, state);
-    },
-    {
-      params: t.Object({ id: t.Integer({ minimum: 1 }) }),
-      body: t.Optional(t.Object({ force: t.Optional(t.Boolean()), clean_sfx: t.Optional(t.Boolean()) })),
-      response: { 202: ChapterRunSchema, 404: ErrBody, 409: ErrBody },
-    },
-  )
-
-  .get(
-    "/chapters/:id/run",
-    async ({ params, status }) => {
-      const chapter = await VolumeStore.findChapterById(params.id);
-      if (!chapter) return status(404, { error: "chapter not found" });
-      const state = chapterRun(params.id);
-      // No run yet: report what one would do now, so the button can show the count
-      return state ?? { chapter_id: params.id, pending: (await pagesToRun(params.id, false)).length };
-    },
-    {
-      params: t.Object({ id: t.Integer({ minimum: 1 }) }),
-      response: { 200: t.Union([ChapterRunSchema, t.Object({ chapter_id: t.Integer(), pending: t.Integer() })]), 404: ErrBody },
     },
   )
 
