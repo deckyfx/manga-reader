@@ -137,7 +137,7 @@ export function ReadPage() {
                 to={`/read/series/${entry.id}`}
                 className="group rounded-lg overflow-hidden bg-gray-900 border border-gray-800 hover:border-indigo-500/60 transition-colors"
               >
-                <div className="aspect-[2/3] bg-gray-950 flex items-center justify-center">
+                <div className="aspect-2/3 bg-gray-950 flex items-center justify-center">
                   {entry.has_cover ? (
                     <img src={seriesCoverUrl(entry.id, entry.updated_at)} alt="" loading="lazy" className="w-full h-full object-cover" />
                   ) : (
