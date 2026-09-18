@@ -96,8 +96,10 @@ export function ReaderPage() {
   // Arrow keys follow the reading direction; space pages forward, Home / End jump to the ends
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Keys aimed at a control belong to that control: Space on a focused button would otherwise press it and
+      // turn the page at once
       const target = e.target;
-      if (target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      if (target instanceof Element && target.closest('button, a[href], input, textarea, select, [contenteditable="true"]')) return;
       const forward = rtl ? "ArrowLeft" : "ArrowRight";
       const backward = rtl ? "ArrowRight" : "ArrowLeft";
       if (e.key === forward || e.key === "ArrowDown" || e.key === "PageDown" || (e.key === " " && !e.shiftKey)) {
