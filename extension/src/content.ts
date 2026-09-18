@@ -56,9 +56,7 @@ function init(): void {
     else if (msg.type === "ocr-error")        showError(msg.message);
     else if (msg.type === "explain-result")   showExplain(msg.tokens, msg.definitions, msg.mode);
     else if (msg.type === "explain-error")    showExplainError(msg.message);
-    else if (msg.type === "image-updated") {
-      replacePageImages(msg.jobId, msg.resultUrl).catch((err: unknown) => console.warn("[web-ocr] republish not shown:", err));
-    }
+    else if (msg.type === "image-updated") showRevision(msg.jobId, msg.resultUrl);
   });
 
   // Studio page → extension bridge: relay image-updated events from the same origin
@@ -325,6 +323,24 @@ function showResult(msg: OcrResultMsg): void {
 }
 
 /** Replace all <img> tags on the page whose src matches the server result URL for this job. */
+/**
+ * Shows a revision, trying again a few times if it won't load. The live stream doesn't replay an event while it
+ * stays open, so a publish whose download hit a passing network hiccup would otherwise sit unseen until the next
+ * one. Retrying the same revision is safe: once a newer one has been asked for, `replacePageImages` skips the old.
+ */
+const REVISION_RETRIES = 3;
+
+function showRevision(jobId: string, resultUrl: string, attempt = 0): void {
+  replacePageImages(jobId, resultUrl).catch((err: unknown) => {
+    if (attempt >= REVISION_RETRIES) {
+      // The old revision stays on screen rather than a broken image
+      console.warn("[web-ocr] republish not shown:", err);
+      return;
+    }
+    setTimeout(() => showRevision(jobId, resultUrl, attempt + 1), 2000 * 2 ** attempt);
+  });
+}
+
 /** Object URLs handed to images, so the previous revision's is released when a newer one arrives. */
 const shownResults = new WeakMap<HTMLImageElement, string>();
 /** The same images, as a set that can be walked: to release the URLs of images that have left the page. */
@@ -911,10 +927,7 @@ async function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string
     // The server repeats the current revision on connect (catch-up), so only swap for a newer one
     const newest = Math.max(...Array.from(shown, (img) => Number(img.dataset.socrRevision ?? 0)));
     if (update.revision <= newest) return;
-    replacePageImages(jobId, `${serverUrl}${update.result_url}`).catch((err: unknown) => {
-      // The old revision stays on screen rather than a broken image
-      console.warn("[web-ocr] republish not shown:", err);
-    });
+    showRevision(jobId, `${serverUrl}${update.result_url}`);
   };
 
   // EventSource reconnects on its own after network errors; it only closes for good when the server refuses the
