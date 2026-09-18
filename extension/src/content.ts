@@ -657,12 +657,17 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
     if (error) throw new Error(errorMessage(error));
     appendLogEntry(data.cached ? "Found a previous translation ✓" : "Uploaded ✓", "uploaded");
 
-    // Server-sent events replay the job's whole history, so nothing is missed between submit and connect
+    // Server-sent events replay the job's whole history, so nothing is missed between submit and connect — and a
+    // reopened stream replays it again, which is why what has already been shown is counted and skipped
     activeEventSource?.close();
-    const es = new EventSource(await streamUrl(serverUrl, `api/translate-page/${data.job_id}/events`, apiKey));
-    activeEventSource = es;
+    let seen = 0;
 
-    es.onmessage = (event: MessageEvent<string>) => {
+    const onJobEvent = (es: EventSource, event: MessageEvent<string>, skip: { remaining: number }): void => {
+      if (skip.remaining > 0) {
+        skip.remaining--;
+        return;
+      }
+      seen++;
       const update = JSON.parse(event.data) as PageJobEvent;
       switch (update.type) {
         case "log":
@@ -696,11 +701,40 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
       }
     };
 
-    es.onerror = () => {
-      es.close();
-      activeEventSource = null;
-      hideImageTranslateLoading(false, "Connection to server lost");
+    /**
+     * Opens (or reopens) the job's stream with a fresh token. A dropped connection or an expired token closes an
+     * EventSource for good, so it is replaced rather than left to retry a URL the server will keep refusing.
+     */
+    const openJobStream = async (failures: number): Promise<void> => {
+      const es = new EventSource(await streamUrl(serverUrl, `api/translate-page/${data.job_id}/events`, apiKey));
+      activeEventSource = es;
+      const skip = { remaining: seen };
+      let opened = false;
+      es.onopen = () => {
+        opened = true;
+      };
+      es.onmessage = (event: MessageEvent<string>) => onJobEvent(es, event, skip);
+      es.onerror = () => {
+        if (activeEventSource !== es) return;
+        es.close();
+        const next = opened ? 1 : failures + 1;
+        if (next > MAX_STREAM_FAILURES) {
+          activeEventSource = null;
+          hideImageTranslateLoading(false, "Connection to server lost");
+          return;
+        }
+        setTimeout(() => {
+          // Another translation started, or this one finished, while waiting
+          if (activeEventSource !== es) return;
+          openJobStream(next).catch((err: unknown) => {
+            activeEventSource = null;
+            hideImageTranslateLoading(false, err instanceof Error ? err.message : String(err));
+          });
+        }, reopenDelay(next));
+      };
     };
+
+    await openJobStream(0);
 
   } catch (e) {
     hideImageTranslateLoading(false, e instanceof Error ? e.message : String(e));
@@ -747,12 +781,32 @@ function observeWatchedImages(): void {
   watcherObserver.observe(document.body, { childList: true, subtree: true });
 }
 
-/** Swap in the new result whenever the page is published from the Studio. */
-async function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string): Promise<void> {
-  if (pageWatchers.has(jobId)) return;
+/**
+ * How many times in a row a stream may fail to reopen before it is given up on. A stream that opened resets the
+ * count, so a watcher that lives for hours — reopening every time its token runs out — never reaches it.
+ */
+const MAX_STREAM_FAILURES = 5;
+
+/** Wait before reopening: 1 s, 2 s, 4 s… capped at 30 s, so a server that is down isn't hammered. */
+const reopenDelay = (failures: number): number => Math.min(30_000, 1000 * 2 ** Math.max(0, failures - 1));
+
+/**
+ * Swap in the new result whenever the page is published from the Studio.
+ *
+ * The stream's token lasts fifteen minutes, and EventSource reconnects with the URL it was given — so once the token
+ * has run out, the server refuses the reconnect and the stream closes for good. When that happens and the page is
+ * still being watched, a new token is fetched and the stream reopened.
+ */
+async function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string, failures = 0): Promise<void> {
+  if (failures === 0 && pageWatchers.has(jobId)) return;
   const es = new EventSource(await streamUrl(serverUrl, `api/translate-page/${jobId}/live`, apiKey));
   pageWatchers.set(jobId, es);
   observeWatchedImages();
+
+  let opened = false;
+  es.onopen = () => {
+    opened = true;
+  };
 
   es.onmessage = (event: MessageEvent<string>) => {
     const update = JSON.parse(event.data) as PageLiveEvent;
@@ -773,9 +827,21 @@ async function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string
     replacePageImages(jobId, `${serverUrl}${update.result_url}`);
   };
 
-  // EventSource reconnects on its own after network errors; it only closes for good when the server refuses the stream
+  // EventSource reconnects on its own after network errors; it only closes for good when the server refuses the
+  // stream — most often because its token has expired, which a new token fixes
   es.onerror = () => {
-    if (es.readyState === EventSource.CLOSED && pageWatchers.get(jobId) === es) stopWatching(jobId);
+    if (es.readyState !== EventSource.CLOSED || pageWatchers.get(jobId) !== es) return;
+    const next = opened ? 1 : failures + 1;
+    if (next > MAX_STREAM_FAILURES) {
+      stopWatching(jobId);
+      return;
+    }
+    setTimeout(() => {
+      // Stopped, or replaced, while waiting: the page no longer wants this stream
+      if (pageWatchers.get(jobId) !== es) return;
+      pageWatchers.delete(jobId);
+      watchPageUpdates(serverUrl, jobId, apiKey, next).catch(() => stopWatching(jobId));
+    }, reopenDelay(next));
   };
 }
 
