@@ -3,20 +3,11 @@ import { Link, useNavigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, Maximize, Minimize, MoveHorizontal, MoveVertical, Scan } from "lucide-react";
 import { getChapter, readPageImageUrl, type ReadPage } from "../api";
+import { clearProgress, saveProgress } from "../lib/read-progress";
 
 type FitMode = "height" | "width" | "original";
 
 const FIT_KEY = "read-fit-mode";
-const progressKey = (chapterId: number) => `read-progress-${chapterId}`;
-
-/** Remembers where the reader left off, so a chapter reopens on the same page. */
-function saveProgress(chapterId: number, pageNumber: number): void {
-  try {
-    localStorage.setItem(progressKey(chapterId), String(pageNumber));
-  } catch {
-    // Storage can be unavailable (private mode); the URL still holds the position
-  }
-}
 
 function readFitMode(): FitMode {
   try {
@@ -70,8 +61,11 @@ export function ReaderPage() {
   const previousChapter = chapterIndex > 0 ? [...chapters.slice(0, chapterIndex)].reverse().find((c) => c.pages > 0) : undefined;
 
   useEffect(() => {
-    if (page) saveProgress(chapterId, pageNumber);
-  }, [chapterId, pageNumber, page]);
+    if (!page) return;
+    // The last page means the chapter is finished: forget it, so the next visit starts at the beginning
+    if (pageNumber === pages.length) clearProgress(chapterId);
+    else saveProgress(chapterId, pageNumber);
+  }, [chapterId, pageNumber, page, pages.length]);
 
   // Neighbouring pages are fetched ahead, so turning the page is instant
   useEffect(() => {
@@ -89,7 +83,7 @@ export function ReaderPage() {
   /** Next in reading order: the following page, or the first page of the next chapter. */
   const next = useCallback(() => {
     if (pageNumber < pages.length) goToPage(pageNumber + 1);
-    else if (nextChapter) navigate(`/read/chapters/${nextChapter.id}/pages/1`);
+    else if (nextChapter) navigate(`/read/chapters/${nextChapter.id}/pages/1`);  // a new chapter starts at its first page
   }, [pageNumber, pages.length, goToPage, nextChapter, navigate]);
 
   const previous = useCallback(() => {

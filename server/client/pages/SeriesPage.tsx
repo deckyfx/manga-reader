@@ -2,6 +2,7 @@ import { Link, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, Loader2, Settings2 } from "lucide-react";
 import { getSeries, seriesCoverUrl, type ChapterSummary } from "../api";
+import { chapterLink, savedPage } from "../lib/read-progress";
 
 const STATUS_LABEL: Record<string, string> = { ongoing: "Ongoing", completed: "Completed", hiatus: "Hiatus" };
 
@@ -93,19 +94,28 @@ function ChapterList({ chapters }: { chapters: ChapterSummary[] }) {
   if (chapters.length === 0) return <p className="text-xs text-gray-600">No chapters in this volume yet.</p>;
   return (
     <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
-      {chapters.map((chapter) => (
-        <Link
-          key={chapter.id}
-          to={chapter.pages > 0 ? `/read/chapters/${chapter.id}/pages/1` : `/manage/chapters/${chapter.id}`}
-          className="flex items-center gap-2 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 hover:border-indigo-500/60 transition-colors"
-        >
-          <span className="text-sm truncate">
-            {chapter.number ? `${chapter.number}. ` : ""}
-            {chapter.title}
-          </span>
-          <span className="ml-auto text-xs text-gray-500">{chapter.pages} pg</span>
-        </Link>
-      ))}
+      {chapters.map((chapter) => {
+        // Where this chapter was left off, so the card resumes instead of starting over
+        const resumeAt = savedPage(chapter.id, chapter.pages);
+        return (
+          <Link
+            key={chapter.id}
+            to={chapter.pages > 0 ? chapterLink(chapter.id, chapter.pages) : `/manage/chapters/${chapter.id}`}
+            className="flex items-center gap-2 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 hover:border-indigo-500/60 transition-colors"
+          >
+            <span className="text-sm truncate">
+              {chapter.number ? `${chapter.number}. ` : ""}
+              {chapter.title}
+            </span>
+            {resumeAt > 1 && (
+              <span className="shrink-0 rounded-full bg-indigo-600/25 px-2 py-0.5 text-[11px] text-indigo-200" title="Continue where you left off">
+                page {resumeAt}
+              </span>
+            )}
+            <span className="ml-auto text-xs text-gray-500">{chapter.pages} pg</span>
+          </Link>
+        );
+      })}
     </div>
   );
 }
