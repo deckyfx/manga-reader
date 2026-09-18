@@ -7,10 +7,12 @@ import { useAuth } from "../auth/AuthProvider";
 import { AuthButton } from "../components/AuthButton";
 import { AuthField } from "../components/AuthField";
 import { AuthShell } from "../components/AuthShell";
+import { useToast } from "../components/Toast";
 
 /** Self-registration, which only exists while an admin has it switched on. */
 export function RegisterPage() {
   const navigate = useNavigate();
+  const toast = useToast();
   const { account, needsSetup, registrationEnabled, loading, refresh } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -24,7 +26,10 @@ export function RegisterPage() {
     },
     onError: async (error) => {
       // Registration switched off, or the server set up, while this page was open — re-read and show what's true now
-      if (error instanceof ApiError && (error.status === 403 || error.status === 409)) await refresh();
+      if (error instanceof ApiError && (error.status === 403 || error.status === 409)) {
+        toast.info("This server isn't taking new accounts any more.");
+        await refresh();
+      }
     },
   });
 

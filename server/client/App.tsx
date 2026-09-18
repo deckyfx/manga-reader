@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Routes, Route, useParams } from "react-router"
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "./api";
 import { ConfirmProvider } from "./components/ConfirmDialog";
+import { toast, ToastProvider } from "./components/Toast";
 import { AuthProvider } from "./auth/AuthProvider";
 import { Layout } from "./components/Layout";
 import { HomePage } from "./pages/HomePage";
@@ -25,7 +26,9 @@ import { AdminPage } from "./pages/AdminPage";
  * makes the whole client agree at once: the sidebar drops what it can't open, and the guarded pages redirect.
  */
 const onUnauthorised = (error: unknown) => {
-  if (error instanceof ApiError && error.status === 401) void queryClient.invalidateQueries({ queryKey: ["me"] });
+  if (!(error instanceof ApiError) || error.status !== 401) return;
+  toast.info("Your session has ended. Sign in again to carry on.");
+  void queryClient.invalidateQueries({ queryKey: ["me"] });
 };
 
 const queryClient: QueryClient = new QueryClient({
@@ -40,6 +43,7 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ConfirmProvider>
+      <ToastProvider>
       <BrowserRouter>
         <AuthProviderWithRouter>
         <Routes>
@@ -65,6 +69,7 @@ export function App() {
         </Routes>
         </AuthProviderWithRouter>
       </BrowserRouter>
+      </ToastProvider>
       </ConfirmProvider>
     </QueryClientProvider>
   );

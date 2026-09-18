@@ -31,7 +31,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const meQ = useQuery({ queryKey: ["me"], queryFn: getMe, staleTime: 30_000, retry: false });
 
   const refresh = useCallback(async () => {
+    // Waits for the answer, so a caller can act on what comes back rather than on what was cached
     await qc.invalidateQueries({ queryKey: ["me"] });
+    await qc.refetchQueries({ queryKey: ["me"] });
   }, [qc]);
 
   const signOut = useCallback(async () => {

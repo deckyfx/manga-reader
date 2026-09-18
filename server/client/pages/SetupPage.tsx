@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, ShieldPlus } from "lucide-react";
@@ -7,11 +7,27 @@ import { useAuth } from "../auth/AuthProvider";
 import { AuthButton } from "../components/AuthButton";
 import { AuthField } from "../components/AuthField";
 import { AuthShell } from "../components/AuthShell";
+import { useToast } from "../components/Toast";
 
 /** The first run: an empty server takes one admin, and the route closes behind itself. */
 export function SetupPage() {
   const navigate = useNavigate();
+  const toast = useToast();
   const { needsSetup, loading, refresh } = useAuth();
+  /**
+   * This screen exists only while the server has no accounts, so it asks again on arrival rather than trusting a
+   * cached answer — a tab left open through the setup would otherwise still offer the form.
+   */
+  const [checking, setChecking] = useState(true);
+  useEffect(() => {
+    void refresh().finally(() => setChecking(false));
+  }, [refresh]);
+
+  const settled = !checking && !loading;
+  useEffect(() => {
+    if (settled && !needsSetup) toast.info("This server already has an account. Sign in instead.");
+  }, [settled, needsSetup, toast]);
+
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -23,12 +39,12 @@ export function SetupPage() {
       navigate("/home");
     },
     onError: async (error) => {
-      // 409 means somebody set this server up while this page was open: ask again, and the guard below moves on
+      // 409 means somebody set this server up while this page was open: ask again, and the guard above moves on
       if (error instanceof ApiError && error.status === 409) await refresh();
     },
   });
 
-  if (loading) {
+  if (!settled) {
     return (
       <div className="flex min-h-full items-center justify-center">
         <Loader2 className="animate-spin text-gray-600" />
