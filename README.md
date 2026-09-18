@@ -1,5 +1,7 @@
 # Selfhost OCR
 
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/deckyfx/web-ocr?utm_source=oss&utm_medium=github&utm_campaign=deckyfx%2Fweb-ocr&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
+
 > Forked from [brian-girko/image-reader](https://github.com/brian-girko/image-reader) — original OCR Image Reader extension by Brian Girko, licensed under MPL 2.0.
 
 A browser extension (MV3) that lets you select any region on screen and extract text via OCR. Supports two engines: **Tesseract.js** (runs entirely in-browser, no server needed) or a **self-hosted Bun server** with ONNX OCR, translation, whole-page manga translation and a Studio for editing translated pages.
@@ -14,6 +16,9 @@ A browser extension (MV3) that lets you select any region on screen and extract 
 - DeepL translation (client-side or server-side)
 - **Page translation**: detect text, OCR, translate, clean the lettering and typeset the translation, replacing the image in the open tab
 - **Studio** (`/studio`): edit detected regions, paint the text mask, re-clean areas, and move / resize / rotate / restyle the lettering with a live preview that matches the final image
+- **Library** (`/manage`): series → volume (optional) → chapter → page, with cover art, tags, ZIP / CBZ import, drag-to-reorder, whole-chapter translation and export
+- **Reader** (`/read`): browse by title, tag or status and read a chapter right to left or left to right, resuming where you left off
+- Editing a page never changes what readers see until it is published
 - Manifest V3 — works on Chrome, Edge, and Firefox
 
 ## Project Structure
@@ -22,7 +27,7 @@ A browser extension (MV3) that lets you select any region on screen and extract 
 server/        Self-hosted server: OCR, translation, page pipeline, Studio (Bun + Elysia + ONNX)
 extension/     Browser extension (TypeScript + Bun)
 desktop/       Desktop companion app (Avalonia / C#)
-docs/          Studio / reader plan
+docs/          Studio, library and reader plan
 WebOcr.slnx    .NET solution for the desktop app
 ```
 
@@ -60,7 +65,9 @@ bun install
 bun run dev
 ```
 
-Default address: `http://localhost:3579` (Studio at `http://localhost:3579/studio`). Put settings such as `DEEPL_API_KEY` in `server/.env`.
+Default address: `http://localhost:3579` — Studio at `/studio`, library management at `/manage`, reader at `/read`. Put settings such as `DEEPL_API_KEY` in `server/.env`.
+
+The server binds to `127.0.0.1` by default: `/manage` and the Studio have no sign-in yet, so anyone who can reach the port can edit the library. To read from another device, set `HOST=0.0.0.0` deliberately, and only behind something that authenticates.
 
 In extension settings, choose the **Remote Server** tab, enter the server URL, click **Test Connection**, then save.
 
@@ -72,6 +79,7 @@ To build a single executable: `bun run build` (outputs `server/app`).
 - Jitendex dictionary lookups with Kuromoji tokenization (`/analyze`)
 - Page pipeline: comic text detection, block OCR and translation, LaMa inpainting to clean lettering, bubble-aware typesetting
 - Studio for correcting and re-lettering pages, with per-stage state, partial re-runs, publish history and rollback
+- Library of series, volumes, chapters and pages: import, reorder, batch translate, export, and a reader that is served published pages only
 - SQLite (Drizzle) with migrations embedded in the build
 - `/health` reports readiness while models load
 
