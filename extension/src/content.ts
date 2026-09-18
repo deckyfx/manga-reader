@@ -643,7 +643,12 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
 
     const { serverUrl, apiKey, cleanSfx } = await loadServerAccess();
     if (!serverUrl) throw new Error("No server URL configured. Open extension settings.");
-    if (!apiKey) throw new Error("No API key configured. Make one on the server's account page, then paste it into extension settings.");
+    if (!apiKey) {
+      throw new Error(
+        "No API key is being sent. Make one on the server's account page and paste it into extension settings — and if"
+        + " the server's address is plain http on your network, tick the box that allows sending it there.",
+      );
+    }
 
     const { data, error } = await serverApi(serverUrl, apiKey).api["translate-page"].post({
       image: base64,

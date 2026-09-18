@@ -60,7 +60,32 @@ export async function loadServerAccess(): Promise<{ serverUrl: string; apiKey: s
   const settings = await loadSettings();
   return {
     serverUrl: settings.serverUrl.replace(/\/$/, ""),
-    apiKey: settings.serverApiKey,
+    apiKey: usableApiKey(settings),
     cleanSfx: settings.pageCleanSfx,
   };
+}
+
+/**
+ * Whether this address would put the key on a network in clear. Loopback never leaves the machine, https is
+ * encrypted; anything else is a home LAN or worse, and the key is only sent there on purpose.
+ */
+export function isPlainHttpOverNetwork(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:") return false;
+    const host = url.hostname;
+    return !(host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]" || host.endsWith(".localhost"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The key to send, which is nothing when it would travel in clear and that hasn't been allowed. The server then
+ * refuses the request, which is the honest outcome: better a refusal you can read than a credential on the wire.
+ */
+export function usableApiKey(settings: Pick<Settings, "serverUrl" | "serverApiKey" | "allowInsecureServer">): string {
+  if (!settings.serverApiKey) return "";
+  if (isPlainHttpOverNetwork(settings.serverUrl) && !settings.allowInsecureServer) return "";
+  return settings.serverApiKey;
 }

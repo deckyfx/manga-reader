@@ -11,7 +11,7 @@ import type {
   ImageUpdatedMsg,
 } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
-import { loadSettings } from "./settings-store";
+import { loadSettings, usableApiKey } from "./settings-store";
 import { errorMessage, serverApi } from "./api";
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -168,7 +168,7 @@ async function runServerFlow(
   const start = Date.now();
 
   try {
-    const { data, error } = await serverApi(settings.serverUrl, settings.serverApiKey).ocr.post({
+    const { data, error } = await serverApi(settings.serverUrl, usableApiKey(settings)).ocr.post({
       image: `data:image/jpeg;base64,${imageB64}`,
       translate_engine: settings.serverTranslation,
     });
@@ -199,7 +199,7 @@ async function handleExplain(text: string, tabId: number): Promise<void> {
   }
 
   try {
-    const { data, error } = await serverApi(settings.serverUrl, settings.serverApiKey).analyze.post({ text, sanitize: true, mode: settings.dictMode });
+    const { data, error } = await serverApi(settings.serverUrl, usableApiKey(settings)).analyze.post({ text, sanitize: true, mode: settings.dictMode });
 
     if (error) {
       sendToTab(tabId, { type: "explain-error", message: errorMessage(error) });

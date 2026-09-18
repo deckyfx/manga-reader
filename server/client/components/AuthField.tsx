@@ -24,9 +24,10 @@ export const AuthField = forwardRef<HTMLInputElement, AuthFieldProps>(function A
       <input
         id={id}
         ref={ref}
-        aria-describedby={note ? noteId : undefined}
-        aria-invalid={invalid || undefined}
         {...input}
+        // After the spread: a caller's own description is kept, with the note's id added rather than replacing it
+        aria-describedby={[input["aria-describedby"], note ? noteId : undefined].filter(Boolean).join(" ") || undefined}
+        aria-invalid={input["aria-invalid"] ?? (invalid || undefined)}
         className={`w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${className}`}
       />
       {note && (

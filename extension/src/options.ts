@@ -1,6 +1,6 @@
 import type { Settings, OcrEngine, ServerTranslation, ClientTranslation, DictMode, TesseractQuality } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
-import { loadSettings, saveSettings as persistSettings } from "./settings-store";
+import { isPlainHttpOverNetwork, loadSettings, saveSettings as persistSettings } from "./settings-store";
 import { errorMessage, serverApi } from "./api";
 
 // ── Elements ──────────────────────────────────────────────────────────────────
@@ -22,6 +22,8 @@ const deeplTargetLangSel         = document.getElementById("deeplTargetLang")   
 
 const serverUrlInput             = document.getElementById("serverUrl")               as HTMLInputElement;
 const serverApiKeyInput          = document.getElementById("serverApiKey")            as HTMLInputElement;
+const allowInsecureInput         = document.getElementById("allowInsecureServer")     as HTMLInputElement;
+const insecureField              = document.getElementById("insecureField")           as HTMLElement;
 const serverTranslationSel       = document.getElementById("serverTranslation")       as HTMLSelectElement;
 const dictModeSelect             = document.getElementById("dictMode")                as HTMLSelectElement;
 const pageCleanSfxInput          = document.getElementById("pageCleanSfx")            as HTMLInputElement;
@@ -129,6 +131,17 @@ async function checkLangData(): Promise<void> {
 
 // ── Server: URL change resets verification ────────────────────────────────────
 
+/** The choice only makes sense for an address that would actually expose the key. */
+function updateInsecureVisibility(): void {
+  insecureField.style.display = isPlainHttpOverNetwork(serverUrlInput.value.trim()) ? "block" : "none";
+}
+
+allowInsecureInput.addEventListener("change", () => {
+  serverVerified = false;
+  setInlineStatus(testBtnStatus, "", "");
+  updateSaveBtn();
+});
+
 serverApiKeyInput.addEventListener("input", () => {
   // A new key hasn't been tried yet, so the connection has to be proved again
   serverVerified = false;
@@ -137,6 +150,7 @@ serverApiKeyInput.addEventListener("input", () => {
 });
 
 serverUrlInput.addEventListener("input", () => {
+  updateInsecureVisibility();
   serverVerified = false;
   setInlineStatus(testBtnStatus, "", "");
   updateSaveBtn();
@@ -172,12 +186,21 @@ async function testConnection(): Promise<void> {
         : keyCheck?.error
           ? `❌ the key was refused (${errorMessage(keyCheck.error)})`
           : `key accepted as ${keyCheck?.data?.username ?? "?"} ✓`;
-      // A key crossing a network in clear is worth saying out loud; loopback never leaves the machine
-      const exposed = key !== "" && isPlainHttpOverNetwork(url);
+      // A key crossing a network in clear is the thing to stop; loopback never leaves the machine
+      const exposed = key !== "" && isPlainHttpOverNetwork(url) && !allowInsecureInput.checked;
       serverVerified = key !== "" && !keyCheck?.error;
       const connected = data.status === "starting" ? "⏳ Connected, models still loading" : "✅ Connected";
-      const warning = exposed ? " · ⚠️ this address isn't https, so the key and your password cross the network in clear" : "";
-      setInlineStatus(testBtnStatus, `${connected} — ${models} · ${keyNote}${warning}`, serverVerified ? "ok" : "err");
+      if (exposed) {
+        // Refused rather than warned: a key read off the wire is somebody else's account
+        serverVerified = false;
+        setInlineStatus(
+          testBtnStatus,
+          `${connected} — but this address isn't https and isn't on this machine, so the key would cross the network in clear. Use https, or tick the box below if you trust this network.`,
+          "err",
+        );
+        return;
+      }
+      setInlineStatus(testBtnStatus, `${connected} — ${models} · ${keyNote}`, serverVerified ? "ok" : "err");
     }
   } catch (e) {
     serverVerified = false;
@@ -190,22 +213,6 @@ async function testConnection(): Promise<void> {
 }
 
 
-/**
- * Whether this address would send the key across a network unencrypted. A self-hosted server on loopback is fine —
- * nothing leaves the machine — and https is fine anywhere. Anything else is worth warning about rather than
- * refusing: a server on the LAN is exactly what this is for.
- */
-function isPlainHttpOverNetwork(raw: string): boolean {
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "http:") return false;
-    const host = url.hostname;
-    const loopback = host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]" || host.endsWith(".localhost");
-    return !loopback;
-  } catch {
-    return false;
-  }
-}
 
 // ── Client translation visibility ─────────────────────────────────────────────
 
@@ -262,6 +269,8 @@ loadSettings()
 
     serverUrlInput.value        = s.serverUrl;
     serverApiKeyInput.value     = s.serverApiKey;
+    allowInsecureInput.checked  = s.allowInsecureServer;
+    updateInsecureVisibility();
     serverTranslationSel.value  = s.serverTranslation;
     dictModeSelect.value        = s.dictMode;
     pageCleanSfxInput.checked   = s.pageCleanSfx;
@@ -328,6 +337,7 @@ async function saveSettings(): Promise<void> {
     ocrEngine:         activeEngine,
     serverUrl:         serverUrlInput.value.trim(),
     serverApiKey:      serverApiKeyInput.value.trim(),
+    allowInsecureServer: allowInsecureInput.checked,
     serverTranslation: serverTranslationSel.value as ServerTranslation,
     dictMode:          dictModeSelect.value as DictMode,
     pageCleanSfx:      pageCleanSfxInput.checked,
