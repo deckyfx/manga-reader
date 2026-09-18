@@ -660,6 +660,8 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
     // Server-sent events replay the job's whole history, so nothing is missed between submit and connect — and a
     // reopened stream replays it again, which is why what has already been shown is counted and skipped
     activeEventSource?.close();
+    // This translation's number: a newer one started while a token is being fetched takes over, and this one stops
+    const generation = ++jobGeneration;
     let seen = 0;
 
     const onJobEvent = (es: EventSource, event: MessageEvent<string>, skip: { remaining: number }): void => {
@@ -706,7 +708,10 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
      * EventSource for good, so it is replaced rather than left to retry a URL the server will keep refusing.
      */
     const openJobStream = async (failures: number): Promise<void> => {
-      const es = new EventSource(await streamUrl(serverUrl, `api/translate-page/${data.job_id}/events`, apiKey));
+      const url = await streamUrl(serverUrl, `api/translate-page/${data.job_id}/events`, apiKey);
+      // Overtaken while the token was being fetched: leave the newer translation's stream alone
+      if (generation !== jobGeneration) return;
+      const es = new EventSource(url);
       activeEventSource = es;
       const skip = { remaining: seen };
       let opened = false;
@@ -725,7 +730,7 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
         }
         setTimeout(() => {
           // Another translation started, or this one finished, while waiting
-          if (activeEventSource !== es) return;
+          if (activeEventSource !== es || generation !== jobGeneration) return;
           openJobStream(next).catch((err: unknown) => {
             activeEventSource = null;
             hideImageTranslateLoading(false, err instanceof Error ? err.message : String(err));
@@ -749,6 +754,13 @@ function revisionOf(resultUrl: string): number {
 
 /** Live streams per translated page; they stay open while this tab shows the page. */
 const pageWatchers = new Map<string, EventSource>();
+/**
+ * Which start of a page's watcher is the current one. It is taken before the token is fetched, so two starts racing
+ * for the same page can't both open a stream — and a stop that lands during the fetch is noticed afterwards.
+ */
+const watcherGenerations = new Map<string, number>();
+/** The same, for the translation currently in progress. */
+let jobGeneration = 0;
 let watcherObserver: MutationObserver | null = null;
 let watcherCheckQueued = false;
 
@@ -764,6 +776,8 @@ function closeDetachedWatchers(): void {
 function stopWatching(jobId: string): void {
   pageWatchers.get(jobId)?.close();
   pageWatchers.delete(jobId);
+  // Anything still fetching a token for this page will see it has been stopped
+  watcherGenerations.delete(jobId);
   if (pageWatchers.size === 0) {
     watcherObserver?.disconnect();
     watcherObserver = null;
@@ -798,8 +812,22 @@ const reopenDelay = (failures: number): number => Math.min(30_000, 1000 * 2 ** M
  * still being watched, a new token is fetched and the stream reopened.
  */
 async function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string, failures = 0): Promise<void> {
-  if (failures === 0 && pageWatchers.has(jobId)) return;
-  const es = new EventSource(await streamUrl(serverUrl, `api/translate-page/${jobId}/live`, apiKey));
+  // A first start is refused while one is already running *or still fetching its token*
+  if (failures === 0 && watcherGenerations.has(jobId)) return;
+  const generation = (watcherGenerations.get(jobId) ?? 0) + 1;
+  watcherGenerations.set(jobId, generation);
+
+  let url: string;
+  try {
+    url = await streamUrl(serverUrl, `api/translate-page/${jobId}/live`, apiKey);
+  } catch (err) {
+    if (watcherGenerations.get(jobId) === generation) watcherGenerations.delete(jobId);
+    throw err;
+  }
+  // Stopped, or started again, while the token was being fetched: this attempt is no longer wanted
+  if (watcherGenerations.get(jobId) !== generation) return;
+
+  const es = new EventSource(url);
   pageWatchers.set(jobId, es);
   observeWatchedImages();
 
@@ -838,7 +866,7 @@ async function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string
     }
     setTimeout(() => {
       // Stopped, or replaced, while waiting: the page no longer wants this stream
-      if (pageWatchers.get(jobId) !== es) return;
+      if (pageWatchers.get(jobId) !== es || watcherGenerations.get(jobId) !== generation) return;
       pageWatchers.delete(jobId);
       watchPageUpdates(serverUrl, jobId, apiKey, next).catch(() => stopWatching(jobId));
     }, reopenDelay(next));
