@@ -380,8 +380,14 @@ async function replacePageImages(jobId: string, resultUrl: string): Promise<void
   if (revision < (latestRevisionRequested.get(jobId) ?? 0)) return;
   latestRevisionRequested.set(jobId, revision);
 
-  const { apiKey } = await loadServerAccess();
-  const response = await fetch(resultUrl, {
+  const { serverUrl, apiKey } = await loadServerAccess();
+  // This URL can arrive through a message relayed from the page itself — and the page is any website. Without this
+  // check, a hostile page could post itself an "image-updated" pointing anywhere and collect the key.
+  const target = new URL(resultUrl, `${serverUrl}/`);
+  if (!serverUrl || target.origin !== new URL(serverUrl).origin) {
+    throw new Error(`refusing to fetch a revision from ${target.origin}: it isn't the configured server`);
+  }
+  const response = await fetch(target, {
     headers: apiKey ? { "x-api-key": apiKey } : {},
     // Never follow a redirect with the key attached, and never show a cached older revision
     redirect: "error",
@@ -768,7 +774,10 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
           setImageTranslateProgress(1);
           appendLogEntry(`Image replaced ✓ (${(update.elapsed_ms / 1000).toFixed(1)} s)`, "done");
           appendStudioLink(`${serverUrl}/studio/pages/${data.job_id}`);
-          setTimeout(() => hideImageTranslateLoading(true), 4000);
+          // A newer translation may have opened its own overlay by then; only this one's is ours to hide
+          setTimeout(() => {
+            if (isCurrent()) hideImageTranslateLoading(true);
+          }, 4000);
           break;
         case "error":
           es.close();
@@ -954,8 +963,13 @@ function reopenWatcher(serverUrl: string, jobId: string, apiKey: string, failure
     return;
   }
   setTimeout(() => {
-    // Stopped while waiting (the image left the page), or already running again
+    // Stopped while waiting, or already running again
     if (!watcherGenerations.has(jobId) || pageWatchers.has(jobId)) return;
+    // Out of the map while it waited, the observer's sweep couldn't see it: check the image is still here
+    if (!document.querySelector(`img[data-socr-job-id="${CSS.escape(jobId)}"]`)) {
+      stopWatching(jobId);
+      return;
+    }
     watchPageUpdates(serverUrl, jobId, apiKey, failures).catch(() => reopenWatcher(serverUrl, jobId, apiKey, failures + 1));
   }, reopenDelay(failures));
 }
