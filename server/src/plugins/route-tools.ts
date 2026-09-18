@@ -11,14 +11,14 @@
 import Elysia, { t } from "elysia";
 import { ErrBody } from "@/lib/schemas";
 import { authContext } from "@/plugins/auth/index";
-import { issueStreamToken } from "@/services/auth";
+import { AUTH_FAILED, issueStreamToken } from "@/services/auth";
 
 export const routeTools = new Elysia()
   .use(authContext)
   .get(
     "/api/whoami",
     ({ principal, status }) => {
-      if (!principal) return status(401, { error: "no account behind this request" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       return { username: principal.user.username, role: principal.user.role, via: principal.via };
     },
     {
@@ -32,7 +32,7 @@ export const routeTools = new Elysia()
   .post(
     "/api/stream-token",
     ({ principal, status }) => {
-      if (!principal) return status(401, { error: "no account behind this request" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       return issueStreamToken(principal.user.id);
     },
     { response: { 200: t.Object({ token: t.String(), expires_in: t.Integer() }), 401: ErrBody } },

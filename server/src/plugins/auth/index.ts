@@ -30,6 +30,7 @@ import Elysia, { t } from "elysia";
 import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
 import {
+  AUTH_FAILED,
   authenticate,
   checkTotp,
   removeTotpDevice,
@@ -170,7 +171,7 @@ export const requireRole = (role: UserRole) =>
   new Elysia({ name: `require-${role}` })
     .use(authContext)
     .onBeforeHandle({ as: "scoped" }, ({ principal, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       if (!hasRole(principal.user, role)) return status(403, { error: `this needs the ${role} role` });
@@ -382,7 +383,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .get(
     "/passkeys",
     async ({ principal, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       return (await CredentialStore.listByUser(principal.user.id)).map((credential) => ({
@@ -399,7 +400,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     "/passkeys/options",
     async ({ principal, request, status }) => {
       // Enrolling always happens from a signed-in session: a passkey is a second factor, never a way in
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const options = await registrationOptions(principal.user);
@@ -413,7 +414,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .post(
     "/passkeys",
     async ({ principal, body, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const pending = await pendingUser(body.challenge);
@@ -435,7 +436,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .delete(
     "/passkeys/:id",
     async ({ principal, params, body, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       if (!(await verifyPassword(body.password, principal.user.passwordHash))) return status(403, { error: "the password doesn't match" });
@@ -455,7 +456,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .get(
     "/totp",
     async ({ principal, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       return (await TotpDeviceStore.listByUser(principal.user.id)).map((device) => ({
@@ -472,7 +473,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .post(
     "/totp",
     async ({ principal, body, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       // Only one enrolment can be half-finished at a time; starting again replaces the abandoned one
@@ -490,7 +491,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .post(
     "/totp/:id/confirm",
     async ({ principal, params, body, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const device = await TotpDeviceStore.findById(params.id);
@@ -515,7 +516,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .delete(
     "/totp/:id",
     async ({ principal, params, body, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       // The password again: a borrowed session shouldn't be able to strip a factor off the account
@@ -545,7 +546,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .post(
     "/password",
     async ({ principal, body, cookie, request, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       if (!(await verifyPassword(body.current, principal.user.passwordHash))) return status(403, { error: "the current password doesn't match" });
@@ -566,7 +567,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .post(
     "/recovery",
     async ({ principal, body, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       if (!(await verifyPassword(body.password, principal.user.passwordHash))) return status(403, { error: "the password doesn't match" });
@@ -585,7 +586,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .get(
     "/sessions",
     async ({ principal, cookie, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const token = cookie[SESSION_COOKIE]?.value;
@@ -606,7 +607,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .delete(
     "/sessions/:id",
     async ({ principal, params, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const session = await SessionStore.find(params.id);
@@ -625,7 +626,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .get(
     "/keys",
     async ({ principal, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const keys = await ApiKeyStore.listByUser(principal.user.id);
@@ -644,7 +645,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .post(
     "/keys",
     async ({ principal, body, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       if (!hasRole(principal.user, "contributor")) return status(403, { error: "this needs the contributor role" });
@@ -661,7 +662,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .delete(
     "/keys/:id",
     async ({ principal, params, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const key = await ApiKeyStore.findById(params.id);

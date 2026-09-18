@@ -7,7 +7,7 @@
  */
 import Elysia from "elysia";
 import { authContext } from "@/plugins/auth/index";
-import { hasRole } from "@/services/auth";
+import { AUTH_FAILED, hasRole } from "@/services/auth";
 import type { UserRole } from "@/db/schema";
 
 /** What a path needs: nothing, or a role. First match wins, so order matters. */
@@ -45,14 +45,35 @@ export function policyFor(pathname: string): UserRole | "public" {
 }
 
 /**
+ * Whether this is a person typing a URL rather than a program calling an API. A top-level navigation says so
+ * outright (`Sec-Fetch-Mode: navigate`); otherwise asking for HTML and not for JSON is the next best sign. The
+ * SPA's own calls, the extension and the desktop app all ask for JSON, and SSE asks for text/event-stream.
+ */
+function isBrowserNavigation(request: Request): boolean {
+  if (request.method !== "GET") return false;
+  if (request.headers.get("sec-fetch-mode") === "navigate") return true;
+  const accept = request.headers.get("accept") ?? "";
+  return accept.includes("text/html") && !accept.includes("application/json");
+}
+
+/**
  * Applies the table to every Elysia route. Registered once, at the top of the app, so no plugin can forget it.
  */
 export const authGuard = new Elysia({ name: "auth-guard" })
   .use(authContext)
-  .onBeforeHandle({ as: "global" }, ({ request, principal, status }) => {
-    const needs = policyFor(new URL(request.url).pathname);
+  .onBeforeHandle({ as: "global" }, ({ request, principal, status, redirect }) => {
+    const url = new URL(request.url);
+    const needs = policyFor(url.pathname);
     if (needs === "public") return undefined;
-    if (!principal) return status(401, { error: "sign in to do that" });
+
+    if (!principal) {
+      // Somebody following a link deserves the sign-in screen, not a JSON error; everything else gets the 401
+      if (isBrowserNavigation(request)) {
+        return redirect(`/login?next=${encodeURIComponent(url.pathname + url.search)}`, 302);
+      }
+      return status(401, { error: AUTH_FAILED });
+    }
+
     if (!hasRole(principal.user, needs)) return status(403, { error: `this needs the ${needs} role` });
     return undefined;
   });

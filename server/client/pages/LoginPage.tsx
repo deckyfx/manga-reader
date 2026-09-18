@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import { useMutation } from "@tanstack/react-query";
 import { KeyRound, Loader2, LogIn, ShieldCheck } from "lucide-react";
 import {
@@ -18,7 +18,11 @@ const field = "w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 te
 /** Sign-in: a password, then a second factor when the account carries one. */
 export function LoginPage() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const { account, needsSetup, registrationEnabled, refresh } = useAuth();
+  // Where the server sent us from, when a link needed signing in first; only ever a path on this server
+  const next = params.get("next");
+  const destination = next && next.startsWith("/") && !next.startsWith("//") ? next : "/home";
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   /** Set once the password is accepted but the account wants more. */
@@ -28,7 +32,7 @@ export function LoginPage() {
 
   const done = async () => {
     await refresh();
-    navigate("/home");
+    navigate(destination);
   };
 
   const passwordM = useMutation({
@@ -62,7 +66,7 @@ export function LoginPage() {
 
   // A server with no accounts wants its first admin before anything else
   if (needsSetup) return <Navigate to="/setup" replace />;
-  if (account) return <Navigate to="/home" replace />;
+  if (account) return <Navigate to={destination} replace />;
 
   const error = passwordM.error ?? codeM.error ?? passkeyM.error;
 

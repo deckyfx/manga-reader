@@ -24,6 +24,8 @@ import type { User, UserRole } from "@/db/schema";
 const log = childLogger("auth");
 
 export const SESSION_COOKIE = "web_ocr_session";
+/** What an unauthenticated caller is told, the same for every path: signed out, or not allowed to know. */
+export const AUTH_FAILED = "Authorization failed";
 export const SESSION_DAYS = 30;
 /** Keys are recognisable in logs and settings screens, and easy to search for if one leaks. */
 const KEY_PREFIX = "wo_";
