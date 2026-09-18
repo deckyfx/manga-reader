@@ -131,6 +131,13 @@ export const toChapter = (chapter: Chapter, pages: number) => ({
   updated_at: chapter.updatedAt,
 });
 
+/** The file the cover route would serve: the uploaded cover, else the series' first page, else nothing. */
+export function coverFile(entry: SeriesWithCounts): string | null {
+  const uploaded = entry.series.coverPath ? coverFilePath(entry.series.coverPath) : null;
+  if (uploaded && existsSync(uploaded)) return uploaded;
+  return entry.firstPageId ? pageImagePath(entry.firstPageId) : null;
+}
+
 export const toSeries = (entry: SeriesWithCounts) => ({
   id: entry.series.id,
   title: entry.series.title,
@@ -141,7 +148,7 @@ export const toSeries = (entry: SeriesWithCounts) => ({
   tags: entry.tags,
   chapters: entry.chapters,
   volumes: entry.volumes,
-  has_cover: entry.series.coverPath !== null || entry.firstPageId !== null,
+  has_cover: coverFile(entry) !== null,
   created_at: entry.series.createdAt,
   updated_at: entry.series.updatedAt,
 });
@@ -237,12 +244,8 @@ export const readPlugin = new Elysia({ prefix: "/read/api" })
     async ({ params, status }) => {
       const entry = await SeriesStore.withCounts(params.id);
       if (!entry) return status(404, { error: "series not found" });
-      const uploaded = entry.series.coverPath ? coverFilePath(entry.series.coverPath) : null;
-      if (uploaded && existsSync(uploaded)) {
-        return new Response(Bun.file(uploaded), { headers: { "cache-control": "no-cache" } });
-      }
-      // No cover uploaded: fall back to the first page of the first chapter
-      const file = entry.firstPageId ? pageImagePath(entry.firstPageId) : null;
+      // The uploaded cover, else the first page of the first chapter
+      const file = coverFile(entry);
       if (!file) return status(404, { error: "this series has no cover yet" });
       return new Response(Bun.file(file), { headers: { "content-type": "image/png", "cache-control": "no-cache" } });
     },

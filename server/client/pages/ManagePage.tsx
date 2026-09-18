@@ -24,6 +24,7 @@ export function ManagePage() {
     mutationFn: (id: number) => deleteSeries(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["series"] });
+      void qc.invalidateQueries({ queryKey: ["series-tags"] });
       void qc.invalidateQueries({ queryKey: ["inbox"] });
     },
   });
@@ -78,6 +79,8 @@ export function ManagePage() {
         <Inbox size={14} />
         {inboxQ.isLoading ? (
           <Loader2 size={12} className="animate-spin" />
+        ) : inboxQ.isError ? (
+          <span className="text-red-400">The Inbox couldn't be read: {inboxQ.error.message}</span>
         ) : (
           <span>
             {inboxQ.data?.length ?? 0} page{(inboxQ.data?.length ?? 0) === 1 ? "" : "s"} in the Inbox — pages from the extension and the Studio,
