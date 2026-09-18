@@ -674,7 +674,10 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
           img.srcset = "";
           img.dataset.socrJobId = data.job_id;
           img.dataset.socrRevision = String(revisionOf(update.result_url));
-          void watchPageUpdates(serverUrl, data.job_id, apiKey);
+          watchPageUpdates(serverUrl, data.job_id, apiKey).catch((err: unknown) => {
+            // Live updates need their own token; without it the page still translated, it just won't refresh itself
+            appendLogEntry(`Live updates unavailable: ${err instanceof Error ? err.message : String(err)}`, "warn");
+          });
           setImageTranslateProgress(1);
           appendLogEntry(`Image replaced ✓ (${(update.elapsed_ms / 1000).toFixed(1)} s)`, "done");
           appendStudioLink(`${serverUrl}/studio/pages/${data.job_id}`);

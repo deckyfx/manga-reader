@@ -19,6 +19,7 @@ A browser extension (MV3) that lets you select any region on screen and extract 
 - **Library** (`/manage`): series → volume (optional) → chapter → page, with cover art, tags, ZIP / CBZ import, drag-to-reorder, whole-chapter translation and export
 - **Reader** (`/read`): browse by title, tag or status and read a chapter right to left or left to right, resuming where you left off
 - Editing a page never changes what readers see until it is published
+- **Accounts**: reading is open to everyone; managing the library, the Studio and OCR need an account, with an authenticator app or a passkey on top of the password if you want one
 - Manifest V3 — works on Chrome, Edge, and Firefox
 
 ## Project Structure
@@ -65,11 +66,22 @@ bun install
 bun run dev
 ```
 
-Default address: `http://localhost:3579` — Studio at `/studio`, library management at `/manage`, reader at `/read`. Put settings such as `DEEPL_API_KEY` in `server/.env`.
+Default address: `http://localhost:3579` — reader at `/read`, library management at `/manage`, Studio at `/studio`, your account at `/user`, server settings at `/admin`.
+Put settings such as `DEEPL_API_KEY` in `server/.env`.
 
-The server binds to `127.0.0.1` by default: `/manage` and the Studio have no sign-in yet, so anyone who can reach the port can edit the library. To read from another device, set `HOST=0.0.0.0` deliberately, and only behind something that authenticates.
+**First run**: open the server in a browser and it asks for one admin account at `/setup`; that page closes itself as soon as an account exists. Reading stays open to anyone. Everything else — the library, the Studio, OCR, translation, the dictionary — needs an account, and an admin decides from `/admin` whether other people may register themselves.
 
-In extension settings, choose the **Remote Server** tab, enter the server URL, click **Test Connection**, then save.
+The server binds to `127.0.0.1` by default. Set `HOST=0.0.0.0` to reach it from other devices, bearing in mind that plain http sends passwords across the network in clear, and that passkeys only work on `localhost` or over https.
+
+`data/secret.key` appears on first start and encrypts the authenticator secrets. Back it up with the database: without it, enrolled authenticator apps stop working and have to be set up again.
+
+### Connecting the extension
+
+1. In the server's UI, open `/user` → **API keys** and create one. It is shown once.
+2. In extension settings, choose the **Remote Server** tab, enter the server URL and paste the key.
+3. Click **Test Connection** — it reports whether the server is up *and* whether the key was accepted, naming the account it belongs to. Then save.
+
+Without a key the server refuses OCR, translation and page jobs. The desktop app takes the same key in its settings.
 
 To build a single executable: `bun run build` (outputs `server/app`).
 
@@ -80,6 +92,7 @@ To build a single executable: `bun run build` (outputs `server/app`).
 - Page pipeline: comic text detection, block OCR and translation, LaMa inpainting to clean lettering, bubble-aware typesetting
 - Studio for correcting and re-lettering pages, with per-stage state, partial re-runs, publish history and rollback
 - Library of series, volumes, chapters and pages: import, reorder, batch translate, export, and a reader that is served published pages only
+- Accounts with roles (admin, contributor, reader), authenticator apps and passkeys as second factors, and API keys for the extension and the desktop app
 - SQLite (Drizzle) with migrations embedded in the build
 - `/health` reports readiness while models load
 

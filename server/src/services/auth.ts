@@ -186,13 +186,21 @@ export async function checkTotp(user: User, code: string): Promise<boolean> {
   return false;
 }
 
-/** Spends a recovery code. Each one works once, and the codes are stored hashed like everything else. */
+/**
+ * Recovery codes are hashed the way passwords are, with argon2id, not with SHA-256 like the session tokens.
+ *
+ * A session token is 256 random bits — nobody is guessing one from its hash. A recovery code is short enough to
+ * type off a piece of paper, so a fast hash would let anyone holding a copy of the database work through the whole
+ * space offline. Argon2 makes that pointless; the cost is at most ten verifications on a code that turns out wrong.
+ */
+const hashRecoveryCode = (code: string): Promise<string> => Bun.password.hash(code.trim().toUpperCase());
+
+/** Spends a recovery code. Each one works once. */
 export async function useRecoveryCode(userId: number, code: string): Promise<boolean> {
-  const typed = code.trim();
+  const typed = code.trim().toUpperCase();
   if (!typed) return false;
-  const digest = sha256(typed);
   for (const stored of await RecoveryCodeStore.listUnused(userId)) {
-    if (sameDigest(stored.codeHash, digest)) return RecoveryCodeStore.consume(stored.id);
+    if (await verifyPassword(typed, stored.codeHash)) return RecoveryCodeStore.consume(stored.id);
   }
   return false;
 }
@@ -200,7 +208,7 @@ export async function useRecoveryCode(userId: number, code: string): Promise<boo
 /** Ten fresh codes: the plain list is returned once, only the hashes are kept. */
 export async function issueRecoveryCodes(userId: number): Promise<string[]> {
   const codes = newRecoveryCodes();
-  await RecoveryCodeStore.replace(userId, codes.map(sha256));
+  await RecoveryCodeStore.replace(userId, await Promise.all(codes.map(hashRecoveryCode)));
   return codes;
 }
 

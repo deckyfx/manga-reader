@@ -95,10 +95,15 @@ export function otpauthUri(secret: string, account: string, issuer = "web-ocr"):
   return `otpauth://totp/${label}?${params.toString()}`;
 }
 
-/** Ten single-use codes, formatted in two groups so they can be read aloud and typed. */
+/**
+ * Single-use codes, in two groups so they can be read aloud and typed.
+ *
+ * The alphabet leaves out I, L, O, U and 0/1 — the characters people mistype from paper — and ten of them carry
+ * about 50 bits, rather than the ~33 that ten decimal digits would. Guessing one has to go through the server.
+ */
+const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
+
 export function newRecoveryCodes(count = 10): string[] {
-  return Array.from({ length: count }, () => {
-    const part = () => randomInt(0, 100_000).toString().padStart(5, "0");
-    return `${part()}-${part()}`;
-  });
+  const draw = (length: number) => Array.from({ length }, () => CODE_ALPHABET[randomInt(0, CODE_ALPHABET.length)]).join("");
+  return Array.from({ length: count }, () => `${draw(5)}-${draw(5)}`);
 }
