@@ -31,6 +31,25 @@ class EnvConfig {
   get isDev(): boolean { return this.NODE_ENV === "development"; }
   get isProd(): boolean { return this.NODE_ENV === "production"; }
 
+  // ── Passkeys ─────────────────────────────────────────────────────────────
+
+  /**
+   * The domain passkeys are bound to. A passkey made on one origin can't be used on another, and the browser only
+   * offers WebAuthn on a secure context — `http://localhost` counts, a plain-http LAN address does not.
+   */
+  get WEBAUTHN_RP_ID(): string {
+    return Bun.env.WEBAUTHN_RP_ID ?? "localhost";
+  }
+
+  get WEBAUTHN_RP_NAME(): string {
+    return Bun.env.WEBAUTHN_RP_NAME ?? "web-ocr";
+  }
+
+  /** Where the browser thinks it is; must match exactly, scheme and port included. */
+  get WEBAUTHN_ORIGIN(): string {
+    return Bun.env.WEBAUTHN_ORIGIN ?? `http://localhost:${this.PORT}`;
+  }
+
   /** Unix socket path — when set the server binds here instead of TCP. */
   get SOCKET_PATH(): string | undefined { return Bun.env.SOCKET_PATH || undefined; }
 

@@ -6,6 +6,12 @@
  * POST /auth/api/login     sign in, setting the session cookie
  * POST /auth/api/login/totp      finish a sign-in with a code from an authenticator app
  * POST /auth/api/login/recovery  finish a sign-in with a recovery code
+ * POST   /auth/api/login/passkey/options  the WebAuthn request for a sign-in waiting on a second factor
+ * POST   /auth/api/login/passkey          finish that sign-in with the authenticator's answer
+ * GET    /auth/api/passkeys      the passkeys on this account
+ * POST   /auth/api/passkeys/options  start enrolling one (signed in; a passkey never creates an account)
+ * POST   /auth/api/passkeys      store the new passkey
+ * DELETE /auth/api/passkeys/:id  remove one (password required)
  * GET    /auth/api/totp         the authenticators on this account
  * POST   /auth/api/totp         add one: returns the secret and the otpauth:// URI to scan
  * POST   /auth/api/totp/:id/confirm  prove the app has it; the first one answers with the recovery codes
@@ -29,6 +35,7 @@ import {
   pendingUser,
   secondFactors,
   startMfaChallenge,
+  hashSecret,
   useRecoveryCode,
   createApiKey,
   endSession,
@@ -42,8 +49,9 @@ import {
   verifyPassword,
   type Principal,
 } from "@/services/auth";
-import { ApiKeyStore, RecoveryCodeStore, SessionStore, TotpDeviceStore, UserStore } from "@/stores/user-store";
+import { ApiKeyStore, CredentialStore, MfaChallengeStore, RecoveryCodeStore, SessionStore, TotpDeviceStore, UserStore } from "@/stores/user-store";
 import { newTotpSecret, otpauthUri, verifyTotp } from "@/services/totp";
+import { authenticationOptions, registrationOptions, saveRegistration, verifyAssertion } from "@/services/passkeys";
 import { USER_ROLES, type User, type UserRole } from "@/db/schema";
 
 const log = childLogger("auth");
@@ -79,6 +87,13 @@ const LoginResult = t.Object({
   mfa_required: t.Boolean(),
   methods: t.Array(t.UnionEnum(["totp", "passkey"])),
   challenge: t.Nullable(t.String()),
+});
+
+const PasskeySchema = t.Object({
+  id: t.String(),
+  name: t.String(),
+  last_used_at: t.Nullable(t.String()),
+  created_at: t.String(),
 });
 
 const TotpDeviceSchema = t.Object({
@@ -263,6 +278,107 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     {
       body: t.Object({ challenge: t.String({ maxLength: 200 }), code: t.String({ maxLength: 40 }) }),
       response: { 200: LoginResult, 401: ErrBody },
+    },
+  )
+
+  // ── Passkeys at sign-in ────────────────────────────────────────────────────
+
+  .post(
+    "/login/passkey/options",
+    async ({ body, status }) => {
+      const pending = await pendingUser(body.challenge);
+      if (!pending) return status(401, { error: "this sign-in has expired — start again" });
+      const options = await authenticationOptions(pending.user);
+      // The challenge the authenticator must sign, kept against this sign-in and nothing else
+      await MfaChallengeStore.setWebauthnChallenge(pending.tokenHash, options.challenge);
+      return options as unknown as Record<string, unknown>;
+    },
+    { body: t.Object({ challenge: t.String({ maxLength: 200 }) }), response: { 200: t.Any(), 401: ErrBody } },
+  )
+
+  .post(
+    "/login/passkey",
+    async ({ body, cookie, request, status }) => {
+      const pending = await pendingUser(body.challenge);
+      if (!pending) return status(401, { error: "this sign-in has expired — start again" });
+      if (!pending.webauthnChallenge) return status(409, { error: "ask for the passkey request first" });
+      if (!(await verifyAssertion(pending.user, body.response as never, pending.webauthnChallenge))) {
+        return status(401, { error: "that passkey didn't check out" });
+      }
+      await endMfaChallenge(pending.tokenHash);
+      const { token, expiresAt } = await startSession(pending.user.id, request.headers.get("user-agent"));
+      writeSessionCookie(cookie, request.url, token, expiresAt);
+      await UserStore.touch(pending.user.id);
+      return { user: toUser(pending.user), mfa_required: false, methods: [], challenge: null };
+    },
+    {
+      body: t.Object({ challenge: t.String({ maxLength: 200 }), response: t.Any() }),
+      response: { 200: LoginResult, 401: ErrBody, 409: ErrBody },
+    },
+  )
+
+  // ── Passkeys on the account page ───────────────────────────────────────────
+
+  .get(
+    "/passkeys",
+    async ({ principal, status }) => {
+      if (!principal) return status(401, { error: "sign in to do that" });
+      return (await CredentialStore.listByUser(principal.user.id)).map((credential) => ({
+        id: credential.id,
+        name: credential.name,
+        last_used_at: credential.lastUsedAt,
+        created_at: credential.createdAt,
+      }));
+    },
+    { response: { 200: t.Array(PasskeySchema), 401: ErrBody } },
+  )
+
+  .post(
+    "/passkeys/options",
+    async ({ principal, request, status }) => {
+      // Enrolling always happens from a signed-in session: a passkey is a second factor, never a way in
+      if (!principal) return status(401, { error: "sign in to do that" });
+      const options = await registrationOptions(principal.user);
+      const token = await startMfaChallenge(principal.user.id, request.headers.get("user-agent"));
+      await MfaChallengeStore.setWebauthnChallenge(hashSecret(token), options.challenge);
+      return { challenge: token, options: options as unknown as Record<string, unknown> };
+    },
+    { response: { 200: t.Object({ challenge: t.String(), options: t.Any() }), 401: ErrBody } },
+  )
+
+  .post(
+    "/passkeys",
+    async ({ principal, body, status }) => {
+      if (!principal) return status(401, { error: "sign in to do that" });
+      const pending = await pendingUser(body.challenge);
+      if (!pending || pending.user.id !== principal.user.id || !pending.webauthnChallenge) {
+        return status(409, { error: "start the enrolment again" });
+      }
+      const credential = await saveRegistration(principal.user, body.name, body.response as never, pending.webauthnChallenge);
+      await endMfaChallenge(pending.tokenHash);
+      if (!credential) return status(422, { error: "that passkey couldn't be verified" });
+      log.info({ userId: principal.user.id, credentialId: credential.id }, "Passkey registered");
+      return { id: credential.id, name: credential.name, last_used_at: null, created_at: credential.createdAt };
+    },
+    {
+      body: t.Object({ challenge: t.String({ maxLength: 200 }), name: t.String({ minLength: 1, maxLength: 60 }), response: t.Any() }),
+      response: { 200: PasskeySchema, 401: ErrBody, 409: ErrBody, 422: ErrBody },
+    },
+  )
+
+  .delete(
+    "/passkeys/:id",
+    async ({ principal, params, body, status }) => {
+      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!(await verifyPassword(body.password, principal.user.passwordHash))) return status(403, { error: "the password doesn't match" });
+      if (!(await CredentialStore.delete(params.id, principal.user.id))) return status(404, { error: "that passkey isn't on this account" });
+      log.info({ userId: principal.user.id, credentialId: params.id }, "Passkey removed");
+      return { removed: true };
+    },
+    {
+      params: t.Object({ id: t.String({ maxLength: 400 }) }),
+      body: t.Object({ password: t.String({ maxLength: 200 }) }),
+      response: { 200: t.Object({ removed: t.Boolean() }), 401: ErrBody, 403: ErrBody, 404: ErrBody },
     },
   )
 
