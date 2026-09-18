@@ -3,6 +3,7 @@
  *
  * GET  /auth/api/me        the signed-in account, or null, plus whether the server still needs setting up
  * POST /auth/api/setup     create the first admin — only while there are no accounts at all
+ * POST /auth/api/register  create your own account, when an admin has switched registration on
  * POST /auth/api/login     sign in, setting the session cookie
  * POST /auth/api/login/totp      finish a sign-in with a code from an authenticator app
  * POST /auth/api/login/recovery  finish a sign-in with a recovery code
@@ -53,6 +54,7 @@ import { ApiKeyStore, CredentialStore, MfaChallengeStore, RecoveryCodeStore, Ses
 import { newTotpSecret, otpauthUri, verifyTotp } from "@/services/totp";
 import { authenticationOptions, registrationOptions, saveRegistration, verifyAssertion } from "@/services/passkeys";
 import { USER_ROLES, type User, type UserRole } from "@/db/schema";
+import { serverPolicy } from "@/services/server-settings";
 
 const log = childLogger("auth");
 
@@ -177,6 +179,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       // What guards this account today, so the settings page and the sign-in screen agree
       factors: principal ? await secondFactors(principal.user) : [],
       needs_setup: await needsSetup(),
+      // So the sign-in screen knows whether to offer "create an account"
+      registration_enabled: (await serverPolicy()).registrationEnabled,
     }),
     {
       response: {
@@ -185,6 +189,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
           via: t.Nullable(t.String()),
           factors: t.Array(t.UnionEnum(["totp", "passkey"])),
           needs_setup: t.Boolean(),
+          registration_enabled: t.Boolean(),
         }),
       },
     },
@@ -209,6 +214,33 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     {
       body: t.Object({ username: Username, password: Password, display_name: t.Optional(t.Nullable(t.String({ maxLength: 80 }))) }),
       response: { 200: UserSchema, 409: ErrBody },
+    },
+  )
+
+  .post(
+    "/register",
+    async ({ body, cookie, request, status }) => {
+      const policy = await serverPolicy();
+      // Off by default: while it is off, accounts come from an admin
+      if (!policy.registrationEnabled) return status(403, { error: "this server isn't taking new accounts" });
+      if (await needsSetup()) return status(409, { error: "this server hasn't been set up yet" });
+      if (await UserStore.findByUsername(body.username)) return status(409, { error: "that username is taken" });
+
+      const user = await UserStore.insert({
+        username: body.username,
+        displayName: body.display_name ?? null,
+        passwordHash: await hashPassword(body.password),
+        role: policy.defaultRole,
+      });
+      // A new account has no second factor yet; it can add one from its own page once it is in
+      const { token, expiresAt } = await startSession(user.id, request.headers.get("user-agent"));
+      writeSessionCookie(cookie, request.url, token, expiresAt);
+      log.info({ userId: user.id, role: user.role }, "Account self-registered");
+      return toUser(user);
+    },
+    {
+      body: t.Object({ username: Username, password: Password, display_name: t.Optional(t.Nullable(t.String({ maxLength: 80 }))) }),
+      response: { 200: UserSchema, 403: ErrBody, 409: ErrBody },
     },
   )
 

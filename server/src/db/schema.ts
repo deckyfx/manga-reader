@@ -205,6 +205,16 @@ export type NewPage = typeof pages.$inferInsert;
 
 export type PageStageRow = typeof pageStages.$inferSelect;
 
+/**
+ * Server-level settings an admin can change at runtime, as key/value text. A table rather than env vars, because a
+ * switch flipped in /admin has to survive a restart, and because the values are policy rather than deployment.
+ */
+export const serverSettings = sqliteTable("server_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+});
+
 // ── Accounts ────────────────────────────────────────────────────────────────
 
 /** admin manages people and keys; contributor manages the library and the Studio; reader only reads. */
@@ -371,3 +381,5 @@ export type MfaChallenge = typeof mfaChallenges.$inferSelect;
 export type Credential = typeof credentials.$inferSelect;
 export type NewCredential = typeof credentials.$inferInsert;
 export type OauthAccount = typeof oauthAccounts.$inferSelect;
+
+export type ServerSetting = typeof serverSettings.$inferSelect;

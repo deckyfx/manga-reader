@@ -21,6 +21,8 @@
  * GET    /manage/api/chapters/:id/run           progress of that run
  * POST   /manage/api/chapters/:id/publish       publish every page of the chapter that has unpublished edits
  * POST   /manage/api/pages/:id/publish          publish one page, so readers get its current result
+ * GET    /manage/api/settings                   server policy: registration, default role (admin)
+ * PUT    /manage/api/settings                   change it (admin)
  * GET    /manage/api/users                      the accounts on this server (admin)
  * POST   /manage/api/users                      add an account (admin)
  * PUT    /manage/api/users/:id                  change a role, suspend, rename or reset a password (admin)
@@ -31,7 +33,7 @@
  */
 import Elysia, { t } from "elysia";
 import { childLogger } from "@/lib/logger";
-import { ErrBody } from "@/lib/schemas";
+import { ErrBody, optionalEnum } from "@/lib/schemas";
 import { chapterRun, pagesToRun, startChapterRun } from "@/services/chapter-batch";
 import { exportChapter } from "@/services/chapter-export";
 import { importIntoChapter, type ImportSource } from "@/services/chapter-import";
@@ -43,6 +45,7 @@ import { copyPageIntoChapter } from "@/services/page-copy";
 import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore } from "@/stores/library-store";
 import { SessionStore, UserStore } from "@/stores/user-store";
 import { hashPassword } from "@/services/auth";
+import { serverPolicy, updateServerPolicy } from "@/services/server-settings";
 import { authContext, toUser, UserSchema } from "@/plugins/auth/index";
 import { USER_ROLES } from "@/db/schema";
 import { PageStore } from "@/stores/page-store";
@@ -64,6 +67,11 @@ const Title = t.String({ minLength: 1, maxLength: 200 });
 const Tags = t.Array(t.String({ maxLength: 40 }), { maxItems: 30 });
 
 /** Progress of a chapter batch run (in memory; a restart cancels it). */
+const ServerPolicySchema = t.Object({
+  registration_enabled: t.Boolean(),
+  default_role: t.UnionEnum([...USER_ROLES]),
+});
+
 const ChapterRunSchema = t.Object({
   chapterId: t.Integer(),
   running: t.Boolean(),
@@ -102,8 +110,8 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         title: Title,
         synopsis: t.Optional(t.Nullable(t.String({ maxLength: 4000 }))),
         author: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
-        status: t.Optional(t.UnionEnum([...SERIES_STATUSES])),
-        reading_direction: t.Optional(t.UnionEnum([...READING_DIRECTIONS])),
+        status: optionalEnum(SERIES_STATUSES),
+        reading_direction: optionalEnum(READING_DIRECTIONS),
         tags: t.Optional(Tags),
       }),
       response: { 200: SeriesDetail, 404: ErrBody },
@@ -133,8 +141,8 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         title: t.Optional(Title),
         synopsis: t.Optional(t.Nullable(t.String({ maxLength: 4000 }))),
         author: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
-        status: t.Optional(t.UnionEnum([...SERIES_STATUSES])),
-        reading_direction: t.Optional(t.UnionEnum([...READING_DIRECTIONS])),
+        status: optionalEnum(SERIES_STATUSES),
+        reading_direction: optionalEnum(READING_DIRECTIONS),
         /** Replaces the series' whole tag set. */
         tags: t.Optional(Tags),
       }),
@@ -481,6 +489,36 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     },
   )
 
+  // ── Server policy (admin) ──────────────────────────────────────────────────
+
+  .get(
+    "/settings",
+    async () => {
+      const policy = await serverPolicy();
+      return { registration_enabled: policy.registrationEnabled, default_role: policy.defaultRole };
+    },
+    { response: { 200: ServerPolicySchema } },
+  )
+
+  .put(
+    "/settings",
+    async ({ body }) => {
+      const policy = await updateServerPolicy({
+        ...(body.registration_enabled !== undefined ? { registrationEnabled: body.registration_enabled } : {}),
+        ...(body.default_role !== undefined ? { defaultRole: body.default_role } : {}),
+      });
+      return { registration_enabled: policy.registrationEnabled, default_role: policy.defaultRole };
+    },
+    {
+      body: t.Object({
+        registration_enabled: t.Optional(t.Boolean()),
+        /** What a self-registered account starts as; an admin can still change it afterwards. */
+        default_role: optionalEnum(USER_ROLES),
+      }),
+      response: { 200: ServerPolicySchema },
+    },
+  )
+
   // ── Accounts (admin; the guard's table is what enforces that) ──────────────
 
   .get("/users", async () => (await UserStore.list()).map(toUser), { response: { 200: t.Array(UserSchema) } })
@@ -533,7 +571,7 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     {
       params: t.Object({ id: IdParam }),
       body: t.Object({
-        role: t.Optional(t.UnionEnum([...USER_ROLES])),
+        role: optionalEnum(USER_ROLES),
         display_name: t.Optional(t.Nullable(t.String({ maxLength: 80 }))),
         password: t.Optional(t.String({ minLength: 8, maxLength: 200 })),
         disabled: t.Optional(t.Boolean()),

@@ -12,6 +12,7 @@ import m0007 from "./migrations/0007_series_hierarchy.sql" with { type: "text" }
 import m0008 from "./migrations/0008_quiet_magus.sql" with { type: "text" };
 import m0009 from "./migrations/0009_nervous_ultimates.sql" with { type: "text" };
 import m0010 from "./migrations/0010_tan_marvel_zombies.sql" with { type: "text" };
+import m0011 from "./migrations/0011_shallow_mandarin.sql" with { type: "text" };
 
 const files: Record<string, string> = {
   "0000_tidy_namor.sql": m0000,
@@ -25,6 +26,7 @@ const files: Record<string, string> = {
   "0008_quiet_magus.sql": m0008,
   "0009_nervous_ultimates.sql": m0009,
   "0010_tan_marvel_zombies.sql": m0010,
+  "0011_shallow_mandarin.sql": m0011,
 };
 
 /** Embedded migration SQL keyed by filename, plus the raw journal JSON. */

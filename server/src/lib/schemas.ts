@@ -73,3 +73,14 @@ export const ModelInfoSchema = t.Object({
   files: t.Array(t.String()),
   ready: t.Boolean(),
 });
+
+/**
+ * An optional enum field that really is absent when the caller omits it.
+ *
+ * `t.Optional(t.UnionEnum([...]))` does not do this: Elysia hands the handler the **first** value of the enum for a
+ * field nobody sent, so "leave this alone" silently becomes "set it to the first option". A union of literals
+ * validates identically and stays absent.
+ */
+export const optionalEnum = <const T extends readonly [string, ...string[]]>(values: T) =>
+  t.Optional(t.Union(values.map((value) => t.Literal(value)))) as unknown as
+    import("@sinclair/typebox").TOptional<import("@sinclair/typebox").TUnsafe<T[number]>>;
