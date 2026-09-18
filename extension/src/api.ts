@@ -14,8 +14,22 @@ export type { PageJobEvent, PageLiveEvent };
 export function serverApi(serverUrl: string, apiKey = "") {
   return treaty<Api>(serverUrl.replace(/\/$/, ""), {
     headers: apiKey ? { "x-api-key": apiKey } : {},
+    fetcher: keyedFetch,
   });
 }
+
+/**
+ * The transport every server call goes through, redirects refused.
+ *
+ * `fetch` follows a redirect by default and keeps custom headers when it does — including a cross-origin one — so a
+ * server or proxy answering with a 3xx elsewhere would receive the API key. Nothing this extension talks to has a
+ * reason to redirect, so a redirect is an error. It is set here, after whatever the caller passed, so a per-call
+ * option can't switch it back on.
+ */
+const keyedFetch: typeof fetch = Object.assign(
+  (input: RequestInfo | URL, init?: RequestInit) => fetch(input, { ...init, redirect: "error" }),
+  { preconnect: fetch.preconnect },
+);
 
 /**
  * EventSource can't send headers, so a progress stream has to carry its credential in the URL — and a URL ends up in
