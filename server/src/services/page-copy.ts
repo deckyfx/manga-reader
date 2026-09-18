@@ -3,7 +3,7 @@
  * stages and blocks, and the draft stays in the Studio to work from. Publish history is not copied — the copy starts
  * unpublished, so it becomes readable when it is published in its new home.
  */
-import { cp, mkdir, readdir } from "node:fs/promises";
+import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { childLogger } from "@/lib/logger";
 import { pageDir, PageStore } from "@/stores/page-store";
@@ -15,6 +15,19 @@ const log = childLogger("page-copy");
 export async function copyPageIntoChapter(source: Page, chapterId: number, name?: string | null): Promise<Page> {
   const sortOrder = (await PageStore.maxSortOrder(chapterId)) + 1;
   const copy = await PageStore.createInChapter(source.imageHash, source.source, chapterId, sortOrder, name ?? source.name);
+  try {
+    return await fillCopy(source, copy, chapterId);
+  } catch (err) {
+    // Half a page in a chapter is worse than none: take the row and anything already copied back out
+    await PageStore.deletePage(copy.id).catch((cleanup: unknown) => log.error({ err: cleanup, pageId: copy.id }, "Couldn't remove a failed copy"));
+    await rm(pageDir(copy.id), { recursive: true, force: true })
+      .catch((cleanup: unknown) => log.error({ err: cleanup, pageId: copy.id }, "Couldn't remove a failed copy's folder"));
+    throw err;
+  }
+}
+
+/** Copies the source page's images, stages and blocks onto the freshly created row. */
+async function fillCopy(source: Page, copy: Page, chapterId: number): Promise<Page> {
   await PageStore.update(copy.id, {
     width: source.width,
     height: source.height,

@@ -347,11 +347,16 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       if (page.status === "queued" || page.status === "running") return status(409, { error: "page is still being translated" });
 
       // A draft is copied by default, so the Studio keeps the original to work from; keep_draft=false moves it instead
+      let filed = page;
       if (body?.keep_draft === false) {
         await PageStore.filePage(params.pageId, { chapterId: params.id, sortOrder: (await PageStore.maxSortOrder(params.id)) + 1 });
+        filed = (await PageStore.findById(params.pageId)) ?? page;
       } else {
-        await copyPageIntoChapter(page, params.id, body?.name);
+        filed = await copyPageIntoChapter(page, params.id, body?.name);
       }
+      // A page that arrives already translated is published at once: readers only ever see published snapshots, and a
+      // page nobody has read yet has nothing to protect from a publish
+      if (hasUnpublishedEdits(filed.id)) await withPageLock(filed.id, () => publishPage(filed.id));
       return (await chapterDetail(params.id)) ?? status(404, { error: "chapter not found" });
     },
     {
@@ -394,7 +399,7 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       if (pages === 0) return status(409, { error: "this chapter has no page images to export" });
       if (missing > 0) log.warn({ chapterId: params.id, missing }, "Exported a chapter with missing page images");
       // Control characters would break (or let someone forge) the Content-Disposition header
-      const name = chapter.title.replace(/[\\/:*?"<>|]+/g, "_").replace(/[ -]/g, "").trim() || `chapter-${chapter.id}`;
+      const name = chapter.title.replace(/[\\/:*?"<>|]+/g, "_").replace(/[\u0000-\u001f\u007f]/g, "").trim() || `chapter-${chapter.id}`;
       return new Response(bytes.buffer as ArrayBuffer, {
         headers: {
           "content-type": "application/zip",

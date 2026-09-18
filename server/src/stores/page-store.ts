@@ -71,10 +71,13 @@ export class PageStore {
     return db.query.pages.findFirst({ where: eq(pages.id, id) });
   }
 
-  /** Existing page for this image, or a new queued one. Safe against concurrent inserts of the same image. */
   /**
    * The Inbox page for an image, created if there is none. Only Inbox pages (no chapter) are reused: the same image
    * filed into chapters keeps its own page per chapter, so edits there are independent.
+   *
+   * `image_hash` stopped being unique in migration 0006 (an image may appear in several chapters), so two requests for
+   * the same new image at the same instant can end up with two drafts. That costs a duplicate draft in the Inbox and
+   * nothing more — each is a complete page — so it is left unguarded rather than serialised.
    */
   static async findOrCreate(imageHash: string, source: string): Promise<{ page: Page; created: boolean }> {
     const inbox = and(eq(pages.imageHash, imageHash), isNull(pages.chapterId));
