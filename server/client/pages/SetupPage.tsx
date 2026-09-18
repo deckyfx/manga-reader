@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, ShieldPlus } from "lucide-react";
-import { setupFirstAdmin } from "../api";
+import { ApiError, setupFirstAdmin } from "../api";
 import { useAuth } from "../auth/AuthProvider";
 import { AuthButton } from "../components/AuthButton";
 import { AuthField } from "../components/AuthField";
@@ -21,6 +21,10 @@ export function SetupPage() {
     onSuccess: async () => {
       await refresh();
       navigate("/home");
+    },
+    onError: async (error) => {
+      // 409 means somebody set this server up while this page was open: ask again, and the guard below moves on
+      if (error instanceof ApiError && error.status === 409) await refresh();
     },
   });
 

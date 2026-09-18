@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, UserPlus } from "lucide-react";
-import { register } from "../api";
+import { ApiError, register } from "../api";
 import { useAuth } from "../auth/AuthProvider";
 import { AuthButton } from "../components/AuthButton";
 import { AuthField } from "../components/AuthField";
@@ -21,6 +21,10 @@ export function RegisterPage() {
     onSuccess: async () => {
       await refresh();
       navigate("/home");
+    },
+    onError: async (error) => {
+      // Registration switched off, or the server set up, while this page was open — re-read and show what's true now
+      if (error instanceof ApiError && (error.status === 403 || error.status === 409)) await refresh();
     },
   });
 
