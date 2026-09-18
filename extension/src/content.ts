@@ -56,7 +56,9 @@ function init(): void {
     else if (msg.type === "ocr-error")        showError(msg.message);
     else if (msg.type === "explain-result")   showExplain(msg.tokens, msg.definitions, msg.mode);
     else if (msg.type === "explain-error")    showExplainError(msg.message);
-    else if (msg.type === "image-updated") replacePageImages(msg.jobId, msg.resultUrl);
+    else if (msg.type === "image-updated") {
+      replacePageImages(msg.jobId, msg.resultUrl).catch((err: unknown) => console.warn("[web-ocr] republish not shown:", err));
+    }
   });
 
   // Studio page → extension bridge: relay image-updated events from the same origin
@@ -323,17 +325,39 @@ function showResult(msg: OcrResultMsg): void {
 }
 
 /** Replace all <img> tags on the page whose src matches the server result URL for this job. */
-function replacePageImages(jobId: string, resultUrl: string): void {
+/** Object URLs handed to images, so the previous revision's is released when a newer one arrives. */
+const shownResults = new WeakMap<HTMLImageElement, string>();
+
+/**
+ * Shows a newly published revision in every image on the page that came from this job.
+ *
+ * The result route needs an API key, and an `<img src>` has no way to send one — pointing the image at the URL got a
+ * 401 and the browser's broken-image icon. So the bytes are fetched here, with the key, and handed to the image as an
+ * object URL.
+ */
+async function replacePageImages(jobId: string, resultUrl: string): Promise<void> {
   if (!resultUrl) return;
-  const imgs = document.querySelectorAll<HTMLImageElement>("img");
-  imgs.forEach((img) => {
-    if (img.dataset.socrJobId === jobId) {
-      // Bust cache by appending timestamp
-      img.src = resultUrl.includes("?")
-        ? `${resultUrl}&t=${Date.now()}`
-        : `${resultUrl}?t=${Date.now()}`;
-    }
+  const targets = Array.from(document.querySelectorAll<HTMLImageElement>("img")).filter((img) => img.dataset.socrJobId === jobId);
+  if (targets.length === 0) return;
+
+  const { apiKey } = await loadServerAccess();
+  const response = await fetch(resultUrl, {
+    headers: apiKey ? { "x-api-key": apiKey } : {},
+    // Never follow a redirect with the key attached, and never show a cached older revision
+    redirect: "error",
+    cache: "no-store",
   });
+  if (!response.ok) throw new Error(`the new revision couldn't be loaded (${response.status})`);
+  const image = await response.blob();
+
+  for (const img of targets) {
+    const previous = shownResults.get(img);
+    const url = URL.createObjectURL(image);
+    img.srcset = "";
+    img.src = url;
+    shownResults.set(img, url);
+    if (previous) URL.revokeObjectURL(previous);
+  }
 }
 
 function showError(message: string): void {
@@ -620,6 +644,10 @@ function onImagePickerKeydown(e: KeyboardEvent): void {
 }
 
 async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
+  // Claimed at the start, before any await: a newer translation that starts while this one is still uploading or
+  // fetching a token takes over, and this one's late failures are no longer anybody's business
+  const generation = ++jobGeneration;
+  const isCurrent = (): boolean => generation === jobGeneration;
   showImageTranslateLoading();
 
   try {
@@ -659,9 +687,9 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
 
     // Server-sent events replay the job's whole history, so nothing is missed between submit and connect — and a
     // reopened stream replays it again, which is why what has already been shown is counted and skipped
+    // Overtaken during the upload: the newer translation owns the panel and the stream
+    if (!isCurrent()) return;
     activeEventSource?.close();
-    // This translation's number: a newer one started while a token is being fetched takes over, and this one stops
-    const generation = ++jobGeneration;
     let seen = 0;
 
     const onJobEvent = (es: EventSource, event: MessageEvent<string>, skip: { remaining: number }): void => {
@@ -710,7 +738,7 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
     const openJobStream = async (failures: number): Promise<void> => {
       const url = await streamUrl(serverUrl, `api/translate-page/${data.job_id}/events`, apiKey);
       // Overtaken while the token was being fetched: leave the newer translation's stream alone
-      if (generation !== jobGeneration) return;
+      if (!isCurrent()) return;
       const es = new EventSource(url);
       activeEventSource = es;
       const skip = { remaining: seen };
@@ -730,8 +758,10 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
         }
         setTimeout(() => {
           // Another translation started, or this one finished, while waiting
-          if (activeEventSource !== es || generation !== jobGeneration) return;
+          if (activeEventSource !== es || !isCurrent()) return;
           openJobStream(next).catch((err: unknown) => {
+            // A stale reopen failing must not tear down a newer translation's stream and panel
+            if (!isCurrent()) return;
             activeEventSource = null;
             hideImageTranslateLoading(false, err instanceof Error ? err.message : String(err));
           });
@@ -742,7 +772,8 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
     await openJobStream(0);
 
   } catch (e) {
-    hideImageTranslateLoading(false, e instanceof Error ? e.message : String(e));
+    // Only the translation still on screen reports; an older one failing late would hide the newer one's panel
+    if (isCurrent()) hideImageTranslateLoading(false, e instanceof Error ? e.message : String(e));
   }
 }
 
@@ -848,11 +879,13 @@ async function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string
     // The server repeats the current revision on connect (catch-up), so only swap for a newer one
     const newest = Math.max(...Array.from(shown, (img) => Number(img.dataset.socrRevision ?? 0)));
     if (update.revision <= newest) return;
-    shown.forEach((img) => {
-      img.srcset = "";
-      img.dataset.socrRevision = String(update.revision);
-    });
-    replacePageImages(jobId, `${serverUrl}${update.result_url}`);
+    replacePageImages(jobId, `${serverUrl}${update.result_url}`)
+      // Marked only once it is actually on screen, so a revision that failed to load is tried again next time
+      .then(() => shown.forEach((img) => (img.dataset.socrRevision = String(update.revision))))
+      .catch((err: unknown) => {
+        // The old revision stays on screen rather than a broken image
+        console.warn("[web-ocr] republish not shown:", err);
+      });
   };
 
   // EventSource reconnects on its own after network errors; it only closes for good when the server refuses the
