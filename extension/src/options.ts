@@ -176,22 +176,11 @@ async function testConnection(): Promise<void> {
     } else {
       const mark = (ready: boolean | "disabled"): string => (ready === true ? "✓" : ready === "disabled" ? "off" : "✗");
       const models = `OCR ${mark(data.ocr)} · Translate ${mark(data.translate)} · Dictionary ${mark(data.dictionary)} · Text detection ${mark(data.text_seg)} · Inpaint ${mark(data.inpaint)}`;
-      // Health is open to anyone; the key is what OCR will actually be judged by, so try it too
-      const key = serverApiKeyInput.value.trim();
-      const keyCheck = key
-        ? await serverApi(url, key).api.whoami.get({ fetch: { signal: AbortSignal.timeout(5000) } })
-        : null;
-      const keyNote = !key
-        ? "⚠️ no API key — OCR will be refused"
-        : keyCheck?.error
-          ? `❌ the key was refused (${errorMessage(keyCheck.error)})`
-          : `key accepted as ${keyCheck?.data?.username ?? "?"} ✓`;
-      // A key crossing a network in clear is the thing to stop; loopback never leaves the machine
-      const exposed = key !== "" && isPlainHttpOverNetwork(url) && !allowInsecureInput.checked;
-      serverVerified = key !== "" && !keyCheck?.error;
       const connected = data.status === "starting" ? "⏳ Connected, models still loading" : "✅ Connected";
-      if (exposed) {
-        // Refused rather than warned: a key read off the wire is somebody else's account
+      const key = serverApiKeyInput.value.trim();
+
+      // Decided before anything is sent: testing the key would be the first thing to leak it
+      if (key !== "" && isPlainHttpOverNetwork(url) && !allowInsecureInput.checked) {
         serverVerified = false;
         setInlineStatus(
           testBtnStatus,
@@ -200,6 +189,17 @@ async function testConnection(): Promise<void> {
         );
         return;
       }
+
+      // Health is open to anyone; the key is what OCR will actually be judged by, so try it too
+      const keyCheck = key
+        ? await serverApi(url, key).api.whoami.get({ fetch: { signal: AbortSignal.timeout(5000) } })
+        : null;
+      const keyNote = !key
+        ? "⚠️ no API key — OCR will be refused"
+        : keyCheck?.error
+          ? `❌ the key was refused (${errorMessage(keyCheck.error)})`
+          : `key accepted as ${keyCheck?.data?.username ?? "?"} ✓`;
+      serverVerified = key !== "" && !keyCheck?.error;
       setInlineStatus(testBtnStatus, `${connected} — ${models} · ${keyNote}`, serverVerified ? "ok" : "err");
     }
   } catch (e) {
