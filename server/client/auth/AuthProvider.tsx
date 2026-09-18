@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getMe, logout as logoutRequest, type Account, type SecondFactor, type UserRole } from "../api";
+import { ApiError, getMe, logout as logoutRequest, type Account, type SecondFactor, type UserRole } from "../api";
 
 interface AuthState {
   /** The signed-in account, or null for a guest (who may still read). */
@@ -9,6 +9,12 @@ interface AuthState {
   factors: SecondFactor[];
   /** True while the server has no accounts at all and is waiting for its first admin. */
   needsSetup: boolean;
+  /**
+   * Set when the server couldn't be asked who you are — a restart, a dropped connection. That is not the same as
+   * being a guest, and a page that guards itself must say so rather than bounce to the sign-in screen.
+   */
+  error: Error | null;
+  retry: () => Promise<void>;
   /** Whether anyone may create their own account, which an admin controls. */
   registrationEnabled: boolean;
   loading: boolean;
@@ -28,7 +34,13 @@ const AuthContext = createContext<AuthState | null>(null);
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
-  const meQ = useQuery({ queryKey: ["me"], queryFn: getMe, staleTime: 30_000, retry: false });
+  const meQ = useQuery({
+    queryKey: ["me"],
+    queryFn: getMe,
+    staleTime: 30_000,
+    // A 401 here is the answer ("you are a guest"), so it is never retried; anything else is worth one more go
+    retry: (attempt, error) => !(error instanceof ApiError && error.status === 401) && attempt < 2,
+  });
 
   const refresh = useCallback(async () => {
     // Waits for the answer, so a caller can act on what comes back rather than on what was cached
@@ -51,11 +63,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       needsSetup: meQ.data?.needs_setup ?? false,
       registrationEnabled: meQ.data?.registration_enabled ?? false,
       loading: meQ.isLoading,
+      error: meQ.isError ? (meQ.error as Error) : null,
+      retry: refresh,
       can: (role) => (account ? RANK[account.role as UserRole] >= RANK[role] : false),
       refresh,
       signOut,
     };
-  }, [meQ.data, meQ.isLoading, refresh, signOut]);
+  }, [meQ.data, meQ.isLoading, meQ.isError, meQ.error, refresh, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

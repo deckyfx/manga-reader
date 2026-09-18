@@ -172,9 +172,12 @@ async function testConnection(): Promise<void> {
         : keyCheck?.error
           ? `❌ the key was refused (${errorMessage(keyCheck.error)})`
           : `key accepted as ${keyCheck?.data?.username ?? "?"} ✓`;
+      // A key crossing a network in clear is worth saying out loud; loopback never leaves the machine
+      const exposed = key !== "" && isPlainHttpOverNetwork(url);
       serverVerified = key !== "" && !keyCheck?.error;
       const connected = data.status === "starting" ? "⏳ Connected, models still loading" : "✅ Connected";
-      setInlineStatus(testBtnStatus, `${connected} — ${models} · ${keyNote}`, serverVerified ? "ok" : "err");
+      const warning = exposed ? " · ⚠️ this address isn't https, so the key and your password cross the network in clear" : "";
+      setInlineStatus(testBtnStatus, `${connected} — ${models} · ${keyNote}${warning}`, serverVerified ? "ok" : "err");
     }
   } catch (e) {
     serverVerified = false;
@@ -183,6 +186,24 @@ async function testConnection(): Promise<void> {
     testBtn.disabled = false;
     testBtn.textContent = "Test Connection";
     updateSaveBtn();
+  }
+}
+
+
+/**
+ * Whether this address would send the key across a network unencrypted. A self-hosted server on loopback is fine —
+ * nothing leaves the machine — and https is fine anywhere. Anything else is worth warning about rather than
+ * refusing: a server on the LAN is exactly what this is for.
+ */
+function isPlainHttpOverNetwork(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:") return false;
+    const host = url.hostname;
+    const loopback = host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]" || host.endsWith(".localhost");
+    return !loopback;
+  } catch {
+    return false;
   }
 }
 

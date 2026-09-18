@@ -15,16 +15,23 @@ export const AuthField = forwardRef<HTMLInputElement, AuthFieldProps>(function A
   const generated = useId();
   // A caller may name the field (to point a label or a test at it); otherwise it gets one of its own
   const id = input.id ?? generated;
+  const noteId = `${id}-note`;
+  // A warning under the field is the reason the button is disabled: say so where a screen reader will hear it
+  const invalid = note !== undefined && note !== null && tone === "warn";
   return (
     <div className="space-y-1.5">
       <label htmlFor={id} className="block text-xs font-medium text-gray-400">{label}</label>
       <input
         id={id}
         ref={ref}
+        aria-describedby={note ? noteId : undefined}
+        aria-invalid={invalid || undefined}
         {...input}
         className={`w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${className}`}
       />
-      {note && <p className={`text-xs ${tone === "warn" ? "text-amber-400" : "text-gray-500"}`}>{note}</p>}
+      {note && (
+        <p id={noteId} className={`text-xs ${tone === "warn" ? "text-amber-400" : "text-gray-500"}`}>{note}</p>
+      )}
     </div>
   );
 });

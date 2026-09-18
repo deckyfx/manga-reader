@@ -195,6 +195,20 @@ export async function checkTotp(user: User, code: string): Promise<boolean> {
  */
 const hashRecoveryCode = (code: string): Promise<string> => Bun.password.hash(code.trim().toUpperCase());
 
+/**
+ * Issuing ten codes means ten argon2 hashes, and Bun's defaults ask for 64 MiB each. Ten at once is 640 MiB, and two
+ * people asking at the same moment is 1.3 GB — on a machine that is also holding ONNX models in memory. So the
+ * hashing is sequential, and one issuance runs at a time across the whole process. It happens rarely and nobody is
+ * waiting on it.
+ */
+let issuing: Promise<unknown> = Promise.resolve();
+
+function queued<T>(work: () => Promise<T>): Promise<T> {
+  const result = issuing.then(work, work);
+  issuing = result.then(() => {}, () => {});
+  return result;
+}
+
 /** Spends a recovery code. Each one works once. */
 export async function useRecoveryCode(userId: number, code: string): Promise<boolean> {
   const typed = code.trim().toUpperCase();
@@ -206,10 +220,14 @@ export async function useRecoveryCode(userId: number, code: string): Promise<boo
 }
 
 /** Ten fresh codes: the plain list is returned once, only the hashes are kept. */
-export async function issueRecoveryCodes(userId: number): Promise<string[]> {
-  const codes = newRecoveryCodes();
-  await RecoveryCodeStore.replace(userId, await Promise.all(codes.map(hashRecoveryCode)));
-  return codes;
+export function issueRecoveryCodes(userId: number): Promise<string[]> {
+  return queued(async () => {
+    const codes = newRecoveryCodes();
+    const hashes: string[] = [];
+    for (const code of codes) hashes.push(await hashRecoveryCode(code));
+    await RecoveryCodeStore.replace(userId, hashes);
+    return codes;
+  });
 }
 
 /**

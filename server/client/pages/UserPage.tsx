@@ -20,6 +20,7 @@ import {
   savePasskey,
 } from "../api";
 import { useAuth } from "../auth/AuthProvider";
+import { LoadFailure } from "../components/LoadFailure";
 import { when } from "../lib/format";
 import { startRegistration, supportsPasskeys } from "../auth/webauthn";
 import { useConfirm } from "../components/ConfirmDialog";
@@ -29,8 +30,10 @@ const ROLE_LABEL: Record<string, string> = { admin: "Admin", contributor: "Contr
 
 /** Your own account: password, the things that guard it, the keys your tools use, and where you're signed in. */
 export function UserPage() {
-  const { account, loading } = useAuth();
+  const { account, loading, error, retry } = useAuth();
   if (loading) return <Loader2 className="m-4 animate-spin text-gray-500" />;
+  // A failed lookup is not a confirmed guest: bouncing to the sign-in screen would hide a server that is simply down
+  if (error) return <LoadFailure message={error.message} onRetry={() => void retry()} />;
   if (!account) return <Navigate to="/login" replace />;
 
   return (

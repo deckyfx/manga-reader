@@ -27,7 +27,10 @@ import { AdminPage } from "./pages/AdminPage";
  */
 const onUnauthorised = (error: unknown) => {
   if (!(error instanceof ApiError) || error.status !== 401) return;
-  toast.info("Your session has ended. Sign in again to carry on.");
+  // A wrong password is also a 401. Only somebody who *was* signed in has a session to lose; a guest is told by the
+  // form they are looking at.
+  const me = queryClient.getQueryData<{ user: unknown } | undefined>(["me"]);
+  if (me?.user) toast.info("Your session has ended. Sign in again to carry on.");
   void queryClient.invalidateQueries({ queryKey: ["me"] });
 };
 

@@ -166,6 +166,10 @@ export function LoginPage() {
                 setPending(null);
                 setCode("");
                 setUseRecovery(false);
+                // Otherwise the last step's complaint hangs under the password form
+                codeM.reset();
+                passkeyM.reset();
+                passwordM.reset();
               }}
               className="ml-auto text-gray-400 hover:text-gray-200"
             >

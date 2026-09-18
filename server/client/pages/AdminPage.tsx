@@ -15,6 +15,7 @@ import {
   type UserRole,
 } from "../api";
 import { useAuth } from "../auth/AuthProvider";
+import { LoadFailure } from "../components/LoadFailure";
 import { when } from "../lib/format";
 import { useConfirm } from "../components/ConfirmDialog";
 import { SecretInput } from "../components/SecretInput";
@@ -24,8 +25,10 @@ const ROLES: UserRole[] = ["admin", "contributor", "reader"];
 
 /** Server-level settings: who may join, who is who, and where everyone is signed in. */
 export function AdminPage() {
-  const { account, loading } = useAuth();
+  const { account, loading, error, retry } = useAuth();
   if (loading) return <Loader2 className="m-4 animate-spin text-gray-500" />;
+  // A failed lookup is not a confirmed guest: bouncing to the sign-in screen would hide a server that is simply down
+  if (error) return <LoadFailure message={error.message} onRetry={() => void retry()} />;
   if (!account) return <Navigate to="/login" replace />;
   if (account.role !== "admin") {
     return (
