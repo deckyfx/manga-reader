@@ -18,7 +18,7 @@ import {
   UserStore,
   normaliseUsername,
 } from "@/stores/user-store";
-import { newRecoveryCodes, verifyTotp } from "@/services/totp";
+import { matchTotpStep, newRecoveryCodes } from "@/services/totp";
 import type { User, UserRole } from "@/db/schema";
 
 const log = childLogger("auth");
@@ -31,7 +31,7 @@ const KEY_PREFIX = "wo_";
 /** Who is making a request, and how they proved it. */
 export interface Principal {
   user: User;
-  via: "session" | "api-key";
+  via: "session" | "api-key" | "stream-token";
   /** The key's id, so its last-used stamp can be updated. */
   apiKeyId?: number;
 }
@@ -171,10 +171,13 @@ export async function pendingUser(token: string): Promise<{ user: User; tokenHas
  */
 export async function checkTotp(user: User, code: string): Promise<boolean> {
   for (const device of await TotpDeviceStore.listConfirmed(user.id)) {
-    if (verifyTotp(device.secret, code)) {
-      await TotpDeviceStore.touch(device.id);
-      return true;
-    }
+    const step = matchTotpStep(device.secret, code);
+    if (step === null) continue;
+    // A code is good once: the step it belongs to has to be newer than the last one this device signed in with,
+    // otherwise somebody who saw the screen has 30 seconds to use it again
+    if (await TotpDeviceStore.claimStep(device.id, step)) return true;
+    log.warn({ userId: user.id, deviceId: device.id }, "An authenticator code was offered twice");
+    return false;
   }
   return false;
 }
@@ -211,3 +214,45 @@ export async function removeTotpDevice(userId: number, deviceId: number): Promis
 export const endMfaChallenge = (tokenHash: string): Promise<void> => MfaChallengeStore.delete(tokenHash);
 
 export { sha256 as hashSecret };
+
+// ── Stream tokens ────────────────────────────────────────────────────────────
+
+/**
+ * EventSource cannot set headers, so a stream has to carry its credential in the URL. A URL ends up in logs, history
+ * and referrers, so what goes there is never the API key: it is a token that lasts minutes, only opens the progress
+ * streams, and is handed out in exchange for a real credential.
+ */
+const STREAM_TOKEN_MINUTES = 15;
+
+interface StreamToken {
+  userId: number;
+  expiresAt: number;
+}
+
+const streamTokens = new Map<string, StreamToken>();
+
+/** Issues a token for the account making the request. */
+export function issueStreamToken(userId: number): { token: string; expires_in: number } {
+  // Expired entries would otherwise pile up for as long as the server runs
+  const now = Date.now();
+  for (const [key, value] of streamTokens) {
+    if (value.expiresAt <= now) streamTokens.delete(key);
+  }
+  const token = randomToken();
+  streamTokens.set(sha256(token), { userId, expiresAt: now + STREAM_TOKEN_MINUTES * 60 * 1000 });
+  return { token, expires_in: STREAM_TOKEN_MINUTES * 60 };
+}
+
+/** The account behind a stream token, or null when it is unknown, spent or out of date. */
+export async function userForStreamToken(token: string): Promise<User | null> {
+  const digest = sha256(token);
+  const entry = streamTokens.get(digest);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    streamTokens.delete(digest);
+    return null;
+  }
+  const user = await UserStore.findById(entry.userId);
+  if (!user || user.disabledAt) return null;
+  return user;
+}

@@ -3,7 +3,7 @@ import { routeHealth } from "@/plugins/route-health";
 import { routeOcr } from "@/plugins/route-ocr";
 import { routeTranslate } from "@/plugins/route-translate";
 import { routeAnalyze } from "@/plugins/route-analyze";
-import { routeWhoami } from "@/plugins/route-whoami";
+import { routeTools } from "@/plugins/route-tools";
 import { routeTranslatePage } from "@/plugins/route-translate-page";
 
 /**
@@ -12,7 +12,7 @@ import { routeTranslatePage } from "@/plugins/route-translate-page";
  */
 export const api = new Elysia()
   .use(routeHealth)
-  .use(routeWhoami)
+  .use(routeTools)
   .use(routeOcr)
   .use(routeTranslate)
   .use(routeAnalyze)

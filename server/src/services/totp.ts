@@ -66,18 +66,27 @@ function codeFor(secret: string, step: number): string {
 export const currentTotp = (secret: string, at: Date = new Date()): string =>
   codeFor(secret, Math.floor(at.getTime() / 1000 / PERIOD_SECONDS));
 
-/** Whether a typed code matches, allowing one step of clock drift either way. */
-export function verifyTotp(secret: string, code: string, at: Date = new Date()): boolean {
+/**
+ * The time step a typed code belongs to, or null when it matches none. One step of clock drift either way is
+ * allowed. The step is the caller's business: remembering the last one accepted is what stops the same code being
+ * used twice inside its 30 seconds.
+ */
+export function matchTotpStep(secret: string, code: string, at: Date = new Date()): number | null {
   const typed = code.replace(/\s/g, "");
-  if (!/^\d{6}$/.test(typed)) return false;
+  if (!/^\d{6}$/.test(typed)) return null;
   const now = Math.floor(at.getTime() / 1000 / PERIOD_SECONDS);
   for (let drift = -WINDOW; drift <= WINDOW; drift++) {
-    const expected = codeFor(secret, now + drift);
+    const step = now + drift;
+    const expected = codeFor(secret, step);
     // Constant-time: a timing difference would say how many leading digits were right
-    if (timingSafeEqual(Buffer.from(expected), Buffer.from(typed))) return true;
+    if (timingSafeEqual(Buffer.from(expected), Buffer.from(typed))) return step;
   }
-  return false;
+  return null;
 }
+
+/** Whether a typed code matches at all — for enrolment, where there is no replay to worry about yet. */
+export const verifyTotp = (secret: string, code: string, at: Date = new Date()): boolean =>
+  matchTotpStep(secret, code, at) !== null;
 
 /** The `otpauth://` URI an authenticator app scans. */
 export function otpauthUri(secret: string, account: string, issuer = "web-ocr"): string {

@@ -265,6 +265,8 @@ export const totpDevices = sqliteTable("totp_devices", {
   /** Base32, as the app stores it. */
   secret: text("secret").notNull(),
   confirmedAt: text("confirmed_at"),
+  /** The 30-second step this device last signed in with; a code is good once, not for its whole window. */
+  lastStep: integer("last_step"),
   lastUsedAt: text("last_used_at"),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
 }, (table) => ({

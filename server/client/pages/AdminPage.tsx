@@ -169,7 +169,8 @@ function UsersSection({ myId }: { myId: number }) {
               <select
                 value={user.role}
                 onChange={(e) => updateM.mutate({ id: user.id, role: e.target.value as UserRole })}
-                disabled={updateM.isPending}
+                disabled={updateM.isPending || user.id === myId}
+                title={user.id === myId ? "Another admin has to change your role" : undefined}
                 aria-label={`Role for ${user.username}`}
                 className={`ml-auto ${field} py-1 text-xs`}
               >

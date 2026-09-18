@@ -11,6 +11,7 @@ import type {
   ImageUpdatedMsg,
 } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
+import { loadSettings } from "./settings-store";
 import { errorMessage, serverApi } from "./api";
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -305,11 +306,7 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-async function loadSettings(): Promise<Settings> {
-  const keys = Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[];
-  const stored = await chrome.storage.sync.get(keys) as Partial<Settings>;
-  return { ...DEFAULT_SETTINGS, ...stored };
-}
+
 
 async function cropToBase64(dataUrl: string, rect: SelectionRect): Promise<string> {
   const comma = dataUrl.indexOf(",");

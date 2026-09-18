@@ -2,8 +2,9 @@
  * Accounts, browser sessions and API keys. Secrets are only ever stored hashed: a session cookie's token and an API
  * key are both kept as SHA-256, so this table tells an attacker nothing they could sign in with.
  */
-import { and, desc, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db/index";
+import { open, seal } from "@/lib/secret-box";
 import {
   apiKeys,
   credentials,
@@ -239,9 +240,21 @@ export class CredentialStore {
     return row;
   }
 
-  /** The counter only ever goes up; a lower one means the authenticator may have been cloned. */
-  static async touch(id: string, counter: number): Promise<void> {
-    await db.update(credentials).set({ counter, lastUsedAt: sql`(datetime('now'))` }).where(eq(credentials.id, id));
+  /**
+   * Moves the signature counter on. It only ever goes up: a counter that didn't advance is how a cloned
+   * authenticator shows itself, so the write is conditional and says whether it happened.
+   */
+  static async touch(id: string, counter: number): Promise<boolean> {
+    const rows = await db
+      .update(credentials)
+      .set({ counter, lastUsedAt: sql`(datetime('now'))` })
+      .where(and(eq(credentials.id, id), lt(credentials.counter, counter)))
+      .returning({ id: credentials.id });
+    if (rows.length === 0) {
+      // A device that reports 0 forever (many platform authenticators do) still counts as used
+      await db.update(credentials).set({ lastUsedAt: sql`(datetime('now'))` }).where(eq(credentials.id, id));
+    }
+    return rows.length > 0;
   }
 
   static async delete(id: string, userId: number): Promise<boolean> {
@@ -280,35 +293,52 @@ export class OauthAccountStore {
 }
 
 export class TotpDeviceStore {
+  /** Rows keep their secret sealed; the rest of the server only ever sees it opened. */
+  private static unseal(device: TotpDevice): TotpDevice {
+    return { ...device, secret: open(device.secret) };
+  }
+
   /** Every device, confirmed or not, newest last. */
   static async listByUser(userId: number): Promise<TotpDevice[]> {
-    return db.select().from(totpDevices).where(eq(totpDevices.userId, userId)).orderBy(totpDevices.createdAt);
+    const rows = await db.select().from(totpDevices).where(eq(totpDevices.userId, userId)).orderBy(totpDevices.createdAt);
+    return rows.map((row) => TotpDeviceStore.unseal(row));
   }
 
   /** Only the devices that finished enrolling: these are the ones that can sign somebody in. */
   static async listConfirmed(userId: number): Promise<TotpDevice[]> {
-    return db
+    const rows = await db
       .select()
       .from(totpDevices)
       .where(and(eq(totpDevices.userId, userId), isNotNull(totpDevices.confirmedAt)));
+    return rows.map((row) => TotpDeviceStore.unseal(row));
   }
 
   static async findById(id: number): Promise<TotpDevice | undefined> {
-    return db.query.totpDevices.findFirst({ where: eq(totpDevices.id, id) });
+    const row = await db.query.totpDevices.findFirst({ where: eq(totpDevices.id, id) });
+    return row ? TotpDeviceStore.unseal(row) : undefined;
   }
 
   static async insert(userId: number, name: string, secret: string): Promise<TotpDevice> {
-    const [row] = await db.insert(totpDevices).values({ userId, name, secret }).returning();
+    const [row] = await db.insert(totpDevices).values({ userId, name, secret: seal(secret) }).returning();
     if (!row) throw new Error("failed to store the authenticator");
-    return row;
+    return TotpDeviceStore.unseal(row);
   }
 
   static async confirm(id: number): Promise<void> {
     await db.update(totpDevices).set({ confirmedAt: sql`(datetime('now'))` }).where(eq(totpDevices.id, id));
   }
 
-  static async touch(id: number): Promise<void> {
-    await db.update(totpDevices).set({ lastUsedAt: sql`(datetime('now'))` }).where(eq(totpDevices.id, id));
+  /**
+   * Claims a time step for this device. False when the step is not newer than the last one used, which is what makes
+   * a code single-use: the update only lands if nothing has claimed that step or a later one.
+   */
+  static async claimStep(id: number, step: number): Promise<boolean> {
+    const rows = await db
+      .update(totpDevices)
+      .set({ lastStep: step, lastUsedAt: sql`(datetime('now'))` })
+      .where(and(eq(totpDevices.id, id), or(isNull(totpDevices.lastStep), lt(totpDevices.lastStep, step))))
+      .returning({ id: totpDevices.id });
+    return rows.length > 0;
   }
 
   static async delete(id: number, userId: number): Promise<boolean> {

@@ -12,8 +12,8 @@ export const loggerPlugin = new Elysia({ name: "logger" })
     const status = set.status ?? 200;
     const method = request.method;
     const url = new URL(request.url);
-    // SSE can't send headers, so those streams take their key in the query — it must not reach the log file
-    if (url.searchParams.has("api_key")) url.searchParams.set("api_key", "redacted");
+    // SSE can't send headers, so those streams take a short-lived token in the query — keep it out of the log
+    if (url.searchParams.has("stream_token")) url.searchParams.set("stream_token", "redacted");
     const path = url.pathname + (url.search ? url.search : "");
 
     const level = typeof status === "number" && status >= 500 ? "error"

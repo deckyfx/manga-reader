@@ -31,6 +31,18 @@ class EnvConfig {
   get isDev(): boolean { return this.NODE_ENV === "development"; }
   get isProd(): boolean { return this.NODE_ENV === "production"; }
 
+  // ── Secrets at rest ──────────────────────────────────────────────────────
+
+  /** 32 bytes of base64 that seal TOTP secrets. Left unset, a key file is made beside the database. */
+  get SECRET_KEY(): string | undefined {
+    return Bun.env.SECRET_KEY || undefined;
+  }
+
+  /** Where that key is kept when SECRET_KEY isn't set. Back it up with the database. */
+  get SECRET_KEY_FILE(): string {
+    return Bun.env.SECRET_KEY_FILE ?? "./data/secret.key";
+  }
+
   // ── Passkeys ─────────────────────────────────────────────────────────────
 
   /**

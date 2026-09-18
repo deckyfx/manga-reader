@@ -1,5 +1,6 @@
 import type { Settings, OcrEngine, ServerTranslation, ClientTranslation, DictMode, TesseractQuality } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
+import { loadSettings, saveSettings as persistSettings } from "./settings-store";
 import { errorMessage, serverApi } from "./api";
 
 // ── Elements ──────────────────────────────────────────────────────────────────
@@ -227,10 +228,8 @@ dictModeSelect.addEventListener("change", () => {
 
 // ── Load saved settings ───────────────────────────────────────────────────────
 
-chrome.storage.sync
-  .get(Object.keys(DEFAULT_SETTINGS))
-  .then((data) => {
-    const s = { ...DEFAULT_SETTINGS, ...data } as Settings;
+loadSettings()
+  .then((s) => {
 
     tesseractLangInput.value    = s.tesseractLang;
     tesseractQualitySel.value   = s.tesseractQuality;
@@ -318,7 +317,7 @@ async function saveSettings(): Promise<void> {
     deeplTargetLang,
   };
 
-  await chrome.storage.sync.set(settings);
+  await persistSettings(settings);
   showStatus("✅ Settings saved!", "success");
 }
 
