@@ -220,10 +220,6 @@ export const users = sqliteTable("users", {
   passwordHash: text("password_hash").notNull(),
   /** From Google sign-in, or set by an admin; unique when present. */
   email: text("email"),
-  /** Base32 TOTP secret. Present but unconfirmed while enrolment is half-finished. */
-  totpSecret: text("totp_secret"),
-  /** Set once a code has been checked: only then does TOTP actually guard the account. */
-  totpEnabledAt: text("totp_enabled_at"),
   role: text("role").notNull().default("reader"),
   /** Set when the account is suspended: it keeps its work but can't sign in. */
   disabledAt: text("disabled_at"),
@@ -246,6 +242,23 @@ export const sessions = sqliteTable("sessions", {
 }, (table) => ({
   sessionsUserIdx: index("sessions_user_idx").on(table.userId),
   sessionsExpiryIdx: index("sessions_expiry_idx").on(table.expiresAt),
+}));
+
+/**
+ * Authenticator apps, one row per device: a phone and a laptop can both hold a code for the same account, each with
+ * its own secret, so losing one doesn't mean re-enrolling the other. A device guards nothing until `confirmedAt`.
+ */
+export const totpDevices = sqliteTable("totp_devices", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  /** Base32, as the app stores it. */
+  secret: text("secret").notNull(),
+  confirmedAt: text("confirmed_at"),
+  lastUsedAt: text("last_used_at"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  totpDevicesUserIdx: index("totp_devices_user_idx").on(table.userId),
 }));
 
 /** Single-use codes for getting back in when the authenticator is gone. Stored hashed, like every other secret. */
@@ -352,6 +365,7 @@ export type NewSession = typeof sessions.$inferInsert;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type NewApiKey = typeof apiKeys.$inferInsert;
 
+export type TotpDevice = typeof totpDevices.$inferSelect;
 export type RecoveryCode = typeof recoveryCodes.$inferSelect;
 export type MfaChallenge = typeof mfaChallenges.$inferSelect;
 export type Credential = typeof credentials.$inferSelect;

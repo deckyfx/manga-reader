@@ -6,9 +6,10 @@
  * POST /auth/api/login     sign in, setting the session cookie
  * POST /auth/api/login/totp      finish a sign-in with a code from an authenticator app
  * POST /auth/api/login/recovery  finish a sign-in with a recovery code
- * POST /auth/api/totp/start      begin enrolling: returns the secret and the otpauth:// URI
- * POST /auth/api/totp/enable     confirm a code and turn TOTP on, answering with the recovery codes
- * POST /auth/api/totp/disable    turn it off again (password required)
+ * GET    /auth/api/totp         the authenticators on this account
+ * POST   /auth/api/totp         add one: returns the secret and the otpauth:// URI to scan
+ * POST   /auth/api/totp/:id/confirm  prove the app has it; the first one answers with the recovery codes
+ * DELETE /auth/api/totp/:id     remove one (password required)
  * POST /auth/api/recovery        replace the recovery codes
  * POST /auth/api/logout    end this session
  * POST /auth/api/password  change your own password (every other session is signed out)
@@ -22,7 +23,7 @@ import { ErrBody } from "@/lib/schemas";
 import {
   authenticate,
   checkTotp,
-  disableTotp,
+  removeTotpDevice,
   endMfaChallenge,
   issueRecoveryCodes,
   pendingUser,
@@ -41,7 +42,7 @@ import {
   verifyPassword,
   type Principal,
 } from "@/services/auth";
-import { ApiKeyStore, RecoveryCodeStore, SessionStore, UserStore } from "@/stores/user-store";
+import { ApiKeyStore, RecoveryCodeStore, SessionStore, TotpDeviceStore, UserStore } from "@/stores/user-store";
 import { newTotpSecret, otpauthUri, verifyTotp } from "@/services/totp";
 import { USER_ROLES, type User, type UserRole } from "@/db/schema";
 
@@ -57,8 +58,6 @@ export const UserSchema = t.Object({
   role: t.UnionEnum([...USER_ROLES]),
   disabled: t.Boolean(),
   email: t.Nullable(t.String()),
-  /** Whether an authenticator app guards this account. */
-  totp_enabled: t.Boolean(),
   last_seen_at: t.Nullable(t.String()),
   created_at: t.String(),
 });
@@ -70,7 +69,6 @@ export const toUser = (user: User) => ({
   role: (USER_ROLES as readonly string[]).includes(user.role) ? (user.role as UserRole) : ("reader" as const),
   disabled: user.disabledAt !== null,
   email: user.email,
-  totp_enabled: user.totpEnabledAt !== null,
   last_seen_at: user.lastSeenAt,
   created_at: user.createdAt,
 });
@@ -81,6 +79,15 @@ const LoginResult = t.Object({
   mfa_required: t.Boolean(),
   methods: t.Array(t.UnionEnum(["totp", "passkey"])),
   challenge: t.Nullable(t.String()),
+});
+
+const TotpDeviceSchema = t.Object({
+  id: t.Integer(),
+  name: t.String(),
+  /** False while the enrolment is half-finished: such a device guards nothing. */
+  confirmed: t.Boolean(),
+  last_used_at: t.Nullable(t.String()),
+  created_at: t.String(),
 });
 
 const ApiKeySchema = t.Object({
@@ -152,9 +159,20 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     async ({ principal }) => ({
       user: principal ? toUser(principal.user) : null,
       via: principal?.via ?? null,
+      // What guards this account today, so the settings page and the sign-in screen agree
+      factors: principal ? await secondFactors(principal.user) : [],
       needs_setup: await needsSetup(),
     }),
-    { response: { 200: t.Object({ user: t.Nullable(UserSchema), via: t.Nullable(t.String()), needs_setup: t.Boolean() }) } },
+    {
+      response: {
+        200: t.Object({
+          user: t.Nullable(UserSchema),
+          via: t.Nullable(t.String()),
+          factors: t.Array(t.UnionEnum(["totp", "passkey"])),
+          needs_setup: t.Boolean(),
+        }),
+      },
+    },
   )
 
   .post(
@@ -209,7 +227,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     async ({ body, cookie, request, status }) => {
       const pending = await pendingUser(body.challenge);
       if (!pending) return status(401, { error: "this sign-in has expired — start again" });
-      if (!checkTotp(pending.user, body.code)) {
+      if (!(await checkTotp(pending.user, body.code))) {
         log.warn({ userId: pending.user.id }, "Wrong authenticator code");
         return status(401, { error: "that code isn't right" });
       }
@@ -248,68 +266,76 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     },
   )
 
-  // ── Enrolling an authenticator app ─────────────────────────────────────────
+  // ── Authenticator apps: as many as the account wants ───────────────────────
 
-  .post(
-    "/totp/start",
+  .get(
+    "/totp",
     async ({ principal, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
-      if (principal.user.totpEnabledAt) return status(409, { error: "this account already uses an authenticator app" });
-      // Stored unconfirmed: it guards nothing until a code proves the app has it too
-      const secret = newTotpSecret();
-      await UserStore.update(principal.user.id, { totpSecret: secret });
-      return { secret, uri: otpauthUri(secret, principal.user.username) };
+      return (await TotpDeviceStore.listByUser(principal.user.id)).map((device) => ({
+        id: device.id,
+        name: device.name,
+        confirmed: device.confirmedAt !== null,
+        last_used_at: device.lastUsedAt,
+        created_at: device.createdAt,
+      }));
     },
-    { response: { 200: t.Object({ secret: t.String(), uri: t.String() }), 401: ErrBody, 409: ErrBody } },
+    { response: { 200: t.Array(TotpDeviceSchema), 401: ErrBody } },
   )
 
   .post(
-    "/totp/enable",
+    "/totp",
     async ({ principal, body, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
-      const secret = principal.user.totpSecret;
-      if (!secret) return status(409, { error: "start the enrolment first" });
-      if (principal.user.totpEnabledAt) return status(409, { error: "this account already uses an authenticator app" });
-      if (!verifyTotp(secret, body.code)) return status(422, { error: "that code isn't right — check the app's clock" });
-      await UserStore.update(principal.user.id, { totpEnabledAt: new Date().toISOString() });
-      // Shown once: the only way back in if the phone is lost
-      const codes = await issueRecoveryCodes(principal.user.id);
-      log.info({ userId: principal.user.id }, "Authenticator app enrolled");
-      return { enabled: true, recovery_codes: codes };
+      // Only one enrolment can be half-finished at a time; starting again replaces the abandoned one
+      await TotpDeviceStore.deleteUnconfirmed(principal.user.id);
+      const secret = newTotpSecret();
+      const device = await TotpDeviceStore.insert(principal.user.id, body.name, secret);
+      return { id: device.id, name: device.name, secret, uri: otpauthUri(secret, `${principal.user.username} (${body.name})`) };
     },
     {
-      body: t.Object({ code: t.String({ maxLength: 10 }) }),
-      response: { 200: t.Object({ enabled: t.Boolean(), recovery_codes: t.Array(t.String()) }), 401: ErrBody, 409: ErrBody, 422: ErrBody },
+      body: t.Object({ name: t.String({ minLength: 1, maxLength: 60 }) }),
+      response: { 200: t.Object({ id: t.Integer(), name: t.String(), secret: t.String(), uri: t.String() }), 401: ErrBody },
     },
   )
 
   .post(
-    "/totp/disable",
-    async ({ principal, body, status }) => {
+    "/totp/:id/confirm",
+    async ({ principal, params, body, status }) => {
+      if (!principal) return status(401, { error: "sign in to do that" });
+      const device = await TotpDeviceStore.findById(params.id);
+      if (!device || device.userId !== principal.user.id) return status(404, { error: "that authenticator isn't on this account" });
+      if (device.confirmedAt) return status(409, { error: "this authenticator is already set up" });
+      if (!verifyTotp(device.secret, body.code)) return status(422, { error: "that code isn't right — check the app's clock" });
+
+      const first = (await TotpDeviceStore.listConfirmed(principal.user.id)).length === 0;
+      await TotpDeviceStore.confirm(device.id);
+      // Recovery codes come with the first device; the rest join an account that already has them
+      const codes = first ? await issueRecoveryCodes(principal.user.id) : [];
+      log.info({ userId: principal.user.id, deviceId: device.id, first }, "Authenticator enrolled");
+      return { confirmed: true, recovery_codes: codes };
+    },
+    {
+      params: t.Object({ id: t.Integer({ minimum: 1 }) }),
+      body: t.Object({ code: t.String({ maxLength: 10 }) }),
+      response: { 200: t.Object({ confirmed: t.Boolean(), recovery_codes: t.Array(t.String()) }), 401: ErrBody, 404: ErrBody, 409: ErrBody, 422: ErrBody },
+    },
+  )
+
+  .delete(
+    "/totp/:id",
+    async ({ principal, params, body, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
       // The password again: a borrowed session shouldn't be able to strip a factor off the account
       if (!(await verifyPassword(body.password, principal.user.passwordHash))) return status(403, { error: "the password doesn't match" });
-      await disableTotp(principal.user.id);
-      log.info({ userId: principal.user.id }, "Authenticator app removed");
-      return { disabled: true };
+      if (!(await removeTotpDevice(principal.user.id, params.id))) return status(404, { error: "that authenticator isn't on this account" });
+      log.info({ userId: principal.user.id, deviceId: params.id }, "Authenticator removed");
+      return { removed: true };
     },
     {
+      params: t.Object({ id: t.Integer({ minimum: 1 }) }),
       body: t.Object({ password: t.String({ maxLength: 200 }) }),
-      response: { 200: t.Object({ disabled: t.Boolean() }), 401: ErrBody, 403: ErrBody },
-    },
-  )
-
-  .post(
-    "/recovery",
-    async ({ principal, body, status }) => {
-      if (!principal) return status(401, { error: "sign in to do that" });
-      if (!(await verifyPassword(body.password, principal.user.passwordHash))) return status(403, { error: "the password doesn't match" });
-      const codes = await issueRecoveryCodes(principal.user.id);
-      return { recovery_codes: codes };
-    },
-    {
-      body: t.Object({ password: t.String({ maxLength: 200 }) }),
-      response: { 200: t.Object({ recovery_codes: t.Array(t.String()) }), 401: ErrBody, 403: ErrBody },
+      response: { 200: t.Object({ removed: t.Boolean() }), 401: ErrBody, 403: ErrBody, 404: ErrBody },
     },
   )
 
@@ -340,6 +366,21 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     {
       body: t.Object({ current: t.String({ maxLength: 200 }), next: Password }),
       response: { 200: t.Object({ changed: t.Boolean() }), 401: ErrBody, 403: ErrBody },
+    },
+  )
+
+  .post(
+    "/recovery",
+    async ({ principal, body, status }) => {
+      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!(await verifyPassword(body.password, principal.user.passwordHash))) return status(403, { error: "the password doesn't match" });
+      const codes = await issueRecoveryCodes(principal.user.id);
+      log.info({ userId: principal.user.id }, "Recovery codes reissued");
+      return { recovery_codes: codes };
+    },
+    {
+      body: t.Object({ password: t.String({ maxLength: 200 }) }),
+      response: { 200: t.Object({ recovery_codes: t.Array(t.String()) }), 401: ErrBody, 403: ErrBody },
     },
   )
 

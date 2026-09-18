@@ -2,7 +2,7 @@
  * Accounts, browser sessions and API keys. Secrets are only ever stored hashed: a session cookie's token and an API
  * key are both kept as SHA-256, so this table tells an attacker nothing they could sign in with.
  */
-import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { db } from "@/db/index";
 import {
   apiKeys,
@@ -11,6 +11,7 @@ import {
   oauthAccounts,
   recoveryCodes,
   sessions,
+  totpDevices,
   users,
   type ApiKey,
   type Credential,
@@ -20,6 +21,7 @@ import {
   type NewUser,
   type OauthAccount,
   type Session,
+  type TotpDevice,
   type User,
 } from "@/db/schema";
 
@@ -259,5 +261,51 @@ export class OauthAccountStore {
       .where(and(eq(oauthAccounts.id, id), eq(oauthAccounts.userId, userId)))
       .returning({ id: oauthAccounts.id });
     return rows.length > 0;
+  }
+}
+
+export class TotpDeviceStore {
+  /** Every device, confirmed or not, newest last. */
+  static async listByUser(userId: number): Promise<TotpDevice[]> {
+    return db.select().from(totpDevices).where(eq(totpDevices.userId, userId)).orderBy(totpDevices.createdAt);
+  }
+
+  /** Only the devices that finished enrolling: these are the ones that can sign somebody in. */
+  static async listConfirmed(userId: number): Promise<TotpDevice[]> {
+    return db
+      .select()
+      .from(totpDevices)
+      .where(and(eq(totpDevices.userId, userId), isNotNull(totpDevices.confirmedAt)));
+  }
+
+  static async findById(id: number): Promise<TotpDevice | undefined> {
+    return db.query.totpDevices.findFirst({ where: eq(totpDevices.id, id) });
+  }
+
+  static async insert(userId: number, name: string, secret: string): Promise<TotpDevice> {
+    const [row] = await db.insert(totpDevices).values({ userId, name, secret }).returning();
+    if (!row) throw new Error("failed to store the authenticator");
+    return row;
+  }
+
+  static async confirm(id: number): Promise<void> {
+    await db.update(totpDevices).set({ confirmedAt: sql`(datetime('now'))` }).where(eq(totpDevices.id, id));
+  }
+
+  static async touch(id: number): Promise<void> {
+    await db.update(totpDevices).set({ lastUsedAt: sql`(datetime('now'))` }).where(eq(totpDevices.id, id));
+  }
+
+  static async delete(id: number, userId: number): Promise<boolean> {
+    const rows = await db
+      .delete(totpDevices)
+      .where(and(eq(totpDevices.id, id), eq(totpDevices.userId, userId)))
+      .returning({ id: totpDevices.id });
+    return rows.length > 0;
+  }
+
+  /** Half-finished enrolments left lying around; replaced whenever a new one starts. */
+  static async deleteUnconfirmed(userId: number): Promise<void> {
+    await db.delete(totpDevices).where(and(eq(totpDevices.userId, userId), isNull(totpDevices.confirmedAt)));
   }
 }

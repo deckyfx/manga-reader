@@ -14,6 +14,7 @@ import {
   MfaChallengeStore,
   RecoveryCodeStore,
   SessionStore,
+  TotpDeviceStore,
   UserStore,
   normaliseUsername,
 } from "@/stores/user-store";
@@ -137,7 +138,7 @@ const MFA_CHALLENGE_MINUTES = 5;
 /** Which second factors an account has set up. Empty means the password is enough. */
 export async function secondFactors(user: User): Promise<("totp" | "passkey")[]> {
   const factors: ("totp" | "passkey")[] = [];
-  if (user.totpEnabledAt) factors.push("totp");
+  if ((await TotpDeviceStore.listConfirmed(user.id)).length > 0) factors.push("totp");
   if ((await CredentialStore.listByUser(user.id)).length > 0) factors.push("passkey");
   return factors;
 }
@@ -164,10 +165,18 @@ export async function pendingUser(token: string): Promise<{ user: User; tokenHas
   return { user, tokenHash, webauthnChallenge: challenge.webauthnChallenge };
 }
 
-/** Checks a TOTP code for an account mid-sign-in. */
-export function checkTotp(user: User, code: string): boolean {
-  if (!user.totpEnabledAt || !user.totpSecret) return false;
-  return verifyTotp(user.totpSecret, code);
+/**
+ * Checks a code against every authenticator the account has enrolled: any of them signs in, and the one that matched
+ * gets its last-used stamp, so a device that has stopped being used is visible on the account page.
+ */
+export async function checkTotp(user: User, code: string): Promise<boolean> {
+  for (const device of await TotpDeviceStore.listConfirmed(user.id)) {
+    if (verifyTotp(device.secret, code)) {
+      await TotpDeviceStore.touch(device.id);
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Spends a recovery code. Each one works once, and the codes are stored hashed like everything else. */
@@ -188,10 +197,14 @@ export async function issueRecoveryCodes(userId: number): Promise<string[]> {
   return codes;
 }
 
-/** Turns TOTP off and drops the codes that went with it. */
-export async function disableTotp(userId: number): Promise<void> {
-  await UserStore.update(userId, { totpSecret: null, totpEnabledAt: null });
-  await RecoveryCodeStore.clear(userId);
+/**
+ * Removes one authenticator. The recovery codes stay while another device is still enrolled; with the last one gone
+ * they mean nothing, so they go too.
+ */
+export async function removeTotpDevice(userId: number, deviceId: number): Promise<boolean> {
+  if (!(await TotpDeviceStore.delete(deviceId, userId))) return false;
+  if ((await TotpDeviceStore.listConfirmed(userId)).length === 0) await RecoveryCodeStore.clear(userId);
+  return true;
 }
 
 /** Ends a challenge once it has been used, so a token can't be spent twice. */
