@@ -53,5 +53,28 @@ CREATE TABLE `__new_chapters` (
 INSERT INTO `__new_chapters`("id", "series_id", "volume_id", "title", "number", "sort_order", "created_at", "updated_at") SELECT `c`.`id`, (SELECT `v`.`series_id` FROM `volumes` `v` WHERE `v`.`id` = `c`.`volume_id`), `c`.`volume_id`, `c`.`title`, NULL, `c`.`sort_order`, `c`.`created_at`, `c`.`updated_at` FROM `chapters` `c`;--> statement-breakpoint
 DROP TABLE `chapters`;--> statement-breakpoint
 ALTER TABLE `__new_chapters` RENAME TO `chapters`;--> statement-breakpoint
+CREATE TABLE `__new_pages` (
+	`id` text PRIMARY KEY NOT NULL,
+	`image_hash` text NOT NULL,
+	`chapter_id` integer,
+	`sort_order` integer DEFAULT 0 NOT NULL,
+	`name` text,
+	`source` text NOT NULL,
+	`width` integer DEFAULT 0 NOT NULL,
+	`height` integer DEFAULT 0 NOT NULL,
+	`status` text DEFAULT 'queued' NOT NULL,
+	`error_message` text,
+	`clean_sfx` integer DEFAULT false NOT NULL,
+	`revision` integer DEFAULT 0 NOT NULL,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
+	FOREIGN KEY (`chapter_id`) REFERENCES `chapters`(`id`) ON UPDATE no action ON DELETE set null
+);
+--> statement-breakpoint
+INSERT INTO `__new_pages`("id", "image_hash", "chapter_id", "sort_order", "name", "source", "width", "height", "status", "error_message", "clean_sfx", "revision", "created_at", "updated_at") SELECT "id", "image_hash", "chapter_id", "sort_order", "name", "source", "width", "height", "status", "error_message", "clean_sfx", "revision", "created_at", "updated_at" FROM `pages`;--> statement-breakpoint
+DROP TABLE `pages`;--> statement-breakpoint
+ALTER TABLE `__new_pages` RENAME TO `pages`;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint
+CREATE INDEX `pages_image_hash_idx` ON `pages` (`image_hash`);--> statement-breakpoint
+CREATE INDEX `pages_chapter_sort_idx` ON `pages` (`chapter_id`,`sort_order`);--> statement-breakpoint
 CREATE INDEX `chapters_series_sort_idx` ON `chapters` (`series_id`,`sort_order`);

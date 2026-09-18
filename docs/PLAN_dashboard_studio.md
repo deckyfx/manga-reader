@@ -372,6 +372,7 @@ Managing lives under its own top-level area, so the app has three modes: **studi
 - `chapters` gained `series_id` (cascade) and `number`; `volume_id` is nullable (`ON DELETE SET NULL`), so a chapter can sit directly under its series.
 - The migration is hand-written: it creates one series per existing volume (paired by `ROW_NUMBER()`), re-points volumes and chapters, and keeps every page. Verified on a throwaway database before use.
 - Deleting never destroys pages: a volume's chapters fall back to the series, a chapter's pages return to the Inbox, a series' pages are unfiled.
+- Migrations now run with `PRAGMA foreign_keys = OFF` around the whole run (`MigrationManager.applyMigrations`), and a `foreign_key_check` afterwards. The `PRAGMA foreign_keys=OFF` that drizzle-kit writes *inside* a migration is silently ignored, because Drizzle runs each migration in a transaction: the rebuilds in 0007 would otherwise drop `volumes` and `pages` with enforcement on and cascade their children away (chapters, page stages and blocks). Found by migrating a copy of a real database and comparing row counts — worth doing for any migration that rebuilds a table.
 
 **API split** — the same data, two plugins, so 5.4 has one place to gate:
 - `/read/api/*` (read-only): `GET /series` (search `q`, `tags`, `exclude`, `has_chapters`, `status`, `sort`), `/series/tags`, `/series/:id`, `/series/:id/cover` (uploaded cover, else the first page), `/chapters/:id`, `/pages/:id/image`.

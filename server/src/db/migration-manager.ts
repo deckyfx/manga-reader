@@ -59,8 +59,7 @@ export class MigrationManager {
     const db = drizzle(sqlite);
     try {
       await db.run(sql`PRAGMA journal_mode = WAL`);
-      await db.run(sql`PRAGMA foreign_keys = ON`);
-      await migrate(db, { migrationsFolder: this.migrationsDir });
+      await this.applyMigrations(db);
       log.info("DB migrations applied.");
     } finally {
       sqlite.close();
@@ -118,7 +117,7 @@ export class MigrationManager {
         console.log(`Running ${pending} pending migration(s)…`);
       }
 
-      await migrate(db, { migrationsFolder: this.migrationsDir });
+      await this.applyMigrations(db);
 
       if (pending > 0) {
         log.info("DB migrations applied.");
@@ -127,6 +126,29 @@ export class MigrationManager {
       }
     } finally {
       sqlite.close();
+    }
+  }
+
+  /**
+   * Runs the pending migrations with foreign keys disabled, then turns them back on and checks the result.
+   *
+   * A `PRAGMA foreign_keys` written inside a migration is silently ignored, because Drizzle runs each migration in a
+   * transaction and SQLite makes that pragma a no-op there. Table rebuilds (create new, copy, drop old, rename) would
+   * then fire ON DELETE CASCADE on the dropped parent and take its children with it, so enforcement is switched off
+   * here, around the whole run, where it does take effect.
+   */
+  private static async applyMigrations(db: ReturnType<typeof drizzle>): Promise<void> {
+    await db.run(sql`PRAGMA foreign_keys = OFF`);
+    try {
+      await migrate(db, { migrationsFolder: this.migrationsDir });
+    } finally {
+      await db.run(sql`PRAGMA foreign_keys = ON`);
+    }
+    const violations = await db.all<Record<string, unknown>>(sql`PRAGMA foreign_key_check`);
+    if (violations.length > 0) {
+      log.error(`❌ The migrated database has ${violations.length} foreign key violation(s).`);
+      log.error(`   ${JSON.stringify(violations.slice(0, 5))}`);
+      throw new Error("migration left foreign key violations");
     }
   }
 
