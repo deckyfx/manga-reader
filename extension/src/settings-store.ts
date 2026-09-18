@@ -23,13 +23,16 @@ export async function loadSettings(): Promise<Settings> {
     chrome.storage.local.get([...SECRET_KEYS]) as Promise<Partial<Settings>>,
   ]);
 
-  const strays = SECRET_KEYS.filter((key) => typeof synced[key] === "string" && synced[key] !== "" && !local[key]);
-  if (strays.length > 0) {
-    // Written by a build that didn't know better: keep the value, take it out of sync
-    const rescued = Object.fromEntries(strays.map((key) => [key, synced[key]]));
-    await chrome.storage.local.set(rescued);
-    await chrome.storage.sync.remove([...strays]);
-    Object.assign(local, rescued);
+  // Anything an older build left in sync comes out of sync, whether or not it is still needed here
+  const inSync = SECRET_KEYS.filter((key) => typeof synced[key] === "string" && synced[key] !== "");
+  if (inSync.length > 0) {
+    const rescued = Object.fromEntries(inSync.filter((key) => !local[key]).map((key) => [key, synced[key]]));
+    if (Object.keys(rescued).length > 0) {
+      await chrome.storage.local.set(rescued);
+      Object.assign(local, rescued);
+    }
+    // Only once the values are safely local: a failed set would otherwise lose them
+    await chrome.storage.sync.remove([...inSync]);
   }
 
   const publicSettings = Object.fromEntries(Object.entries(synced).filter(([key]) => !isSecret(key)));

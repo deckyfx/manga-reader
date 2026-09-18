@@ -122,8 +122,10 @@ export async function authenticate(username: string, password: string): Promise<
     await verifyPassword(password, "$argon2id$v=19$m=65536,t=2,p=1$aaaaaaaaaaaaaaaa$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     return null;
   }
-  if (user.disabledAt) return null;
-  if (!(await verifyPassword(password, user.passwordHash))) return null;
+  // Always spend the verification, then decide: checking `disabledAt` first would answer a suspended account
+  // quicker than a wrong password, which is a way to enumerate them
+  const correct = await verifyPassword(password, user.passwordHash);
+  if (user.disabledAt || !correct) return null;
   return user;
 }
 

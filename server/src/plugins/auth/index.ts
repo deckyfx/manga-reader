@@ -171,6 +171,8 @@ export const requireRole = (role: UserRole) =>
     .use(authContext)
     .onBeforeHandle({ as: "scoped" }, ({ principal, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       if (!hasRole(principal.user, role)) return status(403, { error: `this needs the ${role} role` });
       return undefined;
     });
@@ -223,14 +225,15 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
   .post(
     "/setup",
     async ({ body, cookie, request, status }) => {
-      // Only ever available on an empty install; afterwards accounts are made by an admin
-      if (!(await needsSetup())) return status(409, { error: "this server already has an account" });
-      const user = await UserStore.insert({
+      // Only ever available on an empty install; afterwards accounts are made by an admin. The check and the insert
+      // are one transaction, so a second request racing this one is refused rather than given its own admin.
+      const user = await UserStore.insertFirstAdmin({
         username: body.username,
         displayName: body.display_name ?? null,
         passwordHash: await hashPassword(body.password),
         role: "admin",
       });
+      if (!user) return status(409, { error: "this server already has an account" });
       const { token, expiresAt } = await startSession(user.id, request.headers.get("user-agent"));
       writeSessionCookie(cookie, request.url, token, expiresAt);
       log.info({ userId: user.id, username: user.username }, "First admin created");
@@ -290,7 +293,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     },
     {
       body: t.Object({ username: t.String({ maxLength: 40 }), password: t.String({ maxLength: 200 }) }),
-      response: { 200: LoginResult, 401: ErrBody },
+      response: { 200: LoginResult, 401: ErrBody, 403: ErrBody },
     },
   )
 
@@ -312,7 +315,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     },
     {
       body: t.Object({ challenge: t.String({ maxLength: 200 }), code: t.String({ maxLength: 10 }) }),
-      response: { 200: LoginResult, 401: ErrBody },
+      response: { 200: LoginResult, 401: ErrBody, 403: ErrBody },
     },
   )
 
@@ -334,7 +337,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     },
     {
       body: t.Object({ challenge: t.String({ maxLength: 200 }), code: t.String({ maxLength: 40 }) }),
-      response: { 200: LoginResult, 401: ErrBody },
+      response: { 200: LoginResult, 401: ErrBody, 403: ErrBody },
     },
   )
 
@@ -350,7 +353,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       await MfaChallengeStore.setWebauthnChallenge(pending.tokenHash, options.challenge);
       return options as unknown as Record<string, unknown>;
     },
-    { body: t.Object({ challenge: t.String({ maxLength: 200 }) }), response: { 200: t.Any(), 401: ErrBody } },
+    { body: t.Object({ challenge: t.String({ maxLength: 200 }) }), response: { 200: t.Any(), 401: ErrBody, 403: ErrBody } },
   )
 
   .post(
@@ -370,7 +373,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     },
     {
       body: t.Object({ challenge: t.String({ maxLength: 200 }), response: t.Any() }),
-      response: { 200: LoginResult, 401: ErrBody, 409: ErrBody },
+      response: { 200: LoginResult, 401: ErrBody, 403: ErrBody, 409: ErrBody },
     },
   )
 
@@ -380,6 +383,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     "/passkeys",
     async ({ principal, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       return (await CredentialStore.listByUser(principal.user.id)).map((credential) => ({
         id: credential.id,
         name: credential.name,
@@ -387,7 +392,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
         created_at: credential.createdAt,
       }));
     },
-    { response: { 200: t.Array(PasskeySchema), 401: ErrBody } },
+    { response: { 200: t.Array(PasskeySchema), 401: ErrBody, 403: ErrBody } },
   )
 
   .post(
@@ -395,18 +400,22 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     async ({ principal, request, status }) => {
       // Enrolling always happens from a signed-in session: a passkey is a second factor, never a way in
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const options = await registrationOptions(principal.user);
       const token = await startMfaChallenge(principal.user.id, request.headers.get("user-agent"));
       await MfaChallengeStore.setWebauthnChallenge(hashSecret(token), options.challenge);
       return { challenge: token, options: options as unknown as Record<string, unknown> };
     },
-    { response: { 200: t.Object({ challenge: t.String(), options: t.Any() }), 401: ErrBody } },
+    { response: { 200: t.Object({ challenge: t.String(), options: t.Any() }), 401: ErrBody, 403: ErrBody } },
   )
 
   .post(
     "/passkeys",
     async ({ principal, body, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const pending = await pendingUser(body.challenge);
       if (!pending || pending.user.id !== principal.user.id || !pending.webauthnChallenge) {
         return status(409, { error: "start the enrolment again" });
@@ -419,7 +428,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     },
     {
       body: t.Object({ challenge: t.String({ maxLength: 200 }), name: t.String({ minLength: 1, maxLength: 60 }), response: t.Any() }),
-      response: { 200: PasskeySchema, 401: ErrBody, 409: ErrBody, 422: ErrBody },
+      response: { 200: PasskeySchema, 401: ErrBody, 403: ErrBody, 409: ErrBody, 422: ErrBody },
     },
   )
 
@@ -427,6 +436,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     "/passkeys/:id",
     async ({ principal, params, body, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       if (!(await verifyPassword(body.password, principal.user.passwordHash))) return status(403, { error: "the password doesn't match" });
       if (!(await CredentialStore.delete(params.id, principal.user.id))) return status(404, { error: "that passkey isn't on this account" });
       log.info({ userId: principal.user.id, credentialId: params.id }, "Passkey removed");
@@ -445,6 +456,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     "/totp",
     async ({ principal, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       return (await TotpDeviceStore.listByUser(principal.user.id)).map((device) => ({
         id: device.id,
         name: device.name,
@@ -453,13 +466,15 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
         created_at: device.createdAt,
       }));
     },
-    { response: { 200: t.Array(TotpDeviceSchema), 401: ErrBody } },
+    { response: { 200: t.Array(TotpDeviceSchema), 401: ErrBody, 403: ErrBody } },
   )
 
   .post(
     "/totp",
     async ({ principal, body, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       // Only one enrolment can be half-finished at a time; starting again replaces the abandoned one
       await TotpDeviceStore.deleteUnconfirmed(principal.user.id);
       const secret = newTotpSecret();
@@ -468,7 +483,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     },
     {
       body: t.Object({ name: t.String({ minLength: 1, maxLength: 60 }) }),
-      response: { 200: t.Object({ id: t.Integer(), name: t.String(), secret: t.String(), uri: t.String() }), 401: ErrBody },
+      response: { 200: t.Object({ id: t.Integer(), name: t.String(), secret: t.String(), uri: t.String() }), 401: ErrBody, 403: ErrBody },
     },
   )
 
@@ -476,6 +491,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     "/totp/:id/confirm",
     async ({ principal, params, body, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const device = await TotpDeviceStore.findById(params.id);
       if (!device || device.userId !== principal.user.id) return status(404, { error: "that authenticator isn't on this account" });
       if (device.confirmedAt) return status(409, { error: "this authenticator is already set up" });
@@ -491,7 +508,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     {
       params: t.Object({ id: t.Integer({ minimum: 1 }) }),
       body: t.Object({ code: t.String({ maxLength: 10 }) }),
-      response: { 200: t.Object({ confirmed: t.Boolean(), recovery_codes: t.Array(t.String()) }), 401: ErrBody, 404: ErrBody, 409: ErrBody, 422: ErrBody },
+      response: { 200: t.Object({ confirmed: t.Boolean(), recovery_codes: t.Array(t.String()) }), 401: ErrBody, 403: ErrBody, 404: ErrBody, 409: ErrBody, 422: ErrBody },
     },
   )
 
@@ -499,6 +516,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     "/totp/:id",
     async ({ principal, params, body, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       // The password again: a borrowed session shouldn't be able to strip a factor off the account
       if (!(await verifyPassword(body.password, principal.user.passwordHash))) return status(403, { error: "the password doesn't match" });
       if (!(await removeTotpDevice(principal.user.id, params.id))) return status(404, { error: "that authenticator isn't on this account" });
@@ -527,6 +546,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     "/password",
     async ({ principal, body, cookie, request, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       if (!(await verifyPassword(body.current, principal.user.passwordHash))) return status(403, { error: "the current password doesn't match" });
       await UserStore.update(principal.user.id, { passwordHash: await hashPassword(body.next) });
       // Every session goes, including this one: a password change signs the account out everywhere
@@ -546,6 +567,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     "/recovery",
     async ({ principal, body, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       if (!(await verifyPassword(body.password, principal.user.passwordHash))) return status(403, { error: "the password doesn't match" });
       const codes = await issueRecoveryCodes(principal.user.id);
       log.info({ userId: principal.user.id }, "Recovery codes reissued");
@@ -563,6 +586,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     "/sessions",
     async ({ principal, cookie, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const token = cookie[SESSION_COOKIE]?.value;
       const currentHash = typeof token === "string" && token ? hashSecret(token) : null;
       return (await SessionStore.listByUser(principal.user.id)).map((session) => ({
@@ -575,13 +600,15 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
         expires_at: session.expiresAt,
       }));
     },
-    { response: { 200: t.Array(SessionSchema), 401: ErrBody } },
+    { response: { 200: t.Array(SessionSchema), 401: ErrBody, 403: ErrBody } },
   )
 
   .delete(
     "/sessions/:id",
     async ({ principal, params, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const session = await SessionStore.find(params.id);
       if (!session || session.userId !== principal.user.id) return status(404, { error: "no such session" });
       await SessionStore.delete(params.id);
@@ -589,7 +616,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     },
     {
       params: t.Object({ id: t.String({ maxLength: 128 }) }),
-      response: { 200: t.Object({ signed_out: t.Boolean() }), 401: ErrBody, 404: ErrBody },
+      response: { 200: t.Object({ signed_out: t.Boolean() }), 401: ErrBody, 403: ErrBody, 404: ErrBody },
     },
   )
 
@@ -599,6 +626,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     "/keys",
     async ({ principal, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const keys = await ApiKeyStore.listByUser(principal.user.id);
       return keys.map((key) => ({
         id: key.id,
@@ -609,13 +638,15 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
         created_at: key.createdAt,
       }));
     },
-    { response: { 200: t.Array(ApiKeySchema), 401: ErrBody } },
+    { response: { 200: t.Array(ApiKeySchema), 401: ErrBody, 403: ErrBody } },
   )
 
   .post(
     "/keys",
     async ({ principal, body, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       if (!hasRole(principal.user, "contributor")) return status(403, { error: "this needs the contributor role" });
       // The only time the key itself is readable: it is stored hashed
       const created = await createApiKey(principal.user.id, body.name);
@@ -631,6 +662,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     "/keys/:id",
     async ({ principal, params, status }) => {
       if (!principal) return status(401, { error: "sign in to do that" });
+      // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       const key = await ApiKeyStore.findById(params.id);
       if (!key || key.userId !== principal.user.id) return status(404, { error: "key not found" });
       await ApiKeyStore.revoke(params.id);
@@ -638,6 +671,6 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     },
     {
       params: t.Object({ id: t.Integer({ minimum: 1 }) }),
-      response: { 200: t.Object({ revoked: t.Boolean() }), 401: ErrBody, 404: ErrBody },
+      response: { 200: t.Object({ revoked: t.Boolean() }), 401: ErrBody, 403: ErrBody, 404: ErrBody },
     },
   );

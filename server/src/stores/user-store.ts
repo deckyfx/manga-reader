@@ -48,6 +48,19 @@ export class UserStore {
     return db.query.users.findFirst({ where: eq(users.username, normaliseUsername(username)) });
   }
 
+  /**
+   * Creates the first admin, or answers null when somebody got there first. The count and the insert happen in one
+   * transaction, so two requests arriving together can't each see an empty table and make an admin apiece.
+   */
+  static async insertFirstAdmin(user: NewUser): Promise<User | null> {
+    return db.transaction((tx) => {
+      const existing = tx.select({ count: sql<number>`count(*)` }).from(users).get();
+      if ((existing?.count ?? 0) > 0) return null;
+      const rows = tx.insert(users).values({ ...user, username: normaliseUsername(user.username), role: "admin" }).returning().all();
+      return rows[0] ?? null;
+    });
+  }
+
   static async insert(user: NewUser): Promise<User> {
     const [row] = await db.insert(users).values({ ...user, username: normaliseUsername(user.username) }).returning();
     if (!row) throw new Error("failed to create the user");
