@@ -2,6 +2,22 @@
 
 @layer base {
   /*
+   * The app's own pages sit inside Layout, which paints the background; the sign-in screens don't, and were landing
+   * as a dark card on a white page. Setting it here means every route starts dark, and gives the full-height chain
+   * (html → body → #root) that `h-full` needs to centre anything.
+   */
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-gray-950);
+    color: var(--color-gray-100);
+  }
+
+  /*
    * Tailwind v4 draws a placeholder as the input's own colour at 50% transparency, which on this dark theme lands
    * close enough to the real text to be mistaken for it. A fixed dim grey keeps the hint clearly a hint.
    */

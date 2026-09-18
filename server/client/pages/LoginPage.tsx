@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import { useMutation } from "@tanstack/react-query";
-import { KeyRound, Loader2, LogIn, ShieldCheck } from "lucide-react";
+import { KeyRound, LogIn, ShieldCheck } from "lucide-react";
 import {
   login,
   loginWithPasskey,
@@ -12,8 +12,9 @@ import {
 } from "../api";
 import { useAuth } from "../auth/AuthProvider";
 import { startAssertion } from "../auth/webauthn";
-
-const field = "w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 focus:border-indigo-500 focus:outline-none";
+import { AuthButton } from "../components/AuthButton";
+import { AuthField } from "../components/AuthField";
+import { AuthShell } from "../components/AuthShell";
 
 /** Sign-in: a password, then a second factor when the account carries one. */
 export function LoginPage() {
@@ -23,6 +24,7 @@ export function LoginPage() {
   // Where the server sent us from, when a link needed signing in first; only ever a path on this server
   const next = params.get("next");
   const destination = next && next.startsWith("/") && !next.startsWith("//") ? next : "/home";
+
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   /** Set once the password is accepted but the account wants more. */
@@ -70,114 +72,110 @@ export function LoginPage() {
 
   const error = passwordM.error ?? codeM.error ?? passkeyM.error;
 
-  return (
-    <div className="flex h-full items-center justify-center p-4">
-      <div className="w-full max-w-sm rounded-xl border border-gray-800 bg-gray-900 p-6">
-        <h1 className="text-lg font-semibold">Sign in</h1>
-        <p className="mt-1 text-sm text-gray-400">
-          {pending ? "One more step for this account." : "Reading is open to everyone; signing in is for managing the library."}
-        </p>
-
-        {!pending ? (
-          <form
-            className="mt-5 space-y-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (username.trim() && password) passwordM.mutate();
-            }}
-          >
-            <label className="block space-y-1">
-              <span className="text-xs text-gray-400">Username</span>
-              <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus autoComplete="username" className={field} />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-xs text-gray-400">Password</span>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" className={field} />
-            </label>
-            <button
-              type="submit"
-              disabled={!username.trim() || !password || passwordM.isPending}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-            >
-              {passwordM.isPending ? <Loader2 size={15} className="animate-spin" /> : <LogIn size={15} />}
-              Sign in
-            </button>
-          </form>
-        ) : (
-          <div className="mt-5 space-y-3">
-            {pending.methods.includes("passkey") && (
-              <button
-                onClick={() => passkeyM.mutate()}
-                disabled={passkeyM.isPending}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-gray-800 px-3 py-2 text-sm text-gray-100 hover:bg-gray-700 disabled:opacity-50"
-              >
-                {passkeyM.isPending ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />}
-                Use a passkey
-              </button>
-            )}
-
-            {pending.methods.includes("totp") && (
-              <form
-                className="space-y-3"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (code.trim()) codeM.mutate();
-                }}
-              >
-                <label className="block space-y-1">
-                  <span className="text-xs text-gray-400">{useRecovery ? "Recovery code" : "Code from your authenticator"}</span>
-                  <input
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    autoFocus
-                    inputMode={useRecovery ? "text" : "numeric"}
-                    autoComplete="one-time-code"
-                    placeholder={useRecovery ? "12345-67890" : "123456"}
-                    className={`${field} tracking-widest`}
-                  />
-                </label>
-                <button
-                  type="submit"
-                  disabled={!code.trim() || codeM.isPending}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-                >
-                  {codeM.isPending ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
-                  Continue
-                </button>
-              </form>
-            )}
-
-            <div className="flex items-center justify-between text-xs">
-              {pending.methods.includes("totp") && (
-                <button onClick={() => setUseRecovery((on) => !on)} className="text-indigo-300 hover:text-indigo-200">
-                  {useRecovery ? "Use an authenticator code" : "Lost your authenticator?"}
-                </button>
-              )}
-              <button
-                onClick={() => {
-                  setPending(null);
-                  setCode("");
-                  setUseRecovery(false);
-                }}
-                className="ml-auto text-gray-400 hover:text-white"
-              >
-                Start again
-              </button>
-            </div>
-          </div>
-        )}
-
-        {error && <p className="mt-3 text-sm text-red-400">{error.message}</p>}
-
-        {registrationEnabled && !pending && (
-          <p className="mt-4 text-xs text-gray-500">
-            No account? <Link to="/register" className="text-indigo-300 hover:text-indigo-200">Create one</Link>
-          </p>
-        )}
-        <p className="mt-2 text-xs text-gray-500">
-          <Link to="/read" className="text-gray-400 hover:text-white">Browse the library without signing in →</Link>
-        </p>
-      </div>
+  const footer = (
+    <div className="space-y-1">
+      {registrationEnabled && !pending && (
+        <p>No account? <Link to="/register" className="text-indigo-300 hover:text-indigo-200">Create one</Link></p>
+      )}
+      <p><Link to="/read" className="text-gray-400 hover:text-gray-200">Browse the library without signing in →</Link></p>
     </div>
+  );
+
+  return (
+    <AuthShell
+      title={pending ? "One more step" : "Sign in"}
+      subtitle={pending
+        ? "This account is protected by something beyond its password."
+        : "Reading is open to everyone; signing in is for managing the library."}
+      footer={footer}
+    >
+      {!pending ? (
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (username.trim() && password) passwordM.mutate();
+          }}
+        >
+          <AuthField
+            label="Username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoFocus
+            autoComplete="username"
+          />
+          <AuthField
+            label="Password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
+          <AuthButton type="submit" disabled={!username.trim() || !password} pending={passwordM.isPending} icon={<LogIn size={15} />}>
+            Sign in
+          </AuthButton>
+        </form>
+      ) : (
+        <div className="space-y-4">
+          {pending.methods.includes("passkey") && (
+            <AuthButton variant="quiet" onClick={() => passkeyM.mutate()} pending={passkeyM.isPending} icon={<KeyRound size={15} />}>
+              Use a passkey
+            </AuthButton>
+          )}
+
+          {pending.methods.includes("passkey") && pending.methods.includes("totp") && (
+            <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-gray-600">
+              <span className="h-px flex-1 bg-gray-800" />
+              or
+              <span className="h-px flex-1 bg-gray-800" />
+            </div>
+          )}
+
+          {pending.methods.includes("totp") && (
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (code.trim()) codeM.mutate();
+              }}
+            >
+              <AuthField
+                label={useRecovery ? "Recovery code" : "Code from your authenticator"}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                autoFocus
+                inputMode={useRecovery ? "text" : "numeric"}
+                autoComplete="one-time-code"
+                placeholder={useRecovery ? "12345-67890" : "123456"}
+                className="text-center text-lg tracking-[0.3em]"
+              />
+              <AuthButton type="submit" disabled={!code.trim()} pending={codeM.isPending} icon={<ShieldCheck size={15} />}>
+                Continue
+              </AuthButton>
+            </form>
+          )}
+
+          <div className="flex items-center justify-between text-xs">
+            {pending.methods.includes("totp") && (
+              <button onClick={() => setUseRecovery((on) => !on)} className="text-indigo-300 hover:text-indigo-200">
+                {useRecovery ? "Use an authenticator code" : "Lost your authenticator?"}
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setPending(null);
+                setCode("");
+                setUseRecovery(false);
+              }}
+              className="ml-auto text-gray-400 hover:text-gray-200"
+            >
+              Start again
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && <p className="mt-4 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm text-red-300">{error.message}</p>}
+    </AuthShell>
   );
 }
