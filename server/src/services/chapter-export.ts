@@ -5,14 +5,20 @@
 import { zip } from "fflate";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { publishedFile } from "@/services/page-history";
 import { pageDir, PageStore } from "@/stores/page-store";
 import type { Page } from "@/db/schema";
 
 /** Characters that are awkward in file names on some systems. */
 const safeName = (name: string): string => name.replace(/[\\/:*?"<>|]+/g, "_").trim().slice(0, 80);
 
-/** The image a page exports as: the published result, or the original when it hasn't been translated. */
+/**
+ * The image a page exports as — the same one readers get: its newest published snapshot, else (for pages never
+ * published) the current burn, else the original. An export therefore matches what the chapter reads like.
+ */
 export function exportImagePath(page: Page): string | null {
+  const published = publishedFile(page.id);
+  if (published) return published;
   const result = join(pageDir(page.id), "result.png");
   if (existsSync(result)) return result;
   const original = join(pageDir(page.id), "original.png");

@@ -34,13 +34,14 @@ import { ErrBody } from "@/lib/schemas";
 import { runExclusiveResult, withPageLock } from "@/queue/page-queue";
 import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
-import { historyFile, listHistory, restoreResult, snapshotResult } from "@/services/page-history";
-import { decodeBase64Image, resultUrl, runStoredPage, submitPageJob } from "@/services/page-jobs";
+import { hasUnpublishedEdits, historyFile, listHistory, publishedFile, restoreResult } from "@/services/page-history";
+import { pageLocation, pageLocations } from "@/services/page-location";
+import { publishPage } from "@/services/page-publish";
+import { decodeBase64Image, runStoredPage, submitPageJob } from "@/services/page-jobs";
 import { MASK_LAYER_FILES, PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
 import { FONT_FILES } from "@/services/typeset-service";
 import { FONT_VARIANTS, TEXT_ALIGNS } from "@/shared/typeset";
 import { imageSize, maskFromImage, maskToPng } from "@/lib/mask";
-import { pageLive } from "@/stores/page-live-channel";
 import { PAGE_JOBS_DIR, pageDir, PageStore, type StageName } from "@/stores/page-store";
 
 const log = childLogger("studio");
@@ -147,6 +148,16 @@ function geometryError(page: Page, geometry: { x: number; y: number; w: number; 
   return null;
 }
 
+const PageLocationSchema = t.Object({
+  series_id: t.Integer(),
+  series_title: t.String(),
+  chapter_id: t.Integer(),
+  chapter_title: t.String(),
+  chapter_number: t.Nullable(t.String()),
+  index: t.Integer(),
+  total: t.Integer(),
+});
+
 const PageSummary = t.Object({
   id: t.String(),
   source: t.String(),
@@ -159,9 +170,15 @@ const PageSummary = t.Object({
   created_at: t.String(),
   updated_at: t.String(),
   has_result: t.Boolean(),
+  /** Published at least once: this is the version readers get. */
+  published: t.Boolean(),
+  /** The current burn is newer than the last publish, so readers can't see it yet. */
+  has_edits: t.Boolean(),
   /** Chapter the page belongs to; null = Inbox. */
   chapter_id: t.Nullable(t.Integer()),
   name: t.Nullable(t.String()),
+  /** Series, chapter and reading position, for pages filed into a chapter. */
+  location: t.Optional(t.Nullable(PageLocationSchema)),
 });
 
 const StageSchema = t.Object({
@@ -208,6 +225,8 @@ function toSummary(page: Page) {
     created_at: page.createdAt,
     updated_at: page.updatedAt,
     has_result: existsSync(join(pageDir(page.id), "result.png")),
+    published: publishedFile(page.id) !== null,
+    has_edits: hasUnpublishedEdits(page.id),
     chapter_id: page.chapterId,
     name: page.name,
   };
@@ -225,8 +244,8 @@ function toBlock(block: PageBlock) {
 async function pageDetail(id: string) {
   const page = await PageStore.findById(id);
   if (!page) return null;
-  const [stages, job] = await Promise.all([PageStore.listStages(id), PageStore.readJob(id)]);
-  return { page: toSummary(page), stages: stages.map(toStage), blocks: (job?.blocks ?? []).map(toBlock) };
+  const [stages, job, location] = await Promise.all([PageStore.listStages(id), PageStore.readJob(id), pageLocation(page)]);
+  return { page: { ...toSummary(page), location }, stages: stages.map(toStage), blocks: (job?.blocks ?? []).map(toBlock) };
 }
 
 /** Why a page can't be edited right now (missing, or still running in the pipeline), as a status + message. */
@@ -237,19 +256,28 @@ async function editablePage(id: string): Promise<{ page: Page } | { code: 404 | 
   return { page };
 }
 
-/** Bumps the revision, snapshots result.png under it and tells open extension tabs. Call under the page lock. */
-async function publish(id: string): Promise<{ revision: number; notified: number }> {
-  const revision = await PageStore.bumpRevision(id);
-  await snapshotResult(id, revision);
-  const notified = pageLive.publish({ type: "page-updated", page_id: id, revision, result_url: resultUrl(id, revision) });
-  log.info({ pageId: id, revision, notified }, "Page published");
-  return { revision, notified };
-}
-
 export const studioPlugin = new Elysia({ prefix: "/studio/api" })
-  .get("/pages", async () => (await PageStore.list()).map(toSummary), {
-    response: { 200: t.Array(PageSummary) },
-  })
+  .get(
+    "/pages",
+    async ({ query }) => {
+      const pages = await PageStore.listFiltered({
+        filed: query.filed ?? "inbox",
+        ...(query.chapter_id !== undefined ? { chapterId: query.chapter_id } : {}),
+        ...(query.q !== undefined ? { search: query.q } : {}),
+      });
+      const located = await pageLocations(pages);
+      return pages.map((page) => ({ ...toSummary(page), location: located.get(page.id) ?? null }));
+    },
+    {
+      query: t.Object({
+        /** Which pages to list: the Inbox (default), the ones inside chapters, or both. */
+        filed: t.Optional(t.UnionEnum(["inbox", "chapter", "all"])),
+        chapter_id: t.Optional(t.Integer({ minimum: 1 })),
+        q: t.Optional(t.String({ maxLength: 200 })),
+      }),
+      response: { 200: t.Array(PageSummary) },
+    },
+  )
 
   .post(
     "/pages",
@@ -296,9 +324,13 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .delete(
     "/pages/:id",
-    ({ params, status }) => withPageLock(params.id, async () => {
+    ({ params, query, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
+      // A page inside a chapter would disappear from what people read, so the caller has to mean it
+      if (check.page.chapterId !== null && !query.force) {
+        return status(409, { error: "this page belongs to a chapter — remove it from the chapter, or delete it with force" });
+      }
       // Only ever this page's own folder: the resolved path must be exactly <jobs dir>/<id>
       const jobsDir = resolve(PAGE_JOBS_DIR);
       const dir = resolve(pageDir(params.id));
@@ -321,7 +353,11 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       log.info({ pageId: params.id }, "Page deleted");
       return { deleted: params.id };
     }),
-    { params: IdParams, response: { 200: t.Object({ deleted: t.String() }), 404: ErrBody, 409: ErrBody } },
+    {
+      params: IdParams,
+      query: t.Object({ force: t.Optional(t.Boolean()) }),
+      response: { 200: t.Object({ deleted: t.String() }), 404: ErrBody, 409: ErrBody },
+    },
   )
 
   .get(
@@ -444,9 +480,13 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .delete(
     "/pages/:id/blocks/:idx",
-    ({ params, status }) => withPageLock(params.id, async () => {
+    ({ params, query, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
+      // A page inside a chapter would disappear from what people read, so the caller has to mean it
+      if (check.page.chapterId !== null && !query.force) {
+        return status(409, { error: "this page belongs to a chapter — remove it from the chapter, or delete it with force" });
+      }
       const block = (await PageStore.readJob(params.id))?.blocks.find((b) => b.id === params.idx);
       // Its lettering is no longer cleaned or typeset; OCR / translate of the remaining blocks is unaffected
       // (the sound-effect pass is built on the text pass, so a text block outdates both)
@@ -527,9 +567,13 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .post(
     "/pages/:id/place",
-    ({ params, status }) => withPageLock(params.id, async () => {
+    ({ params, query, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
+      // A page inside a chapter would disappear from what people read, so the caller has to mean it
+      if (check.page.chapterId !== null && !query.force) {
+        return status(409, { error: "this page belongs to a chapter — remove it from the chapter, or delete it with force" });
+      }
       try {
         await runExclusiveResult(async () => {
           const job = await PageStore.readJob(params.id);
@@ -595,9 +639,13 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .delete(
     "/pages/:id/mask/:layer",
-    ({ params, status }) => withPageLock(params.id, async () => {
+    ({ params, query, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
+      // A page inside a chapter would disappear from what people read, so the caller has to mean it
+      if (check.page.chapterId !== null && !query.force) {
+        return status(409, { error: "this page belongs to a chapter — remove it from the chapter, or delete it with force" });
+      }
       const file = join(pageDir(params.id), MASK_LAYER_FILES[params.layer]);
       if (existsSync(file)) {
         await PageStore.markStale(params.id, ["clean_text", "clean_sfx", "render"]);
@@ -665,16 +713,20 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .post(
     "/pages/:id/publish",
-    ({ params, status }) => withPageLock(params.id, async () => {
+    ({ params, query, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
+      // A page inside a chapter would disappear from what people read, so the caller has to mean it
+      if (check.page.chapterId !== null && !query.force) {
+        return status(409, { error: "this page belongs to a chapter — remove it from the chapter, or delete it with force" });
+      }
       if (!existsSync(join(pageDir(params.id), "result.png"))) return status(409, { error: "page has no result to publish" });
       // An edit saved after the last render would otherwise publish an image without it
       const stages = await PageStore.listStages(params.id);
       if (stages.some((s) => s.stage === "render" && s.status === "stale")) {
         return status(409, { error: "the page changed since it was last rendered — re-render before publishing" });
       }
-      return publish(params.id);
+      return publishPage(params.id);
     }),
     { params: IdParams, response: { 200: PublishResult, 404: ErrBody, 409: ErrBody } },
   )
@@ -712,7 +764,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       // The restored image no longer matches the blocks: a later re-render would replace it with the current text.
       // Rollback publishes on purpose despite the stale render (the one exception to the publish check).
       await PageStore.markStale(params.id, ["render"]);
-      return publish(params.id);
+      return publishPage(params.id);
     }),
     {
       params: IdParams,

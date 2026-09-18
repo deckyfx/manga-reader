@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { randomUUIDv7 } from "bun";
 import { existsSync } from "node:fs";
 import { readdir, rename, rm } from "node:fs/promises";
@@ -90,6 +90,46 @@ export class PageStore {
     const [row] = await db.insert(pages).values({ id: randomUUIDv7(), imageHash, source, chapterId, sortOrder, name }).returning();
     if (!row) throw new Error("failed to create page");
     return row;
+  }
+
+  /**
+   * Pages for the Studio's list: the Inbox, the pages inside chapters, or both, newest first. `search` matches the
+   * page name and its source.
+   */
+  static async listFiltered(options: { filed?: "inbox" | "chapter" | "all"; chapterId?: number; search?: string; limit?: number } = {}): Promise<Page[]> {
+    const filters = [];
+    if (options.chapterId !== undefined) filters.push(eq(pages.chapterId, options.chapterId));
+    else if (options.filed === "inbox") filters.push(isNull(pages.chapterId));
+    else if (options.filed === "chapter") filters.push(isNotNull(pages.chapterId));
+    const search = options.search?.trim();
+    if (search) {
+      const like = `%${search.replace(/[%_]/g, (char) => `\\${char}`)}%`;
+      filters.push(sql`(${pages.name} LIKE ${like} ESCAPE '\\' OR ${pages.source} LIKE ${like} ESCAPE '\\')`);
+    }
+    return db
+      .select()
+      .from(pages)
+      .where(filters.length > 0 ? and(...filters) : undefined)
+      .orderBy(desc(pages.updatedAt))
+      .limit(options.limit ?? 100);
+  }
+
+  /** Copies a page's stage state and blocks onto another page, replacing whatever that one had. */
+  static async copyStagesAndBlocks(fromId: string, toId: string): Promise<void> {
+    const [stages, blocks] = await Promise.all([
+      db.select().from(pageStages).where(eq(pageStages.pageId, fromId)),
+      db.select().from(pageBlocks).where(eq(pageBlocks.pageId, fromId)),
+    ]);
+    db.transaction((tx) => {
+      tx.delete(pageStages).where(eq(pageStages.pageId, toId)).run();
+      tx.delete(pageBlocks).where(eq(pageBlocks.pageId, toId)).run();
+      for (const stage of stages) {
+        tx.insert(pageStages).values({ ...stage, pageId: toId }).run();
+      }
+      for (const block of blocks) {
+        tx.insert(pageBlocks).values({ ...block, pageId: toId }).run();
+      }
+    });
   }
 
   /** Pages of a chapter in reading order. */

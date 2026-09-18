@@ -1,12 +1,15 @@
 /**
  * Translating a whole chapter: runs the pipeline over its pages one at a time (the pipeline is CPU-bound and already
- * serialised by the global queue), skipping pages that are finished unless the run is forced. Progress lives in memory
- * and is polled through GET /studio/api/chapters/:id/run; a server restart cancels a run, like every other page job.
+ * serialised by the global queue), skipping pages that are finished unless the run is forced. Each page that succeeds
+ * is published, so the run ends with a chapter readers can read. Progress lives in memory and is polled through
+ * GET /manage/api/chapters/:id/run; a server restart cancels a run, like every other page job.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { childLogger } from "@/lib/logger";
 import { runStoredPage } from "@/services/page-jobs";
+import { publishPage } from "@/services/page-publish";
+import { withPageLock } from "@/queue/page-queue";
 import { pageDir, PageStore } from "@/stores/page-store";
 import type { Page } from "@/db/schema";
 
@@ -101,6 +104,8 @@ export async function startChapterRun(chapterId: number, options: { force: boole
           state.failed++;
           state.error = after.errorMessage ?? "page failed";
         } else {
+          // Readers are served published snapshots, so a translated page has to be published to become readable
+          await withPageLock(page.id, () => publishPage(page.id));
           state.done++;
         }
       } catch (err) {

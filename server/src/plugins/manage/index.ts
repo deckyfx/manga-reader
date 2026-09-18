@@ -14,10 +14,13 @@
  * PUT    /manage/api/chapters/:id               rename / renumber / reorder / move between volumes
  * DELETE /manage/api/chapters/:id               delete it (its pages → Inbox)
  * POST   /manage/api/chapters/:id/pages         file images or ZIP / CBZ archives into a chapter (multipart)
+ * POST   /manage/api/chapters/:id/pages/:pageId copy an Inbox draft into the chapter (or move it, keep_draft=false)
  * PUT    /manage/api/chapters/:id/pages/reorder set the chapter's reading order
  * GET    /manage/api/chapters/:id/export        the chapter as a ZIP of published images
  * POST   /manage/api/chapters/:id/run           translate the chapter (skips finished pages unless forced)
  * GET    /manage/api/chapters/:id/run           progress of that run
+ * POST   /manage/api/chapters/:id/publish       publish every page of the chapter that has unpublished edits
+ * POST   /manage/api/pages/:id/publish          publish one page, so readers get its current result
  * GET    /manage/api/inbox                      pages not filed into a chapter yet
  * PUT    /manage/api/pages/:id                  move a page between chapters / the Inbox, rename, reorder
  * DELETE /manage/api/pages/:id                  take a page out of its chapter (back to the Inbox)
@@ -28,7 +31,11 @@ import { ErrBody } from "@/lib/schemas";
 import { chapterRun, pagesToRun, startChapterRun } from "@/services/chapter-batch";
 import { exportChapter } from "@/services/chapter-export";
 import { importIntoChapter, type ImportSource } from "@/services/chapter-import";
+import { hasUnpublishedEdits } from "@/services/page-history";
+import { publishPage } from "@/services/page-publish";
+import { withPageLock } from "@/queue/page-queue";
 import { CoverTooLargeError, deleteCover, saveCover } from "@/services/library-covers";
+import { copyPageIntoChapter } from "@/services/page-copy";
 import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore } from "@/stores/library-store";
 import { PageStore } from "@/stores/page-store";
 import {
@@ -330,6 +337,34 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     },
   )
 
+  .post(
+    "/chapters/:id/pages/:pageId",
+    async ({ params, body, status }) => {
+      if (!(await ChapterStore.findById(params.id))) return status(404, { error: "chapter not found" });
+      const page = await PageStore.findById(params.pageId);
+      if (!page) return status(404, { error: "page not found" });
+      if (page.chapterId === params.id) return status(409, { error: "this page is already in this chapter" });
+      if (page.status === "queued" || page.status === "running") return status(409, { error: "page is still being translated" });
+
+      // A draft is copied by default, so the Studio keeps the original to work from; keep_draft=false moves it instead
+      if (body?.keep_draft === false) {
+        await PageStore.filePage(params.pageId, { chapterId: params.id, sortOrder: (await PageStore.maxSortOrder(params.id)) + 1 });
+      } else {
+        await copyPageIntoChapter(page, params.id, body?.name);
+      }
+      return (await chapterDetail(params.id)) ?? status(404, { error: "chapter not found" });
+    },
+    {
+      params: t.Object({ id: IdParam, pageId: PageIdParam }),
+      body: t.Optional(t.Object({
+        /** Default true: the page is copied and the draft stays in the Inbox. False moves the page itself. */
+        keep_draft: t.Optional(t.Boolean()),
+        name: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
+      })),
+      response: { 200: ChapterDetail, 404: ErrBody, 409: ErrBody },
+    },
+  )
+
   .put(
     "/chapters/:id/pages/reorder",
     async ({ params, body, status }) => {
@@ -400,7 +435,40 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     },
   )
 
+  .post(
+    "/chapters/:id/publish",
+    async ({ params, status }) => {
+      if (!(await ChapterStore.findById(params.id))) return status(404, { error: "chapter not found" });
+      const pages = await PageStore.listByChapter(params.id);
+      // Only pages holding work readers can't see yet; a page still in the pipeline is left for the next publish
+      const pending = pages.filter((page) => page.status !== "queued" && page.status !== "running" && hasUnpublishedEdits(page.id));
+      for (const page of pending) await withPageLock(page.id, () => publishPage(page.id));
+      const detail = await chapterDetail(params.id);
+      if (!detail) return status(404, { error: "chapter not found" });
+      log.info({ chapterId: params.id, published: pending.length }, "Published a chapter's edits");
+      return { ...detail, published: pending.length };
+    },
+    {
+      params: t.Object({ id: IdParam }),
+      response: { 200: t.Composite([ChapterDetail, t.Object({ published: t.Integer() })]), 404: ErrBody },
+    },
+  )
+
   // ── Pages ──────────────────────────────────────────────────────────────────
+
+  .post(
+    "/pages/:id/publish",
+    async ({ params, status }) => {
+      const page = await PageStore.findById(params.id);
+      if (!page) return status(404, { error: "page not found" });
+      if (page.status === "queued" || page.status === "running") return status(409, { error: "page is still being translated" });
+      if (!hasUnpublishedEdits(params.id)) return status(409, { error: "this page has nothing new to publish" });
+      await withPageLock(params.id, () => publishPage(params.id));
+      const updated = await PageStore.findById(params.id);
+      return updated ? toPage(updated) : status(404, { error: "page not found" });
+    },
+    { params: t.Object({ id: PageIdParam }), response: { 200: ReadPageSchema, 404: ErrBody, 409: ErrBody } },
+  )
 
   .get("/inbox", async () => (await PageStore.listInbox()).map(toPage), { response: { 200: t.Array(ReadPageSchema) } })
 

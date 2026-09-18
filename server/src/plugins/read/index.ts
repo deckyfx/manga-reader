@@ -14,6 +14,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { ErrBody } from "@/lib/schemas";
 import { coverFilePath } from "@/services/library-covers";
+import { hasUnpublishedEdits, publishedFile } from "@/services/page-history";
 import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore, type SeriesWithCounts } from "@/stores/library-store";
 import { pageDir, PageStore } from "@/stores/page-store";
 import type { Chapter, Page, Series, Volume } from "@/db/schema";
@@ -70,8 +71,12 @@ export const ReadPageSchema = t.Object({
   status: t.String(),
   width: t.Integer(),
   height: t.Integer(),
-  /** A published result exists, so the reader shows the translation rather than the original. */
+  /** A translated image is what the reader gets for this page, rather than the original. */
   has_result: t.Boolean(),
+  /** The page has been published at least once: readers are served that snapshot. */
+  published: t.Boolean(),
+  /** result.png holds work newer than the last publish — the Studio has edits readers can't see yet. */
+  has_edits: t.Boolean(),
   revision: t.Integer(),
   updated_at: t.String(),
 });
@@ -93,7 +98,11 @@ export const ChapterDetail = t.Object({
   pages: t.Array(ReadPageSchema),
 });
 
-export const hasResult = (page: Page): boolean => existsSync(join(pageDir(page.id), "result.png"));
+/** What the reader is actually served for this page: a translation, or the original (or nothing at all). */
+export const hasResult = (page: Page): boolean => {
+  const file = pageImagePath(page.id);
+  return file !== null && file !== join(pageDir(page.id), "original.png");
+};
 
 export const toPage = (page: Page) => ({
   id: page.id,
@@ -105,6 +114,8 @@ export const toPage = (page: Page) => ({
   width: page.width,
   height: page.height,
   has_result: hasResult(page),
+  published: publishedFile(page.id) !== null,
+  has_edits: hasUnpublishedEdits(page.id),
   revision: page.revision,
   updated_at: page.updatedAt,
 });
@@ -191,7 +202,14 @@ export async function chapterDetail(id: number) {
 }
 
 /** The image a page shows: its published result when it has one, else the original it was imported from. */
+/**
+ * The image a reader gets: the newest published snapshot, else — for pages that predate publishing, or were never
+ * published — the current burn, else the original. Editing a published page in the Studio therefore changes nothing
+ * for readers until it is published again.
+ */
 export function pageImagePath(pageId: string): string | null {
+  const published = publishedFile(pageId);
+  if (published) return published;
   const dir = pageDir(pageId);
   const result = join(dir, "result.png");
   if (existsSync(result)) return result;
