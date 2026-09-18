@@ -117,7 +117,7 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
     >
       <form onSubmit={submit} className="flex flex-wrap gap-5">
         <div className="w-40 shrink-0 space-y-2">
-          <div className="flex aspect-[2/3] items-center justify-center overflow-hidden rounded-lg border border-gray-800 bg-gray-950">
+          <div className="flex aspect-2/3 items-center justify-center overflow-hidden rounded-lg border border-gray-800 bg-gray-950">
             {preview ? <img src={preview} alt="" className="h-full w-full object-cover" /> : <BookOpen size={26} className="text-gray-700" />}
           </div>
           <input

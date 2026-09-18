@@ -1234,7 +1234,7 @@ function HistoryPanel({ pageId, currentRevision, disabled, onRolledBack }: {
       <div className="grid grid-cols-3 gap-2">
         {entries.map((entry) => (
           <div key={entry.revision} className="flex flex-col gap-1">
-            <a href={historyImageUrl(pageId, entry.revision)} target="_blank" rel="noreferrer" className="block aspect-[2/3] bg-gray-950 rounded overflow-hidden border border-gray-800 hover:border-indigo-500">
+            <a href={historyImageUrl(pageId, entry.revision)} target="_blank" rel="noreferrer" className="block aspect-2/3 bg-gray-950 rounded overflow-hidden border border-gray-800 hover:border-indigo-500">
               <img src={historyImageUrl(pageId, entry.revision)} alt={`Revision ${entry.revision}`} loading="lazy" className="w-full h-full object-contain" />
             </a>
             <div className="flex items-center justify-between text-xs">

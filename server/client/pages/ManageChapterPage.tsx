@@ -294,7 +294,7 @@ export function ManageChapterPage() {
                   dragId === page.id ? "border-indigo-500 opacity-60" : "border-gray-800"
                 }`}
               >
-                <Link to={`/read/chapters/${chapterId}/pages/${index + 1}`} className="block aspect-[2/3] bg-gray-950">
+                <Link to={`/read/chapters/${chapterId}/pages/${index + 1}`} className="block aspect-2/3 bg-gray-950">
                   <img
                     src={readPageImageUrl(page.id, `${page.revision}-${page.updated_at}`)}
                     alt={page.name ?? `Page ${index + 1}`}
@@ -395,7 +395,7 @@ function InboxPicker({ onAdd, adding, keepDrafts, onKeepDrafts }: {
               title={`Add ${page.name ?? page.id.slice(-8)} to this chapter`}
               className="w-24 shrink-0 overflow-hidden rounded-lg border border-gray-800 bg-gray-900 hover:border-indigo-500 disabled:opacity-50"
             >
-              <span className="block aspect-[2/3] bg-gray-950">
+              <span className="block aspect-2/3 bg-gray-950">
                 <img src={readPageImageUrl(page.id, `${page.revision}-${page.updated_at}`)} alt="" loading="lazy" className="h-full w-full object-contain" />
               </span>
               <span className="block truncate px-1.5 py-1 text-[11px] text-gray-400">{page.name ?? page.id.slice(-8)}</span>

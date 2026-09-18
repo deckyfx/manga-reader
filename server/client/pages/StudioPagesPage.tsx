@@ -125,7 +125,7 @@ export function StudioPagesPage() {
                   to={`/studio/pages/${page.id}`}
                   className="flex flex-col overflow-hidden rounded-xl border border-gray-800 bg-gray-900 transition-colors hover:border-indigo-500"
                 >
-                  <div className="aspect-[2/3] overflow-hidden bg-gray-950">
+                  <div className="aspect-2/3 overflow-hidden bg-gray-950">
                     <img
                       src={pageFileUrl(page.id, page.has_result ? "result.png" : "original.png", `${page.updated_at}-${page.revision}`)}
                       alt=""

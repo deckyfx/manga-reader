@@ -37,7 +37,7 @@ export function SeriesPage() {
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="flex flex-wrap gap-4 p-4 border-b border-gray-800">
-          <div className="w-40 shrink-0 aspect-[2/3] rounded-lg overflow-hidden bg-gray-950 border border-gray-800 flex items-center justify-center">
+          <div className="w-40 shrink-0 aspect-2/3 rounded-lg overflow-hidden bg-gray-950 border border-gray-800 flex items-center justify-center">
             {series.has_cover ? (
               <img src={seriesCoverUrl(series.id, series.updated_at)} alt="" className="w-full h-full object-cover" />
             ) : (
