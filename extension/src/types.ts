@@ -12,6 +12,8 @@ export interface Settings {
 
   // Server-mode settings
   serverUrl: string;
+  /** The server refuses OCR, translation and page jobs without one; make it on the server's /user page. */
+  serverApiKey: string;
   serverTranslation: ServerTranslation;
   dictMode: DictMode;
   /** Page translation also removes sound effects (can soften detailed artwork). */
@@ -30,6 +32,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   ocrEngine: "tesseract",
   serverUrl: "",
+  serverApiKey: "",
   serverTranslation: "auto",
   dictMode: "jisho",
   pageCleanSfx: false,

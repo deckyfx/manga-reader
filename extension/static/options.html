@@ -451,6 +451,14 @@
             <p class="hint">e.g. <code>http://localhost:3579</code></p>
           </div>
           <div class="field">
+            <label for="serverApiKey">API key</label>
+            <input type="password" id="serverApiKey" placeholder="wo_…" autocomplete="off" spellcheck="false" />
+            <p class="hint">
+              The server refuses OCR, translation and page jobs without one. Make a key on the server's account page
+              (<code>/user</code> → API keys), then paste it here — it is shown only once.
+            </p>
+          </div>
+          <div class="field">
             <button class="btn btn-ghost" id="testBtn">Test Connection</button>
             <div class="inline-status" id="testBtnStatus"></div>
             <p class="hint" style="margin-top:6px">Connection must succeed before saving.</p>

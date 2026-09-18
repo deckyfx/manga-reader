@@ -133,8 +133,12 @@ const ApiKeySchema = t.Object({
  * null for anyone signed out, which is fine for the reader and refused everywhere else.
  */
 export const authContext = new Elysia({ name: "auth-context" })
-  .derive({ as: "global" }, async ({ cookie, headers }): Promise<{ principal: Principal | null }> => {
-    const key = headers["x-api-key"];
+  .derive({ as: "global" }, async ({ cookie, headers, request }): Promise<{ principal: Principal | null }> => {
+    // EventSource cannot set headers, so the two SSE streams accept their key in the query instead. Nothing else
+    // does, and the logger redacts it — a key in a URL is a key in a log file, a history list and a referrer.
+    const url = new URL(request.url);
+    const streaming = url.pathname.endsWith("/events") || url.pathname.endsWith("/live");
+    const key = headers["x-api-key"] ?? (streaming ? url.searchParams.get("api_key") ?? undefined : undefined);
     if (key) {
       const match = await userForApiKey(key);
       if (match) {

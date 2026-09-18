@@ -12,7 +12,7 @@ import type {
   FromEngineMsg,
   FetchImageMsg,
 } from "./types";
-import { errorMessage, serverApi, type PageJobEvent, type PageLiveEvent } from "./api";
+import { errorMessage, serverApi, streamUrl, type PageJobEvent, type PageLiveEvent } from "./api";
 
 // ── Guard ─────────────────────────────────────────────────────────────────────
 
@@ -640,11 +640,17 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
       base64 = result.base64;
     }
 
-    const stored = await chrome.storage.sync.get(["serverUrl", "pageCleanSfx"]) as { serverUrl?: string; pageCleanSfx?: boolean };
+    const stored = await chrome.storage.sync.get(["serverUrl", "serverApiKey", "pageCleanSfx"]) as {
+      serverUrl?: string;
+      serverApiKey?: string;
+      pageCleanSfx?: boolean;
+    };
     const serverUrl = stored.serverUrl?.replace(/\/$/, "") ?? "";
+    const apiKey = stored.serverApiKey ?? "";
     if (!serverUrl) throw new Error("No server URL configured. Open extension settings.");
+    if (!apiKey) throw new Error("No API key configured. Make one on the server's account page, then paste it into extension settings.");
 
-    const { data, error } = await serverApi(serverUrl).api["translate-page"].post({
+    const { data, error } = await serverApi(serverUrl, apiKey).api["translate-page"].post({
       image: base64,
       clean_sfx: stored.pageCleanSfx ?? false,
     });
@@ -653,7 +659,7 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
 
     // Server-sent events replay the job's whole history, so nothing is missed between submit and connect
     activeEventSource?.close();
-    const es = new EventSource(`${serverUrl}/api/translate-page/${data.job_id}/events`);
+    const es = new EventSource(streamUrl(serverUrl, `api/translate-page/${data.job_id}/events`, apiKey));
     activeEventSource = es;
 
     es.onmessage = (event: MessageEvent<string>) => {
@@ -673,7 +679,7 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
           img.srcset = "";
           img.dataset.socrJobId = data.job_id;
           img.dataset.socrRevision = String(revisionOf(update.result_url));
-          watchPageUpdates(serverUrl, data.job_id);
+          watchPageUpdates(serverUrl, data.job_id, apiKey);
           setImageTranslateProgress(1);
           appendLogEntry(`Image replaced ✓ (${(update.elapsed_ms / 1000).toFixed(1)} s)`, "done");
           appendStudioLink(`${serverUrl}/studio/pages/${data.job_id}`);
@@ -739,9 +745,9 @@ function observeWatchedImages(): void {
 }
 
 /** Swap in the new result whenever the page is published from the Studio. */
-function watchPageUpdates(serverUrl: string, jobId: string): void {
+function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string): void {
   if (pageWatchers.has(jobId)) return;
-  const es = new EventSource(`${serverUrl}/api/translate-page/${jobId}/live`);
+  const es = new EventSource(streamUrl(serverUrl, `api/translate-page/${jobId}/live`, apiKey));
   pageWatchers.set(jobId, es);
   observeWatchedImages();
 

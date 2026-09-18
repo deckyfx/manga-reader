@@ -34,6 +34,7 @@ const POLICY: { prefix: string; needs: UserRole | "public" }[] = [
   { prefix: "/translate", needs: "contributor" },
   { prefix: "/analyze", needs: "contributor" },
   { prefix: "/api/translate-page", needs: "contributor" },
+  { prefix: "/api/whoami", needs: "contributor" },
   { prefix: "/api/settings", needs: "contributor" },
 ];
 

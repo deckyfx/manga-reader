@@ -20,6 +20,7 @@ const deeplApiKeyInput           = document.getElementById("deeplApiKey")       
 const deeplTargetLangSel         = document.getElementById("deeplTargetLang")         as HTMLSelectElement;
 
 const serverUrlInput             = document.getElementById("serverUrl")               as HTMLInputElement;
+const serverApiKeyInput          = document.getElementById("serverApiKey")            as HTMLInputElement;
 const serverTranslationSel       = document.getElementById("serverTranslation")       as HTMLSelectElement;
 const dictModeSelect             = document.getElementById("dictMode")                as HTMLSelectElement;
 const pageCleanSfxInput          = document.getElementById("pageCleanSfx")            as HTMLInputElement;
@@ -127,6 +128,13 @@ async function checkLangData(): Promise<void> {
 
 // ── Server: URL change resets verification ────────────────────────────────────
 
+serverApiKeyInput.addEventListener("input", () => {
+  // A new key hasn't been tried yet, so the connection has to be proved again
+  serverVerified = false;
+  setInlineStatus(testBtnStatus, "", "");
+  updateSaveBtn();
+});
+
 serverUrlInput.addEventListener("input", () => {
   serverVerified = false;
   setInlineStatus(testBtnStatus, "", "");
@@ -153,8 +161,19 @@ async function testConnection(): Promise<void> {
     } else {
       const mark = (ready: boolean | "disabled"): string => (ready === true ? "✓" : ready === "disabled" ? "off" : "✗");
       const models = `OCR ${mark(data.ocr)} · Translate ${mark(data.translate)} · Dictionary ${mark(data.dictionary)} · Text detection ${mark(data.text_seg)} · Inpaint ${mark(data.inpaint)}`;
-      serverVerified = true;
-      setInlineStatus(testBtnStatus, data.status === "starting" ? `⏳ Connected, models still loading — ${models}` : `✅ Connected — ${models}`, "ok");
+      // Health is open to anyone; the key is what OCR will actually be judged by, so try it too
+      const key = serverApiKeyInput.value.trim();
+      const keyCheck = key
+        ? await serverApi(url, key).api.whoami.get({ fetch: { signal: AbortSignal.timeout(5000) } })
+        : null;
+      const keyNote = !key
+        ? "⚠️ no API key — OCR will be refused"
+        : keyCheck?.error
+          ? `❌ the key was refused (${errorMessage(keyCheck.error)})`
+          : `key accepted as ${keyCheck?.data?.username ?? "?"} ✓`;
+      serverVerified = key !== "" && !keyCheck?.error;
+      const connected = data.status === "starting" ? "⏳ Connected, models still loading" : "✅ Connected";
+      setInlineStatus(testBtnStatus, `${connected} — ${models} · ${keyNote}`, serverVerified ? "ok" : "err");
     }
   } catch (e) {
     serverVerified = false;
@@ -222,6 +241,7 @@ chrome.storage.sync
     deeplFields.style.display   = s.clientTranslation === "deepl" ? "block" : "none";
 
     serverUrlInput.value        = s.serverUrl;
+    serverApiKeyInput.value     = s.serverApiKey;
     serverTranslationSel.value  = s.serverTranslation;
     dictModeSelect.value        = s.dictMode;
     pageCleanSfxInput.checked   = s.pageCleanSfx;
@@ -287,6 +307,7 @@ async function saveSettings(): Promise<void> {
   const settings: Settings = {
     ocrEngine:         activeEngine,
     serverUrl:         serverUrlInput.value.trim(),
+    serverApiKey:      serverApiKeyInput.value.trim(),
     serverTranslation: serverTranslationSel.value as ServerTranslation,
     dictMode:          dictModeSelect.value as DictMode,
     pageCleanSfx:      pageCleanSfxInput.checked,

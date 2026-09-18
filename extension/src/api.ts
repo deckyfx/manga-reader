@@ -7,8 +7,24 @@ import type { Api, PageJobEvent, PageLiveEvent } from "../../server/types/src/ap
 
 export type { PageJobEvent, PageLiveEvent };
 
-export function serverApi(serverUrl: string) {
-  return treaty<Api>(serverUrl.replace(/\/$/, ""));
+/**
+ * The server's routes are closed: OCR, translation, the dictionary and page jobs all want an API key, made on the
+ * server's own /user page and pasted into the options here.
+ */
+export function serverApi(serverUrl: string, apiKey = "") {
+  return treaty<Api>(serverUrl.replace(/\/$/, ""), {
+    headers: apiKey ? { "x-api-key": apiKey } : {},
+  });
+}
+
+/**
+ * EventSource can't send headers, so the progress streams take the key in the query. The server accepts it there for
+ * those two paths only, and keeps it out of its log.
+ */
+export function streamUrl(serverUrl: string, path: string, apiKey = ""): string {
+  const url = new URL(path, serverUrl.replace(/\/$/, "") + "/");
+  if (apiKey) url.searchParams.set("api_key", apiKey);
+  return url.toString();
 }
 
 /** Readable message from an Eden error: the server's `{ error }` body, a validation message, or the status. */
