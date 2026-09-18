@@ -22,8 +22,11 @@ export function Modal({ title, onClose, children, footer, width = "max-w-lg" }: 
   useEffect(() => {
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusable = () =>
-      Array.from(frameRef.current?.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input, select, textarea") ?? [])
-        .filter((el) => el.offsetParent !== null);
+      Array.from(
+        frameRef.current?.querySelectorAll<HTMLElement>(
+          "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])",
+        ) ?? [],
+      ).filter((el) => el.offsetParent !== null);
     focusable()[0]?.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {

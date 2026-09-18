@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, Download, Inbox, Loader2, Play, RefreshCw, SquarePen, Upload, X } from "lucide-react";
@@ -41,12 +41,13 @@ export function ManageChapterPage() {
   const run = runQ.data && "running" in runQ.data ? runQ.data : null;
   const pending = runQ.data && "pending" in runQ.data ? runQ.data.pending : null;
   const running = run?.running ?? false;
-  const [wasRunning, setWasRunning] = useState(false);
-  if (running !== wasRunning) {
-    setWasRunning(running);
-    // The run rewrote page results: refresh the grid when it ends
-    if (!running) reload();
-  }
+  const wasRunning = useRef(false);
+  // A finished run rewrote page results: refresh the grid once, after the run stops
+  useEffect(() => {
+    if (wasRunning.current && !running) reload();
+    wasRunning.current = running;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
 
   const [cleanSfx, setCleanSfx] = useState(false);
   const [skipped, setSkipped] = useState<{ name: string; reason: string }[]>([]);
