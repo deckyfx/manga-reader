@@ -1,4 +1,5 @@
 import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pageDir } from "@/stores/page-store";
 
@@ -35,10 +36,14 @@ export async function listHistory(pageId: string): Promise<HistoryEntry[]> {
   })));
 }
 
-/** Copies result.png as the snapshot of `revision`, then drops snapshots beyond HISTORY_LIMIT. */
+/** Copies result.png as the snapshot of `revision`. Pruning is separate, so a publish that fails loses nothing. */
 export async function snapshotResult(pageId: string, revision: number): Promise<void> {
   await mkdir(historyDir(pageId), { recursive: true });
   await copyFile(join(pageDir(pageId), "result.png"), historyFile(pageId, revision));
+}
+
+/** Drops snapshots beyond HISTORY_LIMIT. Call once the revision they belong to is committed. */
+export async function pruneHistory(pageId: string): Promise<void> {
   const expired = (await listHistory(pageId)).slice(HISTORY_LIMIT);
   await Promise.all(expired.map((entry) => rm(historyFile(pageId, entry.revision), { force: true })));
 }
@@ -49,4 +54,41 @@ export async function restoreResult(pageId: string, revision: number): Promise<b
   if (!(await source.exists())) return false;
   await copyFile(historyFile(pageId, revision), join(pageDir(pageId), "result.png"));
   return true;
+}
+
+/** The revisions this page has published, newest first. */
+function publishedRevisions(pageId: string): number[] {
+  try {
+    return readdirSync(historyDir(pageId))
+      .map((file) => /^(\d+)\.png$/.exec(file)?.[1])
+      .filter((revision): revision is string => revision !== undefined)
+      .map(Number)
+      .sort((a, b) => b - a);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The newest published snapshot of a page, or null when it has never been published. This is what readers are served:
+ * burning in the Studio rewrites result.png, but nothing reaches the reader until it is published.
+ */
+export function publishedFile(pageId: string): string | null {
+  const [revision] = publishedRevisions(pageId);
+  if (revision === undefined) return null;
+  const file = historyFile(pageId, revision);
+  return existsSync(file) ? file : null;
+}
+
+/** True when result.png holds work that has not been published: newer than the last snapshot, or never published. */
+export function hasUnpublishedEdits(pageId: string): boolean {
+  const result = join(pageDir(pageId), "result.png");
+  if (!existsSync(result)) return false;
+  const published = publishedFile(pageId);
+  if (!published) return true;
+  try {
+    return statSync(result).mtimeMs > statSync(published).mtimeMs;
+  } catch {
+    return false;
+  }
 }

@@ -196,7 +196,11 @@ Layout: left page list (chapter thumbnails / Inbox) · centre canvas with viewpo
 | 2 | Canvas studio: Fabric wrapper, region tools, block editing, undo / redo, zoom / pan. | Draw, resize, delete regions; OCR + translate a new region. |
 | 3 | Mask editing & re-clean selection; SFX include toggles. | Paint a missed area and re-clean just that area. |
 | 4 | Text overlays: shared client layout, style overrides, rotate / resize, free patches, manual burn. | Overlay matches the burned result; SFX re-lettered. |
-| 5 | `/read`: volumes / chapters / pages management, ZIP upload, reorder, move Inbox pages into chapters, reader view; batch auto-run per chapter from the studio with progress; export chapter. | A chapter goes from ZIP to translated pages and reads end to end in `/read`. |
+| **5** | **Library, manage & read** (split into 5.1–5.4 below): series / volumes / chapters / pages, ZIP import, reorder, Inbox, batch auto-run per chapter, export, reader, and finally users & roles. | A chapter goes from ZIP to translated pages and reads end to end in `/read`. |
+| 5.1 | Preparation & migration: `Series → Volume (optional) → Chapter → Page` schema, stores, covers, and the `/read/api` (read-only) + `/manage/api` (mutations) split. | Migration converts existing volumes into series; the API serves search, detail, import, reorder, export. |
+| 5.2 | Manage mode: the `/manage` area — library, series form, volume / chapter CRUD, chapter page manager (import, reorder, Inbox, per-page Studio, batch translate, export). | A series can be created and filled with chapters and pages without touching the database. |
+| 5.3 | Read mode: `/read` library search, series page, reader polish (saved progress, preloading, fit modes). | A reader finds a series by title or tags and reads it end to end. |
+| 5.4 | Users & roles: login, public (read-only) vs admin / contributor, gating `/manage/api` and the Studio, extension API keys. | Guests can only read; managing requires signing in. |
 | later | Terminology glossary per volume; auth if exposed beyond localhost; self-check & regression set (see `TODO.txt`). | |
 
 ### Phase 0 breakdown
@@ -353,6 +357,99 @@ Decided (user): **shared layout** for the preview (D3), all of phase 4 in one PR
 - The menu's Re-render is now **Burn lettering**; there's no separate burn button, since the preview already shows the result.
 - Known approximation: with an explicit box, the preview's default black/white colour comes from the found area's brightness, while the burn measures the box's own background.
 - Tested in-process on a sample page: placing stores areas without burning; the preview built from stored areas gives the same font sizes and lines as the burn, with and without styles, an explicit rotated box, a moved and rotated bubble (offset) and SFX lettering.
+
+### Phase 5 design (2026-09-18, branch `feat/read-library`)
+
+Decided (user): the reader hierarchy is **Series → Volume (optional) → Chapter → Page**, modelled on manga-reader's series form
+(cover, title, synopsis, tags) plus author, status and reading direction. The reader has two modes — public (reading only) and
+admin / contributor (creating and modifying) — but **no server auth yet**: roles, permissions and extension API keys are 5.4.
+Managing lives under its own top-level area, so the app has three modes: **studio**, **manage**, **read**.
+
+**Data model** (migration `0007_series_hierarchy`)
+- `series`: `title`, `synopsis`, `cover_path`, `author`, `status` (`ongoing | completed | hiatus`), `reading_direction` (`rtl` default), timestamps.
+- `series_tags`: `series_id` + `tag` (lower-cased, unique per series; indexed by tag for search).
+- `volumes` gained `series_id` (cascade), `number`, `sort_order`, `cover_path`; its own `reading_direction` is deprecated (the series decides) and kept only so the migration needs no rename prompt.
+- `chapters` gained `series_id` (cascade) and `number`; `volume_id` is nullable (`ON DELETE SET NULL`), so a chapter can sit directly under its series.
+- The migration is hand-written: it creates one series per existing volume (paired by `ROW_NUMBER()`), re-points volumes and chapters, and keeps every page. Verified on a throwaway database before use.
+- Deleting never destroys pages: a volume's chapters fall back to the series, a chapter's pages return to the Inbox, a series' pages are unfiled.
+- Migrations now run with `PRAGMA foreign_keys = OFF` around the whole run (`MigrationManager.applyMigrations`), and a `foreign_key_check` afterwards. The `PRAGMA foreign_keys=OFF` that drizzle-kit writes *inside* a migration is silently ignored, because Drizzle runs each migration in a transaction: the rebuilds in 0007 would otherwise drop `volumes` and `pages` with enforcement on and cascade their children away (chapters, page stages and blocks). Found by migrating a copy of a real database and comparing row counts — worth doing for any migration that rebuilds a table.
+
+**API split** — the same data, two plugins, so 5.4 has one place to gate:
+- `/read/api/*` (read-only): `GET /series` (search `q`, `tags`, `exclude`, `has_chapters`, `status`, `sort`), `/series/tags`, `/series/:id`, `/series/:id/cover` (uploaded cover, else the first page), `/chapters/:id`, `/pages/:id/image`.
+- `/manage/api/*` (every mutation): series create / update / cover upload / cover delete / delete, volume and chapter CRUD, chapter page import (`.zip` / `.cbz` + loose images), reorder, export, batch run (`POST`/`GET …/run`), the Inbox, and filing / unfiling a page.
+- Covers live in `data/covers/series-<id>.png`, normalised and resized inside 1200 px; requests are cache-busted by the series' `updated_at`, not by `Date.now()`.
+- ZIP import inflates asynchronously and rejects oversized entries from the archive's declared sizes *before* inflating; imported pages keep their original as `original.png` and are filed in natural order.
+
+**Status**: 5.1 is done and covered by an in-process test (33 checks: search, tags, covers, import, reorder, export, Inbox, batch bookkeeping, cascade behaviour).
+
+### Phase 5.5 design — the Studio ↔ Manage seam (2026-09-18)
+
+The round trip is the point (user): **a page being read can be edited as a job, and a job can be published as a page
+that is read**. There is one `pages` table — "a job in the Studio" and "a page in a chapter" are the same row with
+`chapter_id` null or set — so the trip needs no conversion, only two things it lacks today: readers must not see
+half-finished edits, and each area must show the other's half.
+
+Decided (user): the Studio leads with the Inbox; filing an Inbox **draft** into a chapter copies it; discarding in the
+Studio never silently empties a chapter.
+
+**0. The publish gate — what readers see**
+
+Publishing already snapshots `result.png` as `history/<revision>.png` and bumps `revision`; the reader, though, serves
+`result.png`, so every burn reaches readers the moment it lands, and a page being lettered is read half-done. The
+publish gate closes that:
+- `pageImagePath` serves the newest published snapshot; when a page has never been published it falls back to
+  `result.png` and then `original.png`, so pages that exist today keep behaving as they do now.
+- A chapter batch run publishes each page as it finishes, so "translate chapter" ends with a readable chapter.
+- Editing a chapter page in the Studio therefore needs no copy and no syncing: the row is edited in place, readers keep
+  the published revision until **Publish** is pressed. That is the whole round trip — open from the reader, edit as a
+  job, publish back.
+- `has_result` in the reader payload becomes `published`; Manage marks a page "edited since publish" and offers
+  **Publish edits**, per page and for a whole chapter at once. Export follows the published snapshot too, so a ZIP
+  matches what readers get.
+- Rollback already exists (`POST …/rollback`), so an unwanted publish is one click back.
+
+**A. A page says where it lives**
+- A shared `pageLocation(page)` helper returns `{series_id, series_title, chapter_id, chapter_title, index, total}`;
+  `/studio/api/pages` and the page detail carry it.
+- `/studio/api/pages` takes `filed=inbox|chapter|all` (default `inbox`), `chapter_id` and `q` (name or source) instead
+  of a flat newest-100 list.
+- The Studio grid gets a scope switch (Inbox · In chapters · All, remembered per browser), a chapter badge linking to
+  `/manage/chapters/:id`, and shows the page name rather than a raw source URL.
+
+**B. Filing copies, from either side**
+- `POST /manage/api/chapters/:id/pages/:pageId/copy` duplicates a page into the chapter: a new row, a new page folder
+  (original, cleaned, result and masks), its stages and blocks, `revision` back to 0, publish history not copied. The
+  draft stays in the Inbox, so the Studio keeps a clean original to work from.
+- The picker (series → volume → chapter, searchable) is one component used by the Studio's "File into chapter…" action
+  and by Manage's "Add from inbox". A "keep the draft in the Inbox" tick, on by default, turns the copy into a move.
+- `pages.image_hash` is indexed and no longer unique, so the picker can warn "this image is already in Chapter 3" and
+  the Inbox can mark drafts that have been filed somewhere.
+
+**C. Editing a chapter page feels like a chapter**
+- The editor header becomes a breadcrumb — *Series › Chapter › page 4/18* — with prev/next arrows walking the chapter
+  in reading order and a link back to the chapter. The route already keys the editor by page id, so each step mounts a
+  fresh editor.
+
+**D. Discarding matches where the page is**
+- An Inbox page: today's confirmation, unchanged — no chapter can be affected.
+- A page inside a chapter: a dialog with named outcomes instead of a yes/no — **Discard the edits** (roll back to the
+  published revision, which is what readers already see), **Remove from the chapter** (page and images survive, back to
+  the Inbox), or **Delete page and images**. `DELETE /studio/api/pages/:id` refuses a filed page (409) unless
+  `force=true`, so the choice can't be skipped by accident.
+- Manage's chapter grid keeps "remove from chapter" and gains the same delete, for clearing out a bad import in place.
+
+**E. Names**
+- Extension and upload pages get a name derived from the source URL's file name, so the Studio stops showing
+  200-character URLs where imported pages show `page_012`.
+
+**F. Live both ways**
+- The chapter grid follows the page SSE channel (or polls) while any of its pages is queued or running, so a burn done
+  in the Studio shows up in Manage without a reload.
+
+**Status**: built and covered by an in-process test (27 checks), the important one being that a burn made after a
+publish leaves readers on the published image until it is published again. Two decisions changed while building:
+a page filed into a chapter is published as it arrives (it is new, so there is nothing to protect), and Manage's inbox
+picker copies like the Studio's does, with a tick to move instead.
 
 ## 11. Adopt from manga-reader / avoid
 

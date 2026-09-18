@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 // ── OCR / Translate logs (mirrors C# OcrLog / TranslateLog) ────────────────
@@ -25,23 +25,63 @@ export const translateLogs = sqliteTable("translate_logs", {
 
 // ── Manga library ────────────────────────────────────────────────────────────
 
-export const volumes = sqliteTable("volumes", {
+// ── Library: series → volume (optional) → chapter → page ────────────────────
+
+export const series = sqliteTable("series", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   title: text("title").notNull(),
+  synopsis: text("synopsis"),
+  /** Cover image inside the covers folder; falls back to the first page when unset. */
   coverPath: text("cover_path"),
+  author: text("author"),
+  /** ongoing | completed | hiatus */
+  status: text("status").notNull().default("ongoing"),
+  /** How the reader pages through this series: rtl (manga, default) | ltr */
+  readingDirection: text("reading_direction").notNull().default("rtl"),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 });
 
-export const chapters = sqliteTable("chapters", {
+/** Tags of a series, one row each, so searches can include and exclude them without scanning strings. */
+export const seriesTags = sqliteTable("series_tags", {
+  seriesId: integer("series_id").notNull().references(() => series.id, { onDelete: "cascade" }),
+  tag: text("tag").notNull(),
+}, (table) => ({
+  seriesTagIdx: uniqueIndex("series_tags_series_tag_idx").on(table.seriesId, table.tag),
+  tagIdx: index("series_tags_tag_idx").on(table.tag),
+}));
+
+/** A volume groups chapters of a series; chapters may also sit directly under the series. */
+export const volumes = sqliteTable("volumes", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  volumeId: integer("volume_id").notNull().references(() => volumes.id, { onDelete: "cascade" }),
+  seriesId: integer("series_id").notNull().references(() => series.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
+  /** Volume number as shown ("1", "2"); free text so half volumes work. */
+  number: text("number"),
   sortOrder: integer("sort_order").notNull().default(0),
-  pagesDir: text("pages_dir").notNull(),
+  coverPath: text("cover_path"),
+  /** @deprecated moved to the series; dropped in a later migration once no data depends on it. */
+  readingDirection: text("reading_direction").notNull().default("rtl"),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
-});
+}, (table) => ({
+  volumeSeriesIdx: index("volumes_series_sort_idx").on(table.seriesId, table.sortOrder),
+}));
+
+export const chapters = sqliteTable("chapters", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  seriesId: integer("series_id").notNull().references(() => series.id, { onDelete: "cascade" }),
+  /** Volume it belongs to, or null when the series has no volumes (or it isn't sorted into one yet). */
+  volumeId: integer("volume_id").references(() => volumes.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  /** Chapter number as shown ("1", "1.5"); free text, ordering uses sort_order. */
+  number: text("number"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  chapterSeriesIdx: index("chapters_series_sort_idx").on(table.seriesId, table.sortOrder),
+}));
 
 // ── Studio page-translation pipeline ────────────────────────────────────────
 
@@ -92,7 +132,14 @@ export const pageTranslationLogs = sqliteTable("page_translation_logs", {
 /** One manga page; stage images live in data/jobs/<id>/, everything else is here. */
 export const pages = sqliteTable("pages", {
   id: text("id").primaryKey(),
-  imageHash: text("image_hash").notNull().unique(),
+  /** Not unique: the same image can sit in several chapters. The extension's reuse cache looks up Inbox pages. */
+  imageHash: text("image_hash").notNull(),
+  /** Chapter this page belongs to; null = Inbox (extension jobs and uploads not filed yet). */
+  chapterId: integer("chapter_id").references(() => chapters.id, { onDelete: "set null" }),
+  /** Reading order inside the chapter. */
+  sortOrder: integer("sort_order").notNull().default(0),
+  /** Shown in the reader and used for export file names; falls back to the page number. */
+  name: text("name"),
   /** Where the page came from ("upload" or the page URL). */
   source: text("source").notNull(),
   width: integer("width").notNull().default(0),
@@ -106,7 +153,10 @@ export const pages = sqliteTable("pages", {
   revision: integer("revision").notNull().default(0),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
-});
+}, (table) => ({
+  pageHashIdx: index("pages_image_hash_idx").on(table.imageHash),
+  pageChapterIdx: index("pages_chapter_sort_idx").on(table.chapterId, table.sortOrder),
+}));
 
 export const pageStages = sqliteTable("page_stages", {
   pageId: text("page_id").notNull().references(() => pages.id, { onDelete: "cascade" }),
@@ -163,6 +213,10 @@ export type NewOcrLog = typeof ocrLogs.$inferInsert;
 
 export type TranslateLog = typeof translateLogs.$inferSelect;
 export type NewTranslateLog = typeof translateLogs.$inferInsert;
+
+export type Series = typeof series.$inferSelect;
+export type NewSeries = typeof series.$inferInsert;
+export type SeriesTag = typeof seriesTags.$inferSelect;
 
 export type Volume = typeof volumes.$inferSelect;
 export type NewVolume = typeof volumes.$inferInsert;

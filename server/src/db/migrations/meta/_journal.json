@@ -43,6 +43,20 @@
       "when": 1789635625930,
       "tag": "0005_block_text_style",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789686003637,
+      "tag": "0006_read_library",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1789688580300,
+      "tag": "0007_series_hierarchy",
+      "breakpoints": true
     }
   ]
 }
