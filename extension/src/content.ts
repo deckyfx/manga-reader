@@ -375,18 +375,28 @@ async function replacePageImages(jobId: string, resultUrl: string): Promise<void
   const targets = Array.from(document.querySelectorAll<HTMLImageElement>("img")).filter((img) => img.dataset.socrJobId === jobId);
   if (targets.length === 0) return;
 
+  // This URL can arrive through a message relayed from the page itself — and the page is any website. So it is
+  // checked before anything else is done with it: a hostile page could otherwise post itself an "image-updated"
+  // pointing anywhere and collect the key, or claim revision 999 and have every real revision skipped as older.
+  const { serverUrl, apiKey } = await loadServerAccess();
+  let target: URL;
+  try {
+    target = new URL(resultUrl, `${serverUrl}/`);
+  } catch {
+    console.warn("[web-ocr] ignored a revision with an unreadable address");
+    return;
+  }
+  if (!serverUrl || target.origin !== new URL(serverUrl).origin) {
+    // Not an error to retry: it will never become the configured server
+    console.warn(`[web-ocr] ignored a revision from ${target.origin}: it isn't the configured server`);
+    return;
+  }
+
   // Older than something already asked for: not worth downloading, it would only be discarded
-  const revision = revisionOf(resultUrl);
+  const revision = revisionOf(target.toString());
   if (revision < (latestRevisionRequested.get(jobId) ?? 0)) return;
   latestRevisionRequested.set(jobId, revision);
 
-  const { serverUrl, apiKey } = await loadServerAccess();
-  // This URL can arrive through a message relayed from the page itself — and the page is any website. Without this
-  // check, a hostile page could post itself an "image-updated" pointing anywhere and collect the key.
-  const target = new URL(resultUrl, `${serverUrl}/`);
-  if (!serverUrl || target.origin !== new URL(serverUrl).origin) {
-    throw new Error(`refusing to fetch a revision from ${target.origin}: it isn't the configured server`);
-  }
   const response = await fetch(target, {
     headers: apiKey ? { "x-api-key": apiKey } : {},
     // Never follow a redirect with the key attached, and never show a cached older revision
