@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { BookOpen, FolderCog, Layers, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Settings, ShieldCheck, UserRound } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
+import { ThemeToggle } from "./ThemeToggle";
 
 const STORAGE_KEY = "sidebar-expanded";
 
@@ -73,6 +74,7 @@ export function Layout() {
         <NavItem to="/read" icon={<BookOpen size={20} />} label="Read" expanded={expanded} />
 
         <div className="mt-auto space-y-1">
+          <ThemeToggle expanded={expanded} />
           {can("admin") && <NavItem to="/admin" icon={<ShieldCheck size={20} />} label="Server" expanded={expanded} />}
           {can("contributor") && <NavItem to="/settings" icon={<Settings size={20} />} label="Settings" expanded={expanded} />}
           {account ? (

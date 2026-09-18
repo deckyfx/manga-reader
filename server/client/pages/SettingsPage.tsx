@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, XCircle, AlertCircle, Loader2 } from "lucide-react";
 import { getHealth, getSettings } from "../api";
+import { when } from "../lib/format";
 
 function ReadyIcon({ ready }: { ready: boolean | "disabled" }) {
   if (ready === "disabled") return <span className="text-xs text-gray-600">disabled</span>;
@@ -62,6 +63,23 @@ export function SettingsPage() {
             ))}
           </div>
         ) : null}
+
+        {health && (
+          <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-t border-gray-800 pt-3 text-xs text-gray-500">
+            <div className="flex gap-1.5">
+              <dt>Server</dt>
+              <dd className="text-gray-300">v{health.version.server}</dd>
+            </div>
+            <div className="flex gap-1.5">
+              <dt>Bun</dt>
+              <dd className="text-gray-300">{health.version.bun}</dd>
+            </div>
+            <div className="flex gap-1.5">
+              <dt>Up since</dt>
+              <dd className="text-gray-300">{when(health.version.started_at)}</dd>
+            </div>
+          </dl>
+        )}
       </Section>
 
       {/* Model settings */}

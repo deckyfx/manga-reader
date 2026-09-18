@@ -20,12 +20,12 @@ import {
   savePasskey,
 } from "../api";
 import { useAuth } from "../auth/AuthProvider";
+import { when } from "../lib/format";
 import { startRegistration, supportsPasskeys } from "../auth/webauthn";
 import { useConfirm } from "../components/ConfirmDialog";
 
 const field = "w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-100 focus:border-indigo-500 focus:outline-none";
 const ROLE_LABEL: Record<string, string> = { admin: "Admin", contributor: "Contributor", reader: "Reader" };
-const when = (value: string | null) => (value ? new Date(value.replace(" ", "T") + "Z").toLocaleString() : "never");
 
 /** Your own account: password, the things that guard it, the keys your tools use, and where you're signed in. */
 export function UserPage() {

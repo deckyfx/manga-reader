@@ -15,11 +15,11 @@ import {
   type UserRole,
 } from "../api";
 import { useAuth } from "../auth/AuthProvider";
+import { when } from "../lib/format";
 import { useConfirm } from "../components/ConfirmDialog";
 
 const field = "rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-100 focus:border-indigo-500 focus:outline-none";
 const ROLES: UserRole[] = ["admin", "contributor", "reader"];
-const when = (value: string | null) => (value ? new Date(value.replace(" ", "T") + "Z").toLocaleString() : "never");
 
 /** Server-level settings: who may join, who is who, and where everyone is signed in. */
 export function AdminPage() {
