@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+@layer base {
+  /*
+   * Tailwind v4 draws a placeholder as the input's own colour at 50% transparency, which on this dark theme lands
+   * close enough to the real text to be mistaken for it. A fixed dim grey keeps the hint clearly a hint.
+   */
+  ::placeholder {
+    color: var(--color-gray-500);
+    opacity: 1;
+  }
+}
+
 /* Tailwind v4's preflight resets buttons to the default cursor; bring back the pointer for everything clickable. */
 @layer base {
   button,

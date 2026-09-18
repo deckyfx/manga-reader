@@ -30,7 +30,7 @@ interface SeriesFormProps {
 const MAX_TAGS = 30;
 
 const inputClass =
-  "w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-100 placeholder:text-gray-600 focus:border-indigo-500 focus:outline-none";
+  "w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-100 focus:border-indigo-500 focus:outline-none";
 
 /** Create or edit a series: the metadata a reader browses by, plus its cover. Tags are stored lower-cased. */
 export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
@@ -221,7 +221,7 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
                 onBlur={() => addTags(tagDraft)}
                 placeholder={tags.length < MAX_TAGS ? "Add a tag…" : `${MAX_TAGS} tags is the limit`}
                 disabled={tags.length >= MAX_TAGS}
-                className="min-w-28 flex-1 bg-transparent text-sm text-gray-100 placeholder:text-gray-600 focus:outline-none"
+                className="min-w-28 flex-1 bg-transparent text-sm text-gray-100 focus:outline-none"
               />
             </div>
           </div>
