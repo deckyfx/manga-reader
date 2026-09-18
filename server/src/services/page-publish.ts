@@ -7,7 +7,7 @@
  */
 import { rm } from "node:fs/promises";
 import { childLogger } from "@/lib/logger";
-import { historyFile, snapshotResult } from "@/services/page-history";
+import { historyFile, pruneHistory, snapshotResult } from "@/services/page-history";
 import { resultUrl } from "@/services/page-jobs";
 import { pageLive } from "@/stores/page-live-channel";
 import { PageStore } from "@/stores/page-store";
@@ -35,6 +35,10 @@ export async function publishPage(id: string): Promise<{ revision: number; notif
       .catch((cleanup: unknown) => log.error({ err: cleanup, pageId: id, revision }, "Couldn't remove an uncommitted snapshot"));
     throw err;
   }
+
+  // Only now that the revision is committed: pruning before it would drop an old snapshot for a publish that
+  // never happened, and that snapshot is somebody's rollback
+  await pruneHistory(id);
 
   const notified = pageLive.publish({ type: "page-updated", page_id: id, revision, result_url: resultUrl(id, revision) });
   log.info({ pageId: id, revision, notified }, "Page published");

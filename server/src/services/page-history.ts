@@ -36,10 +36,14 @@ export async function listHistory(pageId: string): Promise<HistoryEntry[]> {
   })));
 }
 
-/** Copies result.png as the snapshot of `revision`, then drops snapshots beyond HISTORY_LIMIT. */
+/** Copies result.png as the snapshot of `revision`. Pruning is separate, so a publish that fails loses nothing. */
 export async function snapshotResult(pageId: string, revision: number): Promise<void> {
   await mkdir(historyDir(pageId), { recursive: true });
   await copyFile(join(pageDir(pageId), "result.png"), historyFile(pageId, revision));
+}
+
+/** Drops snapshots beyond HISTORY_LIMIT. Call once the revision they belong to is committed. */
+export async function pruneHistory(pageId: string): Promise<void> {
   const expired = (await listHistory(pageId)).slice(HISTORY_LIMIT);
   await Promise.all(expired.map((entry) => rm(historyFile(pageId, entry.revision), { force: true })));
 }

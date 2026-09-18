@@ -176,6 +176,9 @@ export async function runStoredPage(id: string, options: SubmitPageOptions): Pro
   // reading the original and queueing the same work twice
   translationJobs.create(id, options.cleanSfx);
   try {
+    // The stored status is what Studio edits check, so it has to say "queued" before the read as well: an edit
+    // saved during the read would be rebuilt away by the run that follows
+    await PageStore.update(id, { status: "queued", errorMessage: null });
     const page = Buffer.from(await Bun.file(original).arrayBuffer());
     // The stored original is this page's only copy (imported pages): it stays while the run rebuilds the rest
     const { done } = await startRun(id, page, options, true);
