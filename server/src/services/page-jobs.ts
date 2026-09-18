@@ -172,19 +172,19 @@ export async function runStoredPage(id: string, options: SubmitPageOptions): Pro
   if (pendingPages >= MAX_PENDING_PAGES) return { ok: false, code: 429, error: "Too many pages waiting for translation — try again shortly" };
   pendingPages++;
   let queued = false;
+  // Reserved before any await: a second rerun of this page now sees a live job and is refused, instead of both
+  // reading the original and queueing the same work twice
+  translationJobs.create(id, options.cleanSfx);
   try {
     const page = Buffer.from(await Bun.file(original).arrayBuffer());
-    translationJobs.create(id, options.cleanSfx);
-    try {
-      // The stored original is this page's only copy (imported pages): it stays while the run rebuilds the rest
-      const { done } = await startRun(id, page, options, true);
-      queued = true;
-      return { ok: true, job_id: id, done };
-    } catch (err) {
-      // Never leave the reserved job "queued": it would make every later request for this page wait on it
-      await failJob(id, err);
-      throw err;
-    }
+    // The stored original is this page's only copy (imported pages): it stays while the run rebuilds the rest
+    const { done } = await startRun(id, page, options, true);
+    queued = true;
+    return { ok: true, job_id: id, done };
+  } catch (err) {
+    // Never leave the reserved job "queued": it would make every later request for this page wait on it
+    await failJob(id, err);
+    throw err;
   } finally {
     if (!queued) pendingPages--;
   }

@@ -327,7 +327,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
     ({ params, query, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
-      // A page inside a chapter would disappear from what people read, so the caller has to mean it
+      // Deleting a page that belongs to a chapter takes it out of what people read, so the caller has to mean it
       if (check.page.chapterId !== null && !query.force) {
         return status(409, { error: "this page belongs to a chapter — remove it from the chapter, or delete it with force" });
       }
@@ -480,13 +480,9 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .delete(
     "/pages/:id/blocks/:idx",
-    ({ params, query, status }) => withPageLock(params.id, async () => {
+    ({ params, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
-      // A page inside a chapter would disappear from what people read, so the caller has to mean it
-      if (check.page.chapterId !== null && !query.force) {
-        return status(409, { error: "this page belongs to a chapter — remove it from the chapter, or delete it with force" });
-      }
       const block = (await PageStore.readJob(params.id))?.blocks.find((b) => b.id === params.idx);
       // Its lettering is no longer cleaned or typeset; OCR / translate of the remaining blocks is unaffected
       // (the sound-effect pass is built on the text pass, so a text block outdates both)
@@ -567,13 +563,9 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .post(
     "/pages/:id/place",
-    ({ params, query, status }) => withPageLock(params.id, async () => {
+    ({ params, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
-      // A page inside a chapter would disappear from what people read, so the caller has to mean it
-      if (check.page.chapterId !== null && !query.force) {
-        return status(409, { error: "this page belongs to a chapter — remove it from the chapter, or delete it with force" });
-      }
       try {
         await runExclusiveResult(async () => {
           const job = await PageStore.readJob(params.id);
@@ -639,13 +631,9 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .delete(
     "/pages/:id/mask/:layer",
-    ({ params, query, status }) => withPageLock(params.id, async () => {
+    ({ params, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
-      // A page inside a chapter would disappear from what people read, so the caller has to mean it
-      if (check.page.chapterId !== null && !query.force) {
-        return status(409, { error: "this page belongs to a chapter — remove it from the chapter, or delete it with force" });
-      }
       const file = join(pageDir(params.id), MASK_LAYER_FILES[params.layer]);
       if (existsSync(file)) {
         await PageStore.markStale(params.id, ["clean_text", "clean_sfx", "render"]);
@@ -713,13 +701,9 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
 
   .post(
     "/pages/:id/publish",
-    ({ params, query, status }) => withPageLock(params.id, async () => {
+    ({ params, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
-      // A page inside a chapter would disappear from what people read, so the caller has to mean it
-      if (check.page.chapterId !== null && !query.force) {
-        return status(409, { error: "this page belongs to a chapter — remove it from the chapter, or delete it with force" });
-      }
       if (!existsSync(join(pageDir(params.id), "result.png"))) return status(409, { error: "page has no result to publish" });
       // An edit saved after the last render would otherwise publish an image without it
       const stages = await PageStore.listStages(params.id);

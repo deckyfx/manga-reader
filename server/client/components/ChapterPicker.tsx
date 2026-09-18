@@ -6,6 +6,8 @@ import { Modal } from "./Modal";
 
 interface ChapterPickerProps {
   pageId: string;
+  /** True when the page already belongs to a chapter: it can only be copied from there, never moved out. */
+  filed?: boolean;
   /** Shown in the dialog so it's clear which page is being filed. */
   pageLabel?: string;
   onClose: () => void;
@@ -16,7 +18,7 @@ interface ChapterPickerProps {
  * Files a Studio draft into a chapter: pick the series, then the chapter. The draft is copied by default, so the
  * Studio keeps the original to work from; unticking "keep the draft" moves the page itself.
  */
-export function ChapterPicker({ pageId, pageLabel, onClose, onFiled }: ChapterPickerProps) {
+export function ChapterPicker({ pageId, pageLabel, filed = false, onClose, onFiled }: ChapterPickerProps) {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [seriesId, setSeriesId] = useState<number | null>(null);
@@ -26,7 +28,7 @@ export function ChapterPicker({ pageId, pageLabel, onClose, onFiled }: ChapterPi
   const detailQ = useQuery({ queryKey: ["series", seriesId], queryFn: () => getSeries(seriesId ?? 0), enabled: seriesId !== null });
 
   const fileM = useMutation({
-    mutationFn: (chapterId: number) => copyPageIntoChapter(chapterId, pageId, { keep_draft: keepDraft }),
+    mutationFn: (chapterId: number) => copyPageIntoChapter(chapterId, pageId, { keep_draft: filed || keepDraft }),
     onSuccess: (_detail, chapterId) => {
       void qc.invalidateQueries({ queryKey: ["studio-pages"] });
       void qc.invalidateQueries({ queryKey: ["inbox"] });
@@ -45,10 +47,14 @@ export function ChapterPicker({ pageId, pageLabel, onClose, onFiled }: ChapterPi
       footer={
         <>
           {fileM.error && <span className="mr-auto self-center text-xs text-red-400">{fileM.error.message}</span>}
-          <label className="mr-auto flex items-center gap-2 self-center text-xs text-gray-400" title="Off moves the page instead of copying it">
-            <input type="checkbox" checked={keepDraft} onChange={(e) => setKeepDraft(e.target.checked)} className="accent-indigo-500" />
-            Keep the draft in the Inbox
-          </label>
+          {filed ? (
+            <span className="mr-auto self-center text-xs text-gray-500">The chapter gets its own copy; this page stays where it is.</span>
+          ) : (
+            <label className="mr-auto flex items-center gap-2 self-center text-xs text-gray-400" title="Off moves the page instead of copying it">
+              <input type="checkbox" checked={keepDraft} onChange={(e) => setKeepDraft(e.target.checked)} className="accent-indigo-500" />
+              Keep the draft in the Inbox
+            </label>
+          )}
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-800">Cancel</button>
         </>
       }
@@ -66,6 +72,8 @@ export function ChapterPicker({ pageId, pageLabel, onClose, onFiled }: ChapterPi
           </label>
           {seriesQ.isLoading ? (
             <Loader2 size={16} className="animate-spin text-gray-500" />
+          ) : seriesQ.isError ? (
+            <p className="text-sm text-red-400">The library couldn't be read: {seriesQ.error.message}</p>
           ) : (seriesQ.data?.length ?? 0) === 0 ? (
             <p className="text-sm text-gray-500">No series yet — create one in Manage first.</p>
           ) : (
@@ -90,6 +98,8 @@ export function ChapterPicker({ pageId, pageLabel, onClose, onFiled }: ChapterPi
           <button onClick={() => setSeriesId(null)} className="text-xs text-indigo-300 hover:text-indigo-200">← Another series</button>
           {detailQ.isLoading ? (
             <Loader2 size={16} className="animate-spin text-gray-500" />
+          ) : detailQ.isError ? (
+            <p className="text-sm text-red-400">This series couldn't be read: {detailQ.error.message}</p>
           ) : chapters.length === 0 ? (
             <p className="text-sm text-gray-500">This series has no chapters yet — add one in Manage.</p>
           ) : (

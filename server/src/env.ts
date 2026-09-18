@@ -15,6 +15,15 @@ class EnvConfig {
     return parseInt(Bun.env.PORT ?? "3579", 10);
   }
 
+  /**
+   * Interface the TCP listener binds to. Loopback by default: nothing in `/manage/api` or the Studio asks who you
+   * are yet (that is phase 5.4), so a server on 0.0.0.0 would let anyone on the network edit the library. Set
+   * `HOST=0.0.0.0` deliberately to read from other devices, and put it behind something that authenticates.
+   */
+  get HOST(): string {
+    return Bun.env.HOST ?? "127.0.0.1";
+  }
+
   get NODE_ENV(): "development" | "production" | "test" {
     return (Bun.env.NODE_ENV ?? "development") as "development" | "production" | "test";
   }

@@ -135,9 +135,13 @@ export class PageStore {
     });
   }
 
-  /** Pages of a chapter in reading order. */
+  /**
+   * Pages of a chapter in reading order. Nothing stops two pages sharing a `sort_order` (appends race, imports
+   * number themselves), and `created_at` is only second-precision, so the id settles any tie: the order a reader
+   * sees is then always the same one.
+   */
   static async listByChapter(chapterId: number): Promise<Page[]> {
-    return db.select().from(pages).where(eq(pages.chapterId, chapterId)).orderBy(pages.sortOrder, pages.createdAt);
+    return db.select().from(pages).where(eq(pages.chapterId, chapterId)).orderBy(pages.sortOrder, pages.createdAt, pages.id);
   }
 
   /** Pages not filed into a chapter yet (extension jobs and uploads), newest first. */

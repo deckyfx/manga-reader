@@ -5,7 +5,7 @@
  */
 import sharp from "sharp";
 import { unzip, type Unzipped } from "fflate";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { childLogger } from "@/lib/logger";
 import { MAX_IMAGE_BYTES } from "@/services/page-jobs";
@@ -141,6 +141,7 @@ export async function importIntoChapter(chapterId: number, sources: readonly Imp
       skipped.push({ name: image.name, reason: "image too large (max 15 MB)" });
       continue;
     }
+    let created: string | null = null;
     try {
       const normalised = await normalisePage(sharp(Buffer.from(image.bytes))).png().toBuffer();
       const { width = 0, height = 0 } = await sharp(normalised).metadata();
@@ -148,6 +149,7 @@ export async function importIntoChapter(chapterId: number, sources: readonly Imp
       hasher.update(normalised);
       const name = baseName(image.name);
       const page = await PageStore.createInChapter(hasher.digest("hex"), "import", chapterId, ++order, name);
+      created = page.id;
       await mkdir(pageDir(page.id), { recursive: true });
       await Bun.write(join(pageDir(page.id), "original.png"), normalised);
       // Imported pages are idle with no stages until a batch run translates them
@@ -155,7 +157,13 @@ export async function importIntoChapter(chapterId: number, sources: readonly Imp
       pages.push({ id: page.id, name });
     } catch (err) {
       log.warn({ err, entry: image.name }, "Page could not be imported");
-      skipped.push({ name: image.name, reason: "image could not be decoded" });
+      // The row is written before the image: a page whose image never landed would show up empty in the chapter
+      if (created) {
+        await PageStore.deletePage(created).catch((cleanup: unknown) => log.error({ err: cleanup, pageId: created }, "Couldn't remove a half-imported page"));
+        await rm(pageDir(created), { recursive: true, force: true })
+          .catch((cleanup: unknown) => log.error({ err: cleanup, pageId: created }, "Couldn't remove a half-imported page's folder"));
+      }
+      skipped.push({ name: image.name, reason: "image could not be stored" });
     }
   }
 

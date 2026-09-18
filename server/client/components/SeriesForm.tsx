@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, Loader2, Upload, X } from "lucide-react";
 import {
   createSeries,
@@ -27,6 +27,8 @@ interface SeriesFormProps {
   onSaved: (detail: SeriesDetail) => void;
 }
 
+const MAX_TAGS = 30;
+
 const inputClass =
   "w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-100 placeholder:text-gray-600 focus:border-indigo-500 focus:outline-none";
 
@@ -45,9 +47,19 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
 
   const addTags = (raw: string) => {
     const parts = raw.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean);
-    if (parts.length > 0) setTags((current) => [...new Set([...current, ...parts])]);
+    // The server takes 30 at most; pasting a longer list keeps the first 30 rather than failing the save
+    if (parts.length > 0) setTags((current) => [...new Set([...current, ...parts])].slice(0, MAX_TAGS));
     setTagDraft("");
   };
+
+  // A cover upload that fails leaves the series created: remember it, so retrying edits that one instead of
+  // creating a second series
+  const createdId = useRef<number | null>(null);
+  const qc = useQueryClient();
+  // Closing after a half-finished save would otherwise leave the new series invisible until a reload
+  useEffect(() => () => {
+    if (createdId.current !== null) void qc.invalidateQueries({ queryKey: ["series"] });
+  }, [qc]);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -59,7 +71,9 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
         reading_direction: direction,
         tags,
       };
-      let detail = series ? await updateSeries(series.id, body) : await createSeries(body);
+      const existingId = series?.id ?? createdId.current;
+      let detail = existingId !== null && existingId !== undefined ? await updateSeries(existingId, body) : await createSeries(body);
+      createdId.current = detail.series.id;
       if (coverCleared && !cover) detail = await removeSeriesCover(detail.series.id);
       if (cover) detail = await uploadSeriesCover(detail.series.id, cover);
       return detail;
@@ -205,8 +219,8 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
                   }
                 }}
                 onBlur={() => addTags(tagDraft)}
-                placeholder={tags.length < 30 ? "Add a tag…" : "30 tags is the limit"}
-                disabled={tags.length >= 30}
+                placeholder={tags.length < MAX_TAGS ? "Add a tag…" : `${MAX_TAGS} tags is the limit`}
+                disabled={tags.length >= MAX_TAGS}
                 className="min-w-28 flex-1 bg-transparent text-sm text-gray-100 placeholder:text-gray-600 focus:outline-none"
               />
             </div>

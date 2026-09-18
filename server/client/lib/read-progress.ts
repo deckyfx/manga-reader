@@ -17,7 +17,8 @@ export function saveProgress(chapterId: number, pageNumber: number): void {
 export function savedPage(chapterId: number, pages: number): number {
   try {
     const saved = Number(localStorage.getItem(progressKey(chapterId)));
-    if (!Number.isFinite(saved) || saved < 1) return 1;
+    // Whole pages only: anything else (a fraction, junk, an old format) starts the chapter from the beginning
+    if (!Number.isInteger(saved) || saved < 1) return 1;
     return pages > 0 ? Math.min(saved, pages) : 1;
   } catch {
     return 1;

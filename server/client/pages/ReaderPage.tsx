@@ -31,7 +31,9 @@ const FIT_CLASS: Record<FitMode, string> = {
 export function ReaderPage() {
   const { id = "", n = "1" } = useParams();
   const chapterId = Number(id);
-  const pageNumber = Math.max(1, Number(n) || 1);
+  // A fractional or junk `n` from the URL would index the page array with a fraction and read as "page missing"
+  const requested = Number(n);
+  const pageNumber = Number.isInteger(requested) && requested >= 1 ? requested : 1;
   const navigate = useNavigate();
 
   const chapterQ = useQuery({ queryKey: ["chapter", chapterId], queryFn: () => getChapter(chapterId), enabled: Number.isFinite(chapterId) });

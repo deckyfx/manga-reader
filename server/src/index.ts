@@ -155,7 +155,7 @@ const app = new Elysia({ serve: { routes: spaRoutes } })
 
 const listen = env.SOCKET_PATH
   ? { unix: env.SOCKET_PATH }
-  : { port: env.PORT };
+  : { hostname: env.HOST, port: env.PORT };
 
 app.listen(listen, ({ hostname, port }) => {
   logger.info(`web-ocr-bun listening on http://${hostname}:${port}`);

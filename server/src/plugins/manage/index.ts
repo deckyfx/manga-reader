@@ -345,6 +345,10 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       if (!page) return status(404, { error: "page not found" });
       if (page.chapterId === params.id) return status(409, { error: "this page is already in this chapter" });
       if (page.status === "queued" || page.status === "running") return status(409, { error: "page is still being translated" });
+      // Copying out of another chapter is fine; taking a page out of one is a move, and that has its own route
+      if (page.chapterId !== null && body?.keep_draft === false) {
+        return status(409, { error: "this page belongs to a chapter — move it with PUT /manage/api/pages/:id, or copy it" });
+      }
 
       // A draft is copied by default, so the Studio keeps the original to work from; keep_draft=false moves it instead
       let filed = page;
@@ -362,7 +366,7 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     {
       params: t.Object({ id: IdParam, pageId: PageIdParam }),
       body: t.Optional(t.Object({
-        /** Default true: the page is copied and the draft stays in the Inbox. False moves the page itself. */
+        /** Default true: the page is copied and the draft stays where it is. False moves it, and only from the Inbox. */
         keep_draft: t.Optional(t.Boolean()),
         name: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
       })),

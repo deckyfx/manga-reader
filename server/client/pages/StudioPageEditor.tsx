@@ -533,6 +533,7 @@ export function StudioPageEditor() {
         <ChapterPicker
           pageId={page.id}
           pageLabel={page.name ?? page.id.slice(-8)}
+          filed={page.location !== null && page.location !== undefined}
           onClose={() => setFiling(false)}
           onFiled={(toChapter) => {
             setFiling(false);
