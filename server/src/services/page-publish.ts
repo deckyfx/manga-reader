@@ -37,8 +37,10 @@ export async function publishPage(id: string): Promise<{ revision: number; notif
   }
 
   // Only now that the revision is committed: pruning before it would drop an old snapshot for a publish that
-  // never happened, and that snapshot is somebody's rollback
-  await pruneHistory(id);
+  // never happened, and that snapshot is somebody's rollback. The publish itself has already happened, so a
+  // failure here is logged and nothing more — the extra snapshots go on the next publish, and the tabs waiting
+  // for this revision still get told about it.
+  await pruneHistory(id).catch((err: unknown) => log.warn({ err, pageId: id, revision }, "Couldn't prune the publish history"));
 
   const notified = pageLive.publish({ type: "page-updated", page_id: id, revision, result_url: resultUrl(id, revision) });
   log.info({ pageId: id, revision, notified }, "Page published");
