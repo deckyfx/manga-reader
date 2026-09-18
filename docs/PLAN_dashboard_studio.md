@@ -446,8 +446,10 @@ publish gate closes that:
 - The chapter grid follows the page SSE channel (or polls) while any of its pages is queued or running, so a burn done
   in the Studio shows up in Manage without a reload.
 
-Server work: the publish gate in `pageImagePath` and the batch run, one location helper, list filters, the copy route,
-the delete guard. Everything else is client.
+**Status**: built and covered by an in-process test (27 checks), the important one being that a burn made after a
+publish leaves readers on the published image until it is published again. Two decisions changed while building:
+a page filed into a chapter is published as it arrives (it is new, so there is nothing to protect), and Manage's inbox
+picker copies like the Studio's does, with a tick to move instead.
 
 ## 11. Adopt from manga-reader / avoid
 
