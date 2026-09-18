@@ -384,9 +384,29 @@ Managing lives under its own top-level area, so the app has three modes: **studi
 
 ### Phase 5.5 design — the Studio ↔ Manage seam (2026-09-18)
 
-There is one `pages` table: "a job in the Studio" and "a page in a chapter" are the same row with `chapter_id` null or
-set. Nothing needs converting; the two areas simply don't show each other's half. Decided (user): the Studio leads with
-the Inbox, filing a page **copies** it into the chapter, and discarding in the Studio never silently empties a chapter.
+The round trip is the point (user): **a page being read can be edited as a job, and a job can be published as a page
+that is read**. There is one `pages` table — "a job in the Studio" and "a page in a chapter" are the same row with
+`chapter_id` null or set — so the trip needs no conversion, only two things it lacks today: readers must not see
+half-finished edits, and each area must show the other's half.
+
+Decided (user): the Studio leads with the Inbox; filing an Inbox **draft** into a chapter copies it; discarding in the
+Studio never silently empties a chapter.
+
+**0. The publish gate — what readers see**
+
+Publishing already snapshots `result.png` as `history/<revision>.png` and bumps `revision`; the reader, though, serves
+`result.png`, so every burn reaches readers the moment it lands, and a page being lettered is read half-done. The
+publish gate closes that:
+- `pageImagePath` serves the newest published snapshot; when a page has never been published it falls back to
+  `result.png` and then `original.png`, so pages that exist today keep behaving as they do now.
+- A chapter batch run publishes each page as it finishes, so "translate chapter" ends with a readable chapter.
+- Editing a chapter page in the Studio therefore needs no copy and no syncing: the row is edited in place, readers keep
+  the published revision until **Publish** is pressed. That is the whole round trip — open from the reader, edit as a
+  job, publish back.
+- `has_result` in the reader payload becomes `published`; Manage marks a page "edited since publish" and offers
+  **Publish edits**, per page and for a whole chapter at once. Export follows the published snapshot too, so a ZIP
+  matches what readers get.
+- Rollback already exists (`POST …/rollback`), so an unwanted publish is one click back.
 
 **A. A page says where it lives**
 - A shared `pageLocation(page)` helper returns `{series_id, series_title, chapter_id, chapter_title, index, total}`;
@@ -412,9 +432,10 @@ the Inbox, filing a page **copies** it into the chapter, and discarding in the S
 
 **D. Discarding matches where the page is**
 - An Inbox page: today's confirmation, unchanged — no chapter can be affected.
-- A page inside a chapter: a dialog with two named outcomes instead of a yes/no — **Remove from the chapter** (the page
-  and its images survive, back to the Inbox) or **Delete page and images**. `DELETE /studio/api/pages/:id` refuses a
-  filed page (409) unless `force=true`, so the choice can't be skipped by accident.
+- A page inside a chapter: a dialog with named outcomes instead of a yes/no — **Discard the edits** (roll back to the
+  published revision, which is what readers already see), **Remove from the chapter** (page and images survive, back to
+  the Inbox), or **Delete page and images**. `DELETE /studio/api/pages/:id` refuses a filed page (409) unless
+  `force=true`, so the choice can't be skipped by accident.
 - Manage's chapter grid keeps "remove from chapter" and gains the same delete, for clearing out a bad import in place.
 
 **E. Names**
@@ -425,7 +446,8 @@ the Inbox, filing a page **copies** it into the chapter, and discarding in the S
 - The chapter grid follows the page SSE channel (or polls) while any of its pages is queued or running, so a burn done
   in the Studio shows up in Manage without a reload.
 
-Server work: one helper, list filters, the copy route, the delete guard. Everything else is client.
+Server work: the publish gate in `pageImagePath` and the batch run, one location helper, list filters, the copy route,
+the delete guard. Everything else is client.
 
 ## 11. Adopt from manga-reader / avoid
 
