@@ -23,6 +23,8 @@
  * POST   /manage/api/pages/:id/publish          publish one page, so readers get its current result
  * GET    /manage/api/settings                   server policy: registration, default role (admin)
  * PUT    /manage/api/settings                   change it (admin)
+ * GET    /manage/api/sessions                   every signed-in session (admin)
+ * DELETE /manage/api/sessions/:id               sign one out (admin)
  * GET    /manage/api/users                      the accounts on this server (admin)
  * POST   /manage/api/users                      add an account (admin)
  * PUT    /manage/api/users/:id                  change a role, suspend, rename or reset a password (admin)
@@ -44,9 +46,10 @@ import { CoverTooLargeError, deleteCover, saveCover } from "@/services/library-c
 import { copyPageIntoChapter } from "@/services/page-copy";
 import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore } from "@/stores/library-store";
 import { SessionStore, UserStore } from "@/stores/user-store";
+import { hashSecret, SESSION_COOKIE } from "@/services/auth";
 import { hashPassword } from "@/services/auth";
 import { serverPolicy, updateServerPolicy } from "@/services/server-settings";
-import { authContext, toUser, UserSchema } from "@/plugins/auth/index";
+import { authContext, SessionSchema, toUser, UserSchema } from "@/plugins/auth/index";
 import { USER_ROLES } from "@/db/schema";
 import { PageStore } from "@/stores/page-store";
 import {
@@ -516,6 +519,40 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         default_role: optionalEnum(USER_ROLES),
       }),
       response: { 200: ServerPolicySchema },
+    },
+  )
+
+  // ── Sessions (admin) ───────────────────────────────────────────────────────
+
+  .get(
+    "/sessions",
+    async ({ cookie }) => {
+      const token = cookie[SESSION_COOKIE]?.value;
+      const currentHash = typeof token === "string" && token ? hashSecret(token) : null;
+      return (await SessionStore.listAll()).map(({ session, username }) => ({
+        id: session.tokenHash,
+        username,
+        current: session.tokenHash === currentHash,
+        user_agent: session.userAgent,
+        last_seen_at: session.lastSeenAt,
+        created_at: session.createdAt,
+        expires_at: session.expiresAt,
+      }));
+    },
+    { response: { 200: t.Array(t.Composite([SessionSchema, t.Object({ username: t.String() })])) } },
+  )
+
+  .delete(
+    "/sessions/:id",
+    async ({ params, status }) => {
+      if (!(await SessionStore.find(params.id))) return status(404, { error: "no such session" });
+      await SessionStore.delete(params.id);
+      log.info({ session: params.id.slice(0, 8) }, "Session signed out by an admin");
+      return { signed_out: true };
+    },
+    {
+      params: t.Object({ id: t.String({ maxLength: 128 }) }),
+      response: { 200: t.Object({ signed_out: t.Boolean() }), 404: ErrBody },
     },
   )
 

@@ -85,6 +85,21 @@ export class SessionStore {
     return row;
   }
 
+  /** This account's sessions, newest first. */
+  static async listByUser(userId: number): Promise<Session[]> {
+    return db.select().from(sessions).where(eq(sessions.userId, userId)).orderBy(desc(sessions.lastSeenAt));
+  }
+
+  /** Every session on the server, for an admin to look through. */
+  static async listAll(): Promise<{ session: Session; username: string }[]> {
+    const rows = await db
+      .select({ session: sessions, username: users.username })
+      .from(sessions)
+      .innerJoin(users, eq(users.id, sessions.userId))
+      .orderBy(desc(sessions.lastSeenAt));
+    return rows;
+  }
+
   static async find(tokenHash: string): Promise<Session | undefined> {
     return db.query.sessions.findFirst({ where: eq(sessions.tokenHash, tokenHash) });
   }

@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { NavLink, Outlet } from "react-router";
-import { BookOpen, FolderCog, Layers, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
+import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router";
+import { BookOpen, FolderCog, Layers, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Settings, ShieldCheck, UserRound } from "lucide-react";
+import { useAuth } from "../auth/AuthProvider";
 
 const STORAGE_KEY = "sidebar-expanded";
 
@@ -32,6 +33,12 @@ function NavItem({ to, icon, label, expanded }: { to: string; icon: React.ReactN
 
 export function Layout() {
   const [expanded, setExpanded] = useState(readExpanded);
+  const { account, can, needsSetup, signOut } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // An empty server has nothing to show until it has an admin
+  if (needsSetup && location.pathname !== "/setup") return <Navigate to="/setup" replace />;
   const toggle = () => {
     setExpanded((prev) => {
       try {
@@ -60,11 +67,29 @@ export function Layout() {
             {expanded ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
           </button>
         </div>
-        <NavItem to="/studio" icon={<Layers size={20} />} label="Studio" expanded={expanded} />
-        <NavItem to="/manage" icon={<FolderCog size={20} />} label="Manage" expanded={expanded} />
+        {/* Only what this account can actually open: the server refuses the rest anyway */}
+        {can("contributor") && <NavItem to="/studio" icon={<Layers size={20} />} label="Studio" expanded={expanded} />}
+        {can("contributor") && <NavItem to="/manage" icon={<FolderCog size={20} />} label="Manage" expanded={expanded} />}
         <NavItem to="/read" icon={<BookOpen size={20} />} label="Read" expanded={expanded} />
-        <div className="mt-auto">
-          <NavItem to="/settings" icon={<Settings size={20} />} label="Settings" expanded={expanded} />
+
+        <div className="mt-auto space-y-1">
+          {can("admin") && <NavItem to="/admin" icon={<ShieldCheck size={20} />} label="Server" expanded={expanded} />}
+          {can("contributor") && <NavItem to="/settings" icon={<Settings size={20} />} label="Settings" expanded={expanded} />}
+          {account ? (
+            <>
+              <NavItem to="/user" icon={<UserRound size={20} />} label={account.display_name ?? account.username} expanded={expanded} />
+              <button
+                onClick={() => void signOut().then(() => navigate("/read"))}
+                title={expanded ? undefined : "Sign out"}
+                className="flex w-full items-center gap-3 rounded-lg p-2.5 text-sm text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+              >
+                <span className="shrink-0"><LogOut size={20} /></span>
+                {expanded && <span className="truncate">Sign out</span>}
+              </button>
+            </>
+          ) : (
+            <NavItem to="/login" icon={<LogIn size={20} />} label="Sign in" expanded={expanded} />
+          )}
         </div>
       </nav>
 

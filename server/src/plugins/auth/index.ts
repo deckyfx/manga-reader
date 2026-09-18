@@ -21,6 +21,8 @@
  * POST /auth/api/logout    end this session
  * POST /auth/api/password  change your own password (every other session is signed out)
  * GET/POST/DELETE /auth/api/keys  your API keys for the extension and the desktop app
+ * GET    /auth/api/sessions     where this account is signed in
+ * DELETE /auth/api/sessions/:id sign one of them out
  *
  * `/read/api` stays public. `/studio/api`, `/manage/api` and the tool routes go through `requireRole`.
  */
@@ -89,6 +91,16 @@ const LoginResult = t.Object({
   mfa_required: t.Boolean(),
   methods: t.Array(t.UnionEnum(["totp", "passkey"])),
   challenge: t.Nullable(t.String()),
+});
+
+export const SessionSchema = t.Object({
+  id: t.String(),
+  /** The session this request came in on, which the UI marks rather than offers to end. */
+  current: t.Boolean(),
+  user_agent: t.Nullable(t.String()),
+  last_seen_at: t.String(),
+  created_at: t.String(),
+  expires_at: t.String(),
 });
 
 const PasskeySchema = t.Object({
@@ -529,6 +541,42 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     {
       body: t.Object({ password: t.String({ maxLength: 200 }) }),
       response: { 200: t.Object({ recovery_codes: t.Array(t.String()) }), 401: ErrBody, 403: ErrBody },
+    },
+  )
+
+  // ── Where this account is signed in ───────────────────────────────────────
+
+  .get(
+    "/sessions",
+    async ({ principal, cookie, status }) => {
+      if (!principal) return status(401, { error: "sign in to do that" });
+      const token = cookie[SESSION_COOKIE]?.value;
+      const currentHash = typeof token === "string" && token ? hashSecret(token) : null;
+      return (await SessionStore.listByUser(principal.user.id)).map((session) => ({
+        // The stored hash, not the cookie: it identifies a session without being usable as one
+        id: session.tokenHash,
+        current: session.tokenHash === currentHash,
+        user_agent: session.userAgent,
+        last_seen_at: session.lastSeenAt,
+        created_at: session.createdAt,
+        expires_at: session.expiresAt,
+      }));
+    },
+    { response: { 200: t.Array(SessionSchema), 401: ErrBody } },
+  )
+
+  .delete(
+    "/sessions/:id",
+    async ({ principal, params, status }) => {
+      if (!principal) return status(401, { error: "sign in to do that" });
+      const session = await SessionStore.find(params.id);
+      if (!session || session.userId !== principal.user.id) return status(404, { error: "no such session" });
+      await SessionStore.delete(params.id);
+      return { signed_out: true };
+    },
+    {
+      params: t.Object({ id: t.String({ maxLength: 128 }) }),
+      response: { 200: t.Object({ signed_out: t.Boolean() }), 401: ErrBody, 404: ErrBody },
     },
   )
 

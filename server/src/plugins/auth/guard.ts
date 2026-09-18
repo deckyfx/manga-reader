@@ -22,6 +22,7 @@ const POLICY: { prefix: string; needs: UserRole | "public" }[] = [
   // Accounts and roles are the admin's business (listed first: the general /manage rule would be too weak)
   { prefix: "/manage/api/users", needs: "admin" },
   { prefix: "/manage/api/settings", needs: "admin" },
+  { prefix: "/manage/api/sessions", needs: "admin" },
 
   // Building the library and editing pages
   { prefix: "/manage/api", needs: "contributor" },

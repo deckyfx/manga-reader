@@ -1,0 +1,65 @@
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getMe, logout as logoutRequest, type Account, type SecondFactor, type UserRole } from "../api";
+
+interface AuthState {
+  /** The signed-in account, or null for a guest (who may still read). */
+  account: Account | null;
+  /** What guards this account: an authenticator app, a passkey, or neither. */
+  factors: SecondFactor[];
+  /** True while the server has no accounts at all and is waiting for its first admin. */
+  needsSetup: boolean;
+  /** Whether anyone may create their own account, which an admin controls. */
+  registrationEnabled: boolean;
+  loading: boolean;
+  /** Whether the account is at least this role; guests are below all of them. */
+  can: (role: UserRole) => boolean;
+  refresh: () => Promise<void>;
+  signOut: () => Promise<void>;
+}
+
+const RANK: Record<UserRole, number> = { reader: 1, contributor: 2, admin: 3 };
+
+const AuthContext = createContext<AuthState | null>(null);
+
+/**
+ * Who is signed in, for the whole client. The server decides everything that matters — this only drives what the UI
+ * offers, so a guest isn't shown doors that would answer 401.
+ */
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const qc = useQueryClient();
+  const meQ = useQuery({ queryKey: ["me"], queryFn: getMe, staleTime: 30_000, retry: false });
+
+  const refresh = useCallback(async () => {
+    await qc.invalidateQueries({ queryKey: ["me"] });
+  }, [qc]);
+
+  const signOut = useCallback(async () => {
+    await logoutRequest();
+    // Everything on screen was fetched as somebody: start again as a guest
+    qc.clear();
+    await qc.invalidateQueries({ queryKey: ["me"] });
+  }, [qc]);
+
+  const value = useMemo<AuthState>(() => {
+    const account = meQ.data?.user ?? null;
+    return {
+      account,
+      factors: (meQ.data?.factors ?? []) as SecondFactor[],
+      needsSetup: meQ.data?.needs_setup ?? false,
+      registrationEnabled: meQ.data?.registration_enabled ?? false,
+      loading: meQ.isLoading,
+      can: (role) => (account ? RANK[account.role as UserRole] >= RANK[role] : false),
+      refresh,
+      signOut,
+    };
+  }, [meQ.data, meQ.isLoading, refresh, signOut]);
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth(): AuthState {
+  const auth = useContext(AuthContext);
+  if (!auth) throw new Error("useAuth must be used inside AuthProvider");
+  return auth;
+}

@@ -1,6 +1,8 @@
 import { BrowserRouter, Navigate, Routes, Route, useParams } from "react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ApiError } from "./api";
 import { ConfirmProvider } from "./components/ConfirmDialog";
+import { AuthProvider } from "./auth/AuthProvider";
 import { Layout } from "./components/Layout";
 import { HomePage } from "./pages/HomePage";
 import { StudioPagesPage } from "./pages/StudioPagesPage";
@@ -12,11 +14,26 @@ import { ManageChapterPage } from "./pages/ManageChapterPage";
 import { SeriesPage } from "./pages/SeriesPage";
 import { ReaderPage } from "./pages/ReaderPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { LoginPage } from "./pages/LoginPage";
+import { SetupPage } from "./pages/SetupPage";
+import { RegisterPage } from "./pages/RegisterPage";
+import { UserPage } from "./pages/UserPage";
+import { AdminPage } from "./pages/AdminPage";
 
-const queryClient = new QueryClient({
+/**
+ * A 401 means the session has ended — expired, signed out elsewhere, or the account suspended. Re-asking who we are
+ * makes the whole client agree at once: the sidebar drops what it can't open, and the guarded pages redirect.
+ */
+const onUnauthorised = (error: unknown) => {
+  if (error instanceof ApiError && error.status === 401) void queryClient.invalidateQueries({ queryKey: ["me"] });
+};
+
+const queryClient: QueryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, staleTime: 10_000 },
   },
+  queryCache: new QueryCache({ onError: onUnauthorised }),
+  mutationCache: new MutationCache({ onError: onUnauthorised }),
 });
 
 export function App() {
@@ -24,7 +41,12 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <ConfirmProvider>
       <BrowserRouter>
+        <AuthProviderWithRouter>
         <Routes>
+          {/* Signing in has no sidebar: there is nowhere to go until it is done */}
+          <Route path="login" element={<LoginPage />} />
+          <Route path="setup" element={<SetupPage />} />
+          <Route path="register" element={<RegisterPage />} />
           <Route element={<Layout />}>
             <Route index element={<Navigate to="/home" replace />} />
             <Route path="home" element={<HomePage />} />
@@ -37,12 +59,20 @@ export function App() {
             <Route path="manage/series/:id" element={<ManageSeriesPage />} />
             <Route path="manage/chapters/:id" element={<ManageChapterPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="user" element={<UserPage />} />
+            <Route path="admin" element={<AdminPage />} />
           </Route>
         </Routes>
+        </AuthProviderWithRouter>
       </BrowserRouter>
       </ConfirmProvider>
     </QueryClientProvider>
   );
+}
+
+/** Inside the router, so a redirect after signing in can use it. */
+function AuthProviderWithRouter({ children }: { children: React.ReactNode }) {
+  return <AuthProvider>{children}</AuthProvider>;
 }
 
 /**
