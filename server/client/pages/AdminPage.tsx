@@ -17,6 +17,7 @@ import {
 import { useAuth } from "../auth/AuthProvider";
 import { when } from "../lib/format";
 import { useConfirm } from "../components/ConfirmDialog";
+import { SecretInput } from "../components/SecretInput";
 
 const field = "rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-100 focus:border-indigo-500 focus:outline-none";
 const ROLES: UserRole[] = ["admin", "contributor", "reader"];
@@ -78,7 +79,9 @@ function PolicySection() {
 
   return (
     <Section title="Registration" description="With this off, accounts come from you; reading stays open to everyone either way.">
-      {policyQ.isLoading || !policy ? (
+      {policyQ.isError ? (
+        <p className="text-sm text-red-400">These settings couldn't be read: {policyQ.error.message}</p>
+      ) : policyQ.isLoading || !policy ? (
         <Loader2 size={16} className="animate-spin text-gray-500" />
       ) : (
         <div className="flex flex-wrap items-center gap-6">
@@ -154,7 +157,9 @@ function UsersSection({ myId }: { myId: number }) {
 
   return (
     <Section title="Accounts" description="Changing a role or suspending an account signs it out everywhere.">
-      {usersQ.isLoading ? (
+      {usersQ.isError ? (
+        <p className="text-sm text-red-400">The accounts couldn't be read: {usersQ.error.message}</p>
+      ) : usersQ.isLoading ? (
         <Loader2 size={16} className="animate-spin text-gray-500" />
       ) : (
         <ul className="divide-y divide-gray-800 overflow-hidden rounded-lg border border-gray-800">
@@ -222,13 +227,11 @@ function UsersSection({ myId }: { myId: number }) {
         >
           <label className="min-w-40 flex-1 space-y-1">
             <span className="text-xs text-gray-400">New password for this account (they're signed out everywhere)</span>
-            <input
-              type="text"
+            <SecretInput
               autoFocus
               value={resetting.value}
               onChange={(e) => setResetting({ ...resetting, value: e.target.value })}
               placeholder="At least eight characters"
-              className={`w-full ${field}`}
             />
           </label>
           <button type="submit" disabled={resetting.value.length < 8} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">Set</button>
@@ -249,7 +252,7 @@ function UsersSection({ myId }: { myId: number }) {
         </label>
         <label className="min-w-36 flex-1 space-y-1">
           <span className="text-xs text-gray-400">Password</span>
-          <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least eight characters" className={`w-full ${field}`} />
+          <SecretInput value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least eight characters" />
         </label>
         <label className="space-y-1">
           <span className="text-xs text-gray-400">Role</span>
@@ -275,7 +278,9 @@ function SessionsSection() {
 
   return (
     <Section title="Sessions" description="Every browser signed in to this server right now.">
-      {sessionsQ.isLoading ? (
+      {sessionsQ.isError ? (
+        <p className="text-sm text-red-400">The sessions couldn't be read: {sessionsQ.error.message}</p>
+      ) : sessionsQ.isLoading ? (
         <Loader2 size={16} className="animate-spin text-gray-500" />
       ) : sessions.length === 0 ? (
         <p className="text-sm text-gray-500">Nobody is signed in.</p>

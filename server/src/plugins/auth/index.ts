@@ -308,7 +308,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
         return status(401, { error: "that code isn't right" });
       }
       // One challenge, one sign-in
-      await endMfaChallenge(pending.tokenHash);
+      // Whoever spends the challenge gets the session; a second request holding the same one gets nothing
+      if (!(await endMfaChallenge(pending.tokenHash))) return status(401, { error: "this sign-in has expired — start again" });
       const { token, expiresAt } = await startSession(pending.user.id, request.headers.get("user-agent"));
       writeSessionCookie(cookie, request.url, token, expiresAt);
       await UserStore.touch(pending.user.id);
@@ -329,7 +330,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
         log.warn({ userId: pending.user.id }, "Wrong or spent recovery code");
         return status(401, { error: "that recovery code isn't right, or has been used" });
       }
-      await endMfaChallenge(pending.tokenHash);
+      // Whoever spends the challenge gets the session; a second request holding the same one gets nothing
+      if (!(await endMfaChallenge(pending.tokenHash))) return status(401, { error: "this sign-in has expired — start again" });
       const { token, expiresAt } = await startSession(pending.user.id, request.headers.get("user-agent"));
       writeSessionCookie(cookie, request.url, token, expiresAt);
       const left = (await RecoveryCodeStore.listUnused(pending.user.id)).length;
@@ -366,7 +368,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       if (!(await verifyAssertion(pending.user, body.response as never, pending.webauthnChallenge))) {
         return status(401, { error: "that passkey didn't check out" });
       }
-      await endMfaChallenge(pending.tokenHash);
+      // Whoever spends the challenge gets the session; a second request holding the same one gets nothing
+      if (!(await endMfaChallenge(pending.tokenHash))) return status(401, { error: "this sign-in has expired — start again" });
       const { token, expiresAt } = await startSession(pending.user.id, request.headers.get("user-agent"));
       writeSessionCookie(cookie, request.url, token, expiresAt);
       await UserStore.touch(pending.user.id);
@@ -422,6 +425,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
         return status(409, { error: "start the enrolment again" });
       }
       const credential = await saveRegistration(principal.user, body.name, body.response as never, pending.webauthnChallenge);
+      // Enrolment, not a sign-in: the challenge is cleaned up either way, and the passkey is what matters
       await endMfaChallenge(pending.tokenHash);
       if (!credential) return status(422, { error: "that passkey couldn't be verified" });
       log.info({ userId: principal.user.id, credentialId: credential.id }, "Passkey registered");

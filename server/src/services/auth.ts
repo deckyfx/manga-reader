@@ -222,8 +222,11 @@ export async function removeTotpDevice(userId: number, deviceId: number): Promis
   return true;
 }
 
-/** Ends a challenge once it has been used, so a token can't be spent twice. */
-export const endMfaChallenge = (tokenHash: string): Promise<void> => MfaChallengeStore.delete(tokenHash);
+/**
+ * Ends a challenge once it has been used. The answer matters: only the request that removed it may go on to make a
+ * session, so a challenge can't be turned into two.
+ */
+export const endMfaChallenge = (tokenHash: string): Promise<boolean> => MfaChallengeStore.delete(tokenHash);
 
 export { sha256 as hashSecret };
 

@@ -10,8 +10,12 @@ import { authContext } from "@/plugins/auth/index";
 import { AUTH_FAILED, hasRole } from "@/services/auth";
 import type { UserRole } from "@/db/schema";
 
-/** What a path needs: nothing, or a role. First match wins, so order matters. */
-const POLICY: { prefix: string; needs: UserRole | "public" }[] = [
+/**
+ * What a path needs: nothing, a role, and whether a tool's API key may be used at all. First match wins, so order
+ * matters. `sessionOnly` marks the places where a stolen extension key must not reach — an API key exists to run
+ * OCR, not to hand out accounts.
+ */
+const POLICY: { prefix: string; needs: UserRole | "public"; sessionOnly?: boolean }[] = [
   // Reading is open to everyone, signed in or not
   { prefix: "/read/api", needs: "public" },
   // Signing in, and asking who you are
@@ -20,9 +24,9 @@ const POLICY: { prefix: string; needs: UserRole | "public" }[] = [
   { prefix: "/health", needs: "public" },
 
   // Accounts and roles are the admin's business (listed first: the general /manage rule would be too weak)
-  { prefix: "/manage/api/users", needs: "admin" },
-  { prefix: "/manage/api/settings", needs: "admin" },
-  { prefix: "/manage/api/sessions", needs: "admin" },
+  { prefix: "/manage/api/users", needs: "admin", sessionOnly: true },
+  { prefix: "/manage/api/settings", needs: "admin", sessionOnly: true },
+  { prefix: "/manage/api/sessions", needs: "admin", sessionOnly: true },
 
   // Building the library and editing pages
   { prefix: "/manage/api", needs: "contributor" },
@@ -39,10 +43,14 @@ const POLICY: { prefix: string; needs: UserRole | "public" }[] = [
   { prefix: "/api/settings", needs: "contributor" },
 ];
 
-/** The rule for a path; anything unlisted needs an admin, so a new route is never accidentally public. */
-export function policyFor(pathname: string): UserRole | "public" {
-  return POLICY.find((rule) => pathname === rule.prefix || pathname.startsWith(`${rule.prefix}/`))?.needs ?? "admin";
+/** The rule for a path; anything unlisted needs an admin through a browser, so a new route is never left open. */
+export function ruleFor(pathname: string): { needs: UserRole | "public"; sessionOnly: boolean } {
+  const rule = POLICY.find((entry) => pathname === entry.prefix || pathname.startsWith(`${entry.prefix}/`));
+  return { needs: rule?.needs ?? "admin", sessionOnly: rule?.sessionOnly ?? rule === undefined };
 }
+
+/** Just the role, for tests and for anything that only cares about that. */
+export const policyFor = (pathname: string): UserRole | "public" => ruleFor(pathname).needs;
 
 /**
  * Whether this is a person typing a URL rather than a program calling an API. A top-level navigation says so
@@ -63,7 +71,7 @@ export const authGuard = new Elysia({ name: "auth-guard" })
   .use(authContext)
   .onBeforeHandle({ as: "global" }, ({ request, principal, status, redirect }) => {
     const url = new URL(request.url);
-    const needs = policyFor(url.pathname);
+    const { needs, sessionOnly } = ruleFor(url.pathname);
     if (needs === "public") return undefined;
 
     if (!principal) {
@@ -75,5 +83,9 @@ export const authGuard = new Elysia({ name: "auth-guard" })
     }
 
     if (!hasRole(principal.user, needs)) return status(403, { error: `this needs the ${needs} role` });
+    // An admin's API key is still only a key: accounts, server settings and sessions want the browser
+    if (sessionOnly && principal.via !== "session") {
+      return status(403, { error: "this needs a signed-in browser, not an API key" });
+    }
     return undefined;
   });

@@ -12,7 +12,9 @@ export const AuthField = forwardRef<HTMLInputElement, AuthFieldProps>(function A
   { label, note, tone = "hint", className = "", ...input },
   ref,
 ) {
-  const id = useId();
+  const generated = useId();
+  // A caller may name the field (to point a label or a test at it); otherwise it gets one of its own
+  const id = input.id ?? generated;
   return (
     <div className="space-y-1.5">
       <label htmlFor={id} className="block text-xs font-medium text-gray-400">{label}</label>

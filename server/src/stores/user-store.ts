@@ -269,8 +269,16 @@ export class MfaChallengeStore {
     await db.update(mfaChallenges).set({ webauthnChallenge: challenge }).where(eq(mfaChallenges.tokenHash, tokenHash));
   }
 
-  static async delete(tokenHash: string): Promise<void> {
-    await db.delete(mfaChallenges).where(eq(mfaChallenges.tokenHash, tokenHash));
+  /**
+   * Spends the challenge. True only for the caller that actually removed it: two requests racing the same
+   * challenge — a double-clicked button, a replayed form — must not both end up with a session.
+   */
+  static async delete(tokenHash: string): Promise<boolean> {
+    const rows = await db
+      .delete(mfaChallenges)
+      .where(eq(mfaChallenges.tokenHash, tokenHash))
+      .returning({ tokenHash: mfaChallenges.tokenHash });
+    return rows.length > 0;
   }
 
   static async purgeExpired(): Promise<number> {
