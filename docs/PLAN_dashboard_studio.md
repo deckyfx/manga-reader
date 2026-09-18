@@ -382,6 +382,51 @@ Managing lives under its own top-level area, so the app has three modes: **studi
 
 **Status**: 5.1 is done and covered by an in-process test (33 checks: search, tags, covers, import, reorder, export, Inbox, batch bookkeeping, cascade behaviour).
 
+### Phase 5.5 design — the Studio ↔ Manage seam (2026-09-18)
+
+There is one `pages` table: "a job in the Studio" and "a page in a chapter" are the same row with `chapter_id` null or
+set. Nothing needs converting; the two areas simply don't show each other's half. Decided (user): the Studio leads with
+the Inbox, filing a page **copies** it into the chapter, and discarding in the Studio never silently empties a chapter.
+
+**A. A page says where it lives**
+- A shared `pageLocation(page)` helper returns `{series_id, series_title, chapter_id, chapter_title, index, total}`;
+  `/studio/api/pages` and the page detail carry it.
+- `/studio/api/pages` takes `filed=inbox|chapter|all` (default `inbox`), `chapter_id` and `q` (name or source) instead
+  of a flat newest-100 list.
+- The Studio grid gets a scope switch (Inbox · In chapters · All, remembered per browser), a chapter badge linking to
+  `/manage/chapters/:id`, and shows the page name rather than a raw source URL.
+
+**B. Filing copies, from either side**
+- `POST /manage/api/chapters/:id/pages/:pageId/copy` duplicates a page into the chapter: a new row, a new page folder
+  (original, cleaned, result and masks), its stages and blocks, `revision` back to 0, publish history not copied. The
+  draft stays in the Inbox, so the Studio keeps a clean original to work from.
+- The picker (series → volume → chapter, searchable) is one component used by the Studio's "File into chapter…" action
+  and by Manage's "Add from inbox". A "keep the draft in the Inbox" tick, on by default, turns the copy into a move.
+- `pages.image_hash` is indexed and no longer unique, so the picker can warn "this image is already in Chapter 3" and
+  the Inbox can mark drafts that have been filed somewhere.
+
+**C. Editing a chapter page feels like a chapter**
+- The editor header becomes a breadcrumb — *Series › Chapter › page 4/18* — with prev/next arrows walking the chapter
+  in reading order and a link back to the chapter. The route already keys the editor by page id, so each step mounts a
+  fresh editor.
+
+**D. Discarding matches where the page is**
+- An Inbox page: today's confirmation, unchanged — no chapter can be affected.
+- A page inside a chapter: a dialog with two named outcomes instead of a yes/no — **Remove from the chapter** (the page
+  and its images survive, back to the Inbox) or **Delete page and images**. `DELETE /studio/api/pages/:id` refuses a
+  filed page (409) unless `force=true`, so the choice can't be skipped by accident.
+- Manage's chapter grid keeps "remove from chapter" and gains the same delete, for clearing out a bad import in place.
+
+**E. Names**
+- Extension and upload pages get a name derived from the source URL's file name, so the Studio stops showing
+  200-character URLs where imported pages show `page_012`.
+
+**F. Live both ways**
+- The chapter grid follows the page SSE channel (or polls) while any of its pages is queued or running, so a burn done
+  in the Studio shows up in Manage without a reload.
+
+Server work: one helper, list filters, the copy route, the delete guard. Everything else is client.
+
 ## 11. Adopt from manga-reader / avoid
 
 **Adopt** (`/home/decky/Documents/funs/bun/manga-reader`):
