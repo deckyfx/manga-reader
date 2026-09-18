@@ -41,8 +41,10 @@ async function fillCopy(source: Page, copy: Page, chapterId: number): Promise<Pa
   let files: string[] = [];
   try {
     files = await readdir(from);
-  } catch {
-    // A page with no folder (nothing rendered yet) copies as an empty one
+  } catch (err) {
+    // A page with no folder (nothing rendered yet) copies as an empty one; anything else is a real failure and
+    // belongs to the caller's cleanup
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
   if (files.some((file) => file.endsWith(".png"))) await mkdir(to, { recursive: true });
   for (const file of files) {

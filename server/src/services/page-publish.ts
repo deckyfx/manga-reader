@@ -5,18 +5,37 @@
  * and the reader is served that snapshot (see `publishedFile`). So a page can be edited while it is being read without
  * anyone seeing half-finished lettering.
  */
+import { rm } from "node:fs/promises";
 import { childLogger } from "@/lib/logger";
-import { snapshotResult } from "@/services/page-history";
+import { historyFile, snapshotResult } from "@/services/page-history";
 import { resultUrl } from "@/services/page-jobs";
 import { pageLive } from "@/stores/page-live-channel";
 import { PageStore } from "@/stores/page-store";
 
 const log = childLogger("publish");
 
-/** Bumps the revision, snapshots result.png under it and tells open extension tabs. Call under the page lock. */
+/**
+ * Snapshots result.png as the next revision, commits that revision and tells open extension tabs. Call under the
+ * page lock — the lock is what makes the next revision number safe to compute here.
+ *
+ * The snapshot is written before the revision is committed, so a failure leaves the page exactly as it was: a
+ * committed revision whose snapshot never landed would point readers and extension tabs at a missing image.
+ */
 export async function publishPage(id: string): Promise<{ revision: number; notified: number }> {
-  const revision = await PageStore.bumpRevision(id);
+  const page = await PageStore.findById(id);
+  if (!page) throw new Error("page not found");
+  const revision = page.revision + 1;
+
   await snapshotResult(id, revision);
+  try {
+    await PageStore.bumpRevision(id);
+  } catch (err) {
+    // The revision never took: drop the snapshot again so nothing claims to be published
+    await rm(historyFile(id, revision), { force: true })
+      .catch((cleanup: unknown) => log.error({ err: cleanup, pageId: id, revision }, "Couldn't remove an uncommitted snapshot"));
+    throw err;
+  }
+
   const notified = pageLive.publish({ type: "page-updated", page_id: id, revision, result_url: resultUrl(id, revision) });
   log.info({ pageId: id, revision, notified }, "Page published");
   return { revision, notified };
