@@ -327,6 +327,24 @@ function showResult(msg: OcrResultMsg): void {
 /** Replace all <img> tags on the page whose src matches the server result URL for this job. */
 /** Object URLs handed to images, so the previous revision's is released when a newer one arrives. */
 const shownResults = new WeakMap<HTMLImageElement, string>();
+/** The same images, as a set that can be walked: to release the URLs of images that have left the page. */
+const imagesWithResults = new Set<HTMLImageElement>();
+/**
+ * The newest revision asked for, per job. Publishes can arrive faster than their images download; an older fetch
+ * finishing last must not put the older picture back over the newer one.
+ */
+const latestRevisionRequested = new Map<string, number>();
+
+/** Releases the object URLs of images no longer in the document. A moved image is still connected, and keeps its. */
+function releaseDetachedResults(): void {
+  for (const img of imagesWithResults) {
+    if (img.isConnected) continue;
+    const url = shownResults.get(img);
+    if (url) URL.revokeObjectURL(url);
+    shownResults.delete(img);
+    imagesWithResults.delete(img);
+  }
+}
 
 /**
  * Shows a newly published revision in every image on the page that came from this job.
@@ -337,8 +355,14 @@ const shownResults = new WeakMap<HTMLImageElement, string>();
  */
 async function replacePageImages(jobId: string, resultUrl: string): Promise<void> {
   if (!resultUrl) return;
+  releaseDetachedResults();
   const targets = Array.from(document.querySelectorAll<HTMLImageElement>("img")).filter((img) => img.dataset.socrJobId === jobId);
   if (targets.length === 0) return;
+
+  // Older than something already asked for: not worth downloading, it would only be discarded
+  const revision = revisionOf(resultUrl);
+  if (revision < (latestRevisionRequested.get(jobId) ?? 0)) return;
+  latestRevisionRequested.set(jobId, revision);
 
   const { apiKey } = await loadServerAccess();
   const response = await fetch(resultUrl, {
@@ -350,12 +374,19 @@ async function replacePageImages(jobId: string, resultUrl: string): Promise<void
   if (!response.ok) throw new Error(`the new revision couldn't be loaded (${response.status})`);
   const image = await response.blob();
 
+  // A newer revision was asked for while this one downloaded: it gets the images, this one is dropped
+  if (latestRevisionRequested.get(jobId) !== revision) return;
+
   for (const img of targets) {
+    if (!img.isConnected) continue;
     const previous = shownResults.get(img);
     const url = URL.createObjectURL(image);
     img.srcset = "";
     img.src = url;
     shownResults.set(img, url);
+    imagesWithResults.add(img);
+    // Marked only once it is actually on screen, so a revision that failed to load is tried again next time
+    if (revision > 0) img.dataset.socrRevision = String(revision);
     if (previous) URL.revokeObjectURL(previous);
   }
 }
@@ -798,6 +829,7 @@ let watcherCheckQueued = false;
 /** Close the streams whose translated image left the page (e.g. a reader swapped pages). */
 function closeDetachedWatchers(): void {
   watcherCheckQueued = false;
+  releaseDetachedResults();
   for (const jobId of [...pageWatchers.keys()]) {
     if (!document.querySelector(`img[data-socr-job-id="${CSS.escape(jobId)}"]`)) stopWatching(jobId);
   }
@@ -879,13 +911,10 @@ async function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string
     // The server repeats the current revision on connect (catch-up), so only swap for a newer one
     const newest = Math.max(...Array.from(shown, (img) => Number(img.dataset.socrRevision ?? 0)));
     if (update.revision <= newest) return;
-    replacePageImages(jobId, `${serverUrl}${update.result_url}`)
-      // Marked only once it is actually on screen, so a revision that failed to load is tried again next time
-      .then(() => shown.forEach((img) => (img.dataset.socrRevision = String(update.revision))))
-      .catch((err: unknown) => {
-        // The old revision stays on screen rather than a broken image
-        console.warn("[web-ocr] republish not shown:", err);
-      });
+    replacePageImages(jobId, `${serverUrl}${update.result_url}`).catch((err: unknown) => {
+      // The old revision stays on screen rather than a broken image
+      console.warn("[web-ocr] republish not shown:", err);
+    });
   };
 
   // EventSource reconnects on its own after network errors; it only closes for good when the server refuses the
