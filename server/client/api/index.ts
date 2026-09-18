@@ -51,6 +51,8 @@ export const patchEngine = (engine: string) => unwrap(api.api.settings.engine.pa
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
 export type UserRole = "admin" | "contributor" | "reader";
+/** What a self-registered account may start as; the server refuses admin here. */
+export type RegistrationRole = Exclude<UserRole, "admin">;
 export type SecondFactor = "totp" | "passkey";
 
 /** Who is signed in, what guards the account, and whether the server is still waiting to be set up. */
@@ -126,7 +128,7 @@ export const revokeApiKey = (id: number) => unwrap(api.auth.api.keys({ id }).del
 
 export const getServerPolicy = () => unwrap(api.manage.api.settings.get());
 
-export const updateServerPolicy = (body: { registration_enabled?: boolean; default_role?: UserRole }) =>
+export const updateServerPolicy = (body: { registration_enabled?: boolean; default_role?: RegistrationRole }) =>
   unwrap(api.manage.api.settings.put(body));
 
 export const listUsers = () => unwrap(api.manage.api.users.get());

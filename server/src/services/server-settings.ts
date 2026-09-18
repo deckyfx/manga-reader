@@ -6,15 +6,23 @@
  */
 import { childLogger } from "@/lib/logger";
 import { ServerSettingStore } from "@/stores/settings-store";
-import { USER_ROLES, type UserRole } from "@/db/schema";
+
+
+/**
+ * What a self-registered account may start as. Admin is deliberately not here: registration is open to strangers
+ * when it is on at all, and "everyone who signs up runs the server" is never a setting worth offering.
+ */
+export const REGISTRATION_ROLES = ["contributor", "reader"] as const;
 
 const log = childLogger("settings");
+
+export type RegistrationRole = (typeof REGISTRATION_ROLES)[number];
 
 export interface ServerPolicy {
   /** Whether anybody may create their own account. Off by default: an admin hands out accounts. */
   registrationEnabled: boolean;
-  /** What a self-registered account starts as. */
-  defaultRole: UserRole;
+  /** What a self-registered account starts as; never an admin. */
+  defaultRole: RegistrationRole;
 }
 
 const DEFAULTS: ServerPolicy = { registrationEnabled: false, defaultRole: "reader" };
@@ -28,7 +36,8 @@ export async function serverPolicy(): Promise<ServerPolicy> {
   const role = stored.get("default_role");
   cache = {
     registrationEnabled: stored.get("registration_enabled") === "true",
-    defaultRole: (USER_ROLES as readonly string[]).includes(role ?? "") ? (role as UserRole) : DEFAULTS.defaultRole,
+    // A row saying "admin" — from an older build, or an edited database — is read as the default rather than obeyed
+    defaultRole: (REGISTRATION_ROLES as readonly string[]).includes(role ?? "") ? (role as RegistrationRole) : DEFAULTS.defaultRole,
   };
   return cache;
 }
@@ -37,7 +46,9 @@ export async function updateServerPolicy(changes: Partial<ServerPolicy>): Promis
   if (changes.registrationEnabled !== undefined) {
     await ServerSettingStore.set("registration_enabled", String(changes.registrationEnabled));
   }
-  if (changes.defaultRole !== undefined) await ServerSettingStore.set("default_role", changes.defaultRole);
+  if (changes.defaultRole !== undefined) {
+    await ServerSettingStore.set("default_role", changes.defaultRole);
+  }
   cache = null;
   const policy = await serverPolicy();
   log.info({ ...policy }, "Server policy changed");

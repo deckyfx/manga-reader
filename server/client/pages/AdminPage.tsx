@@ -12,6 +12,7 @@ import {
   updateServerPolicy,
   updateUser,
   type AccountSummary,
+  type RegistrationRole,
   type UserRole,
 } from "../api";
 import { useAuth } from "../auth/AuthProvider";
@@ -22,6 +23,8 @@ import { SecretInput } from "../components/SecretInput";
 
 const field = "rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-sm text-gray-100 focus:border-indigo-500 focus:outline-none";
 const ROLES: UserRole[] = ["admin", "contributor", "reader"];
+/** Self-registration can't mint admins, so the default-role picker doesn't offer it. */
+const REGISTRATION_ROLES: RegistrationRole[] = ["contributor", "reader"];
 
 /** Server-level settings: who may join, who is who, and where everyone is signed in. */
 export function AdminPage() {
@@ -70,7 +73,7 @@ function PolicySection() {
   const qc = useQueryClient();
   const policyQ = useQuery({ queryKey: ["server-policy"], queryFn: getServerPolicy });
   const saveM = useMutation({
-    mutationFn: (changes: { registration_enabled?: boolean; default_role?: UserRole }) => updateServerPolicy(changes),
+    mutationFn: (changes: { registration_enabled?: boolean; default_role?: RegistrationRole }) => updateServerPolicy(changes),
     onSuccess: (policy) => {
       qc.setQueryData(["server-policy"], policy);
       // The sign-in screen offers "create an account" based on this
@@ -102,11 +105,12 @@ function PolicySection() {
             New accounts start as
             <select
               value={policy.default_role}
-              onChange={(e) => saveM.mutate({ default_role: e.target.value as UserRole })}
+              onChange={(e) => saveM.mutate({ default_role: e.target.value as RegistrationRole })}
               disabled={saveM.isPending || !policy.registration_enabled}
+              title="Anyone who signs up gets this; admins are made here, one at a time"
               className={field}
             >
-              {ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
+              {REGISTRATION_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
             </select>
           </label>
           {saveM.isPending && <Loader2 size={14} className="animate-spin text-gray-500" />}

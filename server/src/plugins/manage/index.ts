@@ -48,7 +48,7 @@ import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore } from "@/store
 import { SessionStore, UserStore } from "@/stores/user-store";
 import { hashSecret, SESSION_COOKIE } from "@/services/auth";
 import { hashPassword } from "@/services/auth";
-import { serverPolicy, updateServerPolicy } from "@/services/server-settings";
+import { REGISTRATION_ROLES, serverPolicy, updateServerPolicy } from "@/services/server-settings";
 import { authContext, SessionSchema, toUser, UserSchema } from "@/plugins/auth/index";
 import { USER_ROLES } from "@/db/schema";
 import { PageStore } from "@/stores/page-store";
@@ -72,7 +72,7 @@ const Tags = t.Array(t.String({ maxLength: 40 }), { maxItems: 30 });
 /** Progress of a chapter batch run (in memory; a restart cancels it). */
 const ServerPolicySchema = t.Object({
   registration_enabled: t.Boolean(),
-  default_role: t.UnionEnum([...USER_ROLES]),
+  default_role: t.UnionEnum([...REGISTRATION_ROLES]),
 });
 
 const ChapterRunSchema = t.Object({
@@ -515,8 +515,8 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     {
       body: t.Object({
         registration_enabled: t.Optional(t.Boolean()),
-        /** What a self-registered account starts as; an admin can still change it afterwards. */
-        default_role: optionalEnum(USER_ROLES),
+        /** What a self-registered account starts as; an admin can still promote it afterwards. Never admin. */
+        default_role: optionalEnum(REGISTRATION_ROLES),
       }),
       response: { 200: ServerPolicySchema },
     },
