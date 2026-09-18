@@ -4,6 +4,12 @@
  * GET  /auth/api/me        the signed-in account, or null, plus whether the server still needs setting up
  * POST /auth/api/setup     create the first admin — only while there are no accounts at all
  * POST /auth/api/login     sign in, setting the session cookie
+ * POST /auth/api/login/totp      finish a sign-in with a code from an authenticator app
+ * POST /auth/api/login/recovery  finish a sign-in with a recovery code
+ * POST /auth/api/totp/start      begin enrolling: returns the secret and the otpauth:// URI
+ * POST /auth/api/totp/enable     confirm a code and turn TOTP on, answering with the recovery codes
+ * POST /auth/api/totp/disable    turn it off again (password required)
+ * POST /auth/api/recovery        replace the recovery codes
  * POST /auth/api/logout    end this session
  * POST /auth/api/password  change your own password (every other session is signed out)
  * GET/POST/DELETE /auth/api/keys  your API keys for the extension and the desktop app
@@ -15,6 +21,14 @@ import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
 import {
   authenticate,
+  checkTotp,
+  disableTotp,
+  endMfaChallenge,
+  issueRecoveryCodes,
+  pendingUser,
+  secondFactors,
+  startMfaChallenge,
+  useRecoveryCode,
   createApiKey,
   endSession,
   hasRole,
@@ -27,7 +41,8 @@ import {
   verifyPassword,
   type Principal,
 } from "@/services/auth";
-import { ApiKeyStore, SessionStore, UserStore } from "@/stores/user-store";
+import { ApiKeyStore, RecoveryCodeStore, SessionStore, UserStore } from "@/stores/user-store";
+import { newTotpSecret, otpauthUri, verifyTotp } from "@/services/totp";
 import { USER_ROLES, type User, type UserRole } from "@/db/schema";
 
 const log = childLogger("auth");
@@ -41,6 +56,9 @@ export const UserSchema = t.Object({
   display_name: t.Nullable(t.String()),
   role: t.UnionEnum([...USER_ROLES]),
   disabled: t.Boolean(),
+  email: t.Nullable(t.String()),
+  /** Whether an authenticator app guards this account. */
+  totp_enabled: t.Boolean(),
   last_seen_at: t.Nullable(t.String()),
   created_at: t.String(),
 });
@@ -51,8 +69,18 @@ export const toUser = (user: User) => ({
   display_name: user.displayName,
   role: (USER_ROLES as readonly string[]).includes(user.role) ? (user.role as UserRole) : ("reader" as const),
   disabled: user.disabledAt !== null,
+  email: user.email,
+  totp_enabled: user.totpEnabledAt !== null,
   last_seen_at: user.lastSeenAt,
   created_at: user.createdAt,
+});
+
+/** Either a session was created (`user`), or a second factor is still needed (`challenge`). */
+const LoginResult = t.Object({
+  user: t.Nullable(UserSchema),
+  mfa_required: t.Boolean(),
+  methods: t.Array(t.UnionEnum(["totp", "passkey"])),
+  challenge: t.Nullable(t.String()),
 });
 
 const ApiKeySchema = t.Object({
@@ -159,12 +187,130 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
         log.warn({ username: body.username }, "Failed sign-in");
         return status(401, { error: "wrong username or password" });
       }
+      // A second factor means no session yet: the password only buys a short-lived challenge
+      const factors = await secondFactors(user);
+      if (factors.length > 0) {
+        const challenge = await startMfaChallenge(user.id, request.headers.get("user-agent"));
+        return { user: null, mfa_required: true, methods: factors, challenge };
+      }
       const { token, expiresAt } = await startSession(user.id, request.headers.get("user-agent"));
       writeSessionCookie(cookie, request.url, token, expiresAt);
       await UserStore.touch(user.id);
-      return toUser(user);
+      return { user: toUser(user), mfa_required: false, methods: [], challenge: null };
     },
-    { body: t.Object({ username: t.String({ maxLength: 40 }), password: t.String({ maxLength: 200 }) }), response: { 200: UserSchema, 401: ErrBody } },
+    {
+      body: t.Object({ username: t.String({ maxLength: 40 }), password: t.String({ maxLength: 200 }) }),
+      response: { 200: LoginResult, 401: ErrBody },
+    },
+  )
+
+  .post(
+    "/login/totp",
+    async ({ body, cookie, request, status }) => {
+      const pending = await pendingUser(body.challenge);
+      if (!pending) return status(401, { error: "this sign-in has expired — start again" });
+      if (!checkTotp(pending.user, body.code)) {
+        log.warn({ userId: pending.user.id }, "Wrong authenticator code");
+        return status(401, { error: "that code isn't right" });
+      }
+      // One challenge, one sign-in
+      await endMfaChallenge(pending.tokenHash);
+      const { token, expiresAt } = await startSession(pending.user.id, request.headers.get("user-agent"));
+      writeSessionCookie(cookie, request.url, token, expiresAt);
+      await UserStore.touch(pending.user.id);
+      return { user: toUser(pending.user), mfa_required: false, methods: [], challenge: null };
+    },
+    {
+      body: t.Object({ challenge: t.String({ maxLength: 200 }), code: t.String({ maxLength: 10 }) }),
+      response: { 200: LoginResult, 401: ErrBody },
+    },
+  )
+
+  .post(
+    "/login/recovery",
+    async ({ body, cookie, request, status }) => {
+      const pending = await pendingUser(body.challenge);
+      if (!pending) return status(401, { error: "this sign-in has expired — start again" });
+      if (!(await useRecoveryCode(pending.user.id, body.code))) {
+        log.warn({ userId: pending.user.id }, "Wrong or spent recovery code");
+        return status(401, { error: "that recovery code isn't right, or has been used" });
+      }
+      await endMfaChallenge(pending.tokenHash);
+      const { token, expiresAt } = await startSession(pending.user.id, request.headers.get("user-agent"));
+      writeSessionCookie(cookie, request.url, token, expiresAt);
+      const left = (await RecoveryCodeStore.listUnused(pending.user.id)).length;
+      log.info({ userId: pending.user.id, left }, "Signed in with a recovery code");
+      return { user: toUser(pending.user), mfa_required: false, methods: [], challenge: null };
+    },
+    {
+      body: t.Object({ challenge: t.String({ maxLength: 200 }), code: t.String({ maxLength: 40 }) }),
+      response: { 200: LoginResult, 401: ErrBody },
+    },
+  )
+
+  // ── Enrolling an authenticator app ─────────────────────────────────────────
+
+  .post(
+    "/totp/start",
+    async ({ principal, status }) => {
+      if (!principal) return status(401, { error: "sign in to do that" });
+      if (principal.user.totpEnabledAt) return status(409, { error: "this account already uses an authenticator app" });
+      // Stored unconfirmed: it guards nothing until a code proves the app has it too
+      const secret = newTotpSecret();
+      await UserStore.update(principal.user.id, { totpSecret: secret });
+      return { secret, uri: otpauthUri(secret, principal.user.username) };
+    },
+    { response: { 200: t.Object({ secret: t.String(), uri: t.String() }), 401: ErrBody, 409: ErrBody } },
+  )
+
+  .post(
+    "/totp/enable",
+    async ({ principal, body, status }) => {
+      if (!principal) return status(401, { error: "sign in to do that" });
+      const secret = principal.user.totpSecret;
+      if (!secret) return status(409, { error: "start the enrolment first" });
+      if (principal.user.totpEnabledAt) return status(409, { error: "this account already uses an authenticator app" });
+      if (!verifyTotp(secret, body.code)) return status(422, { error: "that code isn't right — check the app's clock" });
+      await UserStore.update(principal.user.id, { totpEnabledAt: new Date().toISOString() });
+      // Shown once: the only way back in if the phone is lost
+      const codes = await issueRecoveryCodes(principal.user.id);
+      log.info({ userId: principal.user.id }, "Authenticator app enrolled");
+      return { enabled: true, recovery_codes: codes };
+    },
+    {
+      body: t.Object({ code: t.String({ maxLength: 10 }) }),
+      response: { 200: t.Object({ enabled: t.Boolean(), recovery_codes: t.Array(t.String()) }), 401: ErrBody, 409: ErrBody, 422: ErrBody },
+    },
+  )
+
+  .post(
+    "/totp/disable",
+    async ({ principal, body, status }) => {
+      if (!principal) return status(401, { error: "sign in to do that" });
+      // The password again: a borrowed session shouldn't be able to strip a factor off the account
+      if (!(await verifyPassword(body.password, principal.user.passwordHash))) return status(403, { error: "the password doesn't match" });
+      await disableTotp(principal.user.id);
+      log.info({ userId: principal.user.id }, "Authenticator app removed");
+      return { disabled: true };
+    },
+    {
+      body: t.Object({ password: t.String({ maxLength: 200 }) }),
+      response: { 200: t.Object({ disabled: t.Boolean() }), 401: ErrBody, 403: ErrBody },
+    },
+  )
+
+  .post(
+    "/recovery",
+    async ({ principal, body, status }) => {
+      if (!principal) return status(401, { error: "sign in to do that" });
+      if (!(await verifyPassword(body.password, principal.user.passwordHash))) return status(403, { error: "the password doesn't match" });
+      const codes = await issueRecoveryCodes(principal.user.id);
+      return { recovery_codes: codes };
+    },
+    {
+      body: t.Object({ password: t.String({ maxLength: 200 }) }),
+      response: { 200: t.Object({ recovery_codes: t.Array(t.String()) }), 401: ErrBody, 403: ErrBody },
+    },
   )
 
   .post(

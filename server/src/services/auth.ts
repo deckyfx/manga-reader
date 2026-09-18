@@ -8,7 +8,16 @@
  */
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { childLogger } from "@/lib/logger";
-import { ApiKeyStore, SessionStore, UserStore, normaliseUsername } from "@/stores/user-store";
+import {
+  ApiKeyStore,
+  CredentialStore,
+  MfaChallengeStore,
+  RecoveryCodeStore,
+  SessionStore,
+  UserStore,
+  normaliseUsername,
+} from "@/stores/user-store";
+import { newRecoveryCodes, verifyTotp } from "@/services/totp";
 import type { User, UserRole } from "@/db/schema";
 
 const log = childLogger("auth");
@@ -119,3 +128,73 @@ export async function authenticate(username: string, password: string): Promise<
 
 /** Whether the server still has no accounts, which is what opens the setup route. */
 export const needsSetup = async (): Promise<boolean> => (await UserStore.count()) === 0;
+
+// ── Second factor ────────────────────────────────────────────────────────────
+
+/** How long the gap between password and second factor may stay open. */
+const MFA_CHALLENGE_MINUTES = 5;
+
+/** Which second factors an account has set up. Empty means the password is enough. */
+export async function secondFactors(user: User): Promise<("totp" | "passkey")[]> {
+  const factors: ("totp" | "passkey")[] = [];
+  if (user.totpEnabledAt) factors.push("totp");
+  if ((await CredentialStore.listByUser(user.id)).length > 0) factors.push("passkey");
+  return factors;
+}
+
+/** Opens the gap between a correct password and a session. The token is only good for the second step. */
+export async function startMfaChallenge(userId: number, userAgent: string | null): Promise<string> {
+  const token = randomToken();
+  const expiresAt = new Date(Date.now() + MFA_CHALLENGE_MINUTES * 60 * 1000);
+  await MfaChallengeStore.create(sha256(token), userId, expiresAt.toISOString(), userAgent);
+  return token;
+}
+
+/** The account waiting on a second factor, or null when the challenge is unknown or has run out. */
+export async function pendingUser(token: string): Promise<{ user: User; tokenHash: string; webauthnChallenge: string | null } | null> {
+  const tokenHash = sha256(token);
+  const challenge = await MfaChallengeStore.find(tokenHash);
+  if (!challenge) return null;
+  if (new Date(challenge.expiresAt).getTime() <= Date.now()) {
+    await MfaChallengeStore.delete(tokenHash);
+    return null;
+  }
+  const user = await UserStore.findById(challenge.userId);
+  if (!user || user.disabledAt) return null;
+  return { user, tokenHash, webauthnChallenge: challenge.webauthnChallenge };
+}
+
+/** Checks a TOTP code for an account mid-sign-in. */
+export function checkTotp(user: User, code: string): boolean {
+  if (!user.totpEnabledAt || !user.totpSecret) return false;
+  return verifyTotp(user.totpSecret, code);
+}
+
+/** Spends a recovery code. Each one works once, and the codes are stored hashed like everything else. */
+export async function useRecoveryCode(userId: number, code: string): Promise<boolean> {
+  const typed = code.trim();
+  if (!typed) return false;
+  const digest = sha256(typed);
+  for (const stored of await RecoveryCodeStore.listUnused(userId)) {
+    if (sameDigest(stored.codeHash, digest)) return RecoveryCodeStore.consume(stored.id);
+  }
+  return false;
+}
+
+/** Ten fresh codes: the plain list is returned once, only the hashes are kept. */
+export async function issueRecoveryCodes(userId: number): Promise<string[]> {
+  const codes = newRecoveryCodes();
+  await RecoveryCodeStore.replace(userId, codes.map(sha256));
+  return codes;
+}
+
+/** Turns TOTP off and drops the codes that went with it. */
+export async function disableTotp(userId: number): Promise<void> {
+  await UserStore.update(userId, { totpSecret: null, totpEnabledAt: null });
+  await RecoveryCodeStore.clear(userId);
+}
+
+/** Ends a challenge once it has been used, so a token can't be spent twice. */
+export const endMfaChallenge = (tokenHash: string): Promise<void> => MfaChallengeStore.delete(tokenHash);
+
+export { sha256 as hashSecret };

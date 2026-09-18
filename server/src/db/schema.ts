@@ -218,6 +218,12 @@ export const users = sqliteTable("users", {
   displayName: text("display_name"),
   /** Argon2id, from Bun.password. */
   passwordHash: text("password_hash").notNull(),
+  /** From Google sign-in, or set by an admin; unique when present. */
+  email: text("email"),
+  /** Base32 TOTP secret. Present but unconfirmed while enrolment is half-finished. */
+  totpSecret: text("totp_secret"),
+  /** Set once a code has been checked: only then does TOTP actually guard the account. */
+  totpEnabledAt: text("totp_enabled_at"),
   role: text("role").notNull().default("reader"),
   /** Set when the account is suspended: it keeps its work but can't sign in. */
   disabledAt: text("disabled_at"),
@@ -226,6 +232,7 @@ export const users = sqliteTable("users", {
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 }, (table) => ({
   usersUsernameIdx: uniqueIndex("users_username_idx").on(table.username),
+  usersEmailIdx: uniqueIndex("users_email_idx").on(table.email),
 }));
 
 /** Browser sessions. Only the hash of the cookie's token is stored, so the table is useless if it leaks. */
@@ -239,6 +246,60 @@ export const sessions = sqliteTable("sessions", {
 }, (table) => ({
   sessionsUserIdx: index("sessions_user_idx").on(table.userId),
   sessionsExpiryIdx: index("sessions_expiry_idx").on(table.expiresAt),
+}));
+
+/** Single-use codes for getting back in when the authenticator is gone. Stored hashed, like every other secret. */
+export const recoveryCodes = sqliteTable("recovery_codes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  codeHash: text("code_hash").notNull(),
+  usedAt: text("used_at"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  recoveryCodesUserIdx: index("recovery_codes_user_idx").on(table.userId),
+}));
+
+/**
+ * The gap between "the password was right" and "you are signed in", while a second factor is checked. Short-lived,
+ * stored hashed, and useless on its own: it can only be exchanged for a session by passing the second step.
+ */
+export const mfaChallenges = sqliteTable("mfa_challenges", {
+  tokenHash: text("token_hash").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** WebAuthn assertion challenge, once one has been asked for. */
+  webauthnChallenge: text("webauthn_challenge"),
+  userAgent: text("user_agent"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  expiresAt: text("expires_at").notNull(),
+});
+
+/** Registered passkeys. Second factor: a passkey confirms a password, it doesn't replace one. */
+export const credentials = sqliteTable("credentials", {
+  /** The credential id from the authenticator (base64url). */
+  id: text("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  publicKey: text("public_key").notNull(),
+  /** Signature counter, to notice a cloned authenticator. */
+  counter: integer("counter").notNull().default(0),
+  transports: text("transports"),
+  lastUsedAt: text("last_used_at"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  credentialsUserIdx: index("credentials_user_idx").on(table.userId),
+}));
+
+/** A Google account linked to a user. One row per provider account, so the same Google login always lands here. */
+export const oauthAccounts = sqliteTable("oauth_accounts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  providerAccountId: text("provider_account_id").notNull(),
+  email: text("email"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  oauthProviderIdx: uniqueIndex("oauth_provider_account_idx").on(table.provider, table.providerAccountId),
+  oauthUserIdx: index("oauth_user_idx").on(table.userId),
 }));
 
 /** Keys for the extension and the desktop app (`X-Api-Key`). Stored hashed; the prefix is shown to identify one. */
@@ -290,3 +351,9 @@ export type NewSession = typeof sessions.$inferInsert;
 
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type NewApiKey = typeof apiKeys.$inferInsert;
+
+export type RecoveryCode = typeof recoveryCodes.$inferSelect;
+export type MfaChallenge = typeof mfaChallenges.$inferSelect;
+export type Credential = typeof credentials.$inferSelect;
+export type NewCredential = typeof credentials.$inferInsert;
+export type OauthAccount = typeof oauthAccounts.$inferSelect;

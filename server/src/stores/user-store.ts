@@ -4,7 +4,24 @@
  */
 import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { db } from "@/db/index";
-import { apiKeys, sessions, users, type ApiKey, type NewApiKey, type NewUser, type Session, type User } from "@/db/schema";
+import {
+  apiKeys,
+  credentials,
+  mfaChallenges,
+  oauthAccounts,
+  recoveryCodes,
+  sessions,
+  users,
+  type ApiKey,
+  type Credential,
+  type MfaChallenge,
+  type NewApiKey,
+  type NewCredential,
+  type NewUser,
+  type OauthAccount,
+  type Session,
+  type User,
+} from "@/db/schema";
 
 /** Usernames are matched lower-cased, so "Decky" and "decky" are the same account. */
 export const normaliseUsername = (name: string): string => name.trim().toLowerCase();
@@ -128,6 +145,119 @@ export class ApiKeyStore {
 
   static async delete(id: number): Promise<boolean> {
     const rows = await db.delete(apiKeys).where(eq(apiKeys.id, id)).returning({ id: apiKeys.id });
+    return rows.length > 0;
+  }
+}
+
+export class RecoveryCodeStore {
+  /** Replaces the whole set: turning TOTP on, or asking for new codes, invalidates the old ones. */
+  static async replace(userId: number, hashes: string[]): Promise<void> {
+    db.transaction((tx) => {
+      tx.delete(recoveryCodes).where(eq(recoveryCodes.userId, userId)).run();
+      for (const codeHash of hashes) tx.insert(recoveryCodes).values({ userId, codeHash }).run();
+    });
+  }
+
+  static async listUnused(userId: number): Promise<{ id: number; codeHash: string }[]> {
+    return db
+      .select({ id: recoveryCodes.id, codeHash: recoveryCodes.codeHash })
+      .from(recoveryCodes)
+      .where(and(eq(recoveryCodes.userId, userId), isNull(recoveryCodes.usedAt)));
+  }
+
+  /** Marks one code used; false when it was already spent, so a code can't be replayed. */
+  static async consume(id: number): Promise<boolean> {
+    const rows = await db
+      .update(recoveryCodes)
+      .set({ usedAt: sql`(datetime('now'))` })
+      .where(and(eq(recoveryCodes.id, id), isNull(recoveryCodes.usedAt)))
+      .returning({ id: recoveryCodes.id });
+    return rows.length > 0;
+  }
+
+  static async clear(userId: number): Promise<void> {
+    await db.delete(recoveryCodes).where(eq(recoveryCodes.userId, userId));
+  }
+}
+
+export class MfaChallengeStore {
+  static async create(tokenHash: string, userId: number, expiresAt: string, userAgent: string | null): Promise<void> {
+    await db.insert(mfaChallenges).values({ tokenHash, userId, expiresAt, userAgent });
+  }
+
+  static async find(tokenHash: string): Promise<MfaChallenge | undefined> {
+    return db.query.mfaChallenges.findFirst({ where: eq(mfaChallenges.tokenHash, tokenHash) });
+  }
+
+  /** Stores the challenge a passkey has to sign, once the browser has asked for one. */
+  static async setWebauthnChallenge(tokenHash: string, challenge: string): Promise<void> {
+    await db.update(mfaChallenges).set({ webauthnChallenge: challenge }).where(eq(mfaChallenges.tokenHash, tokenHash));
+  }
+
+  static async delete(tokenHash: string): Promise<void> {
+    await db.delete(mfaChallenges).where(eq(mfaChallenges.tokenHash, tokenHash));
+  }
+
+  static async purgeExpired(): Promise<number> {
+    const rows = await db
+      .delete(mfaChallenges)
+      .where(lt(mfaChallenges.expiresAt, sql`datetime('now')`))
+      .returning({ tokenHash: mfaChallenges.tokenHash });
+    return rows.length;
+  }
+}
+
+export class CredentialStore {
+  static async listByUser(userId: number): Promise<Credential[]> {
+    return db.select().from(credentials).where(eq(credentials.userId, userId)).orderBy(desc(credentials.createdAt));
+  }
+
+  static async findById(id: string): Promise<Credential | undefined> {
+    return db.query.credentials.findFirst({ where: eq(credentials.id, id) });
+  }
+
+  static async insert(credential: NewCredential): Promise<Credential> {
+    const [row] = await db.insert(credentials).values(credential).returning();
+    if (!row) throw new Error("failed to store the passkey");
+    return row;
+  }
+
+  /** The counter only ever goes up; a lower one means the authenticator may have been cloned. */
+  static async touch(id: string, counter: number): Promise<void> {
+    await db.update(credentials).set({ counter, lastUsedAt: sql`(datetime('now'))` }).where(eq(credentials.id, id));
+  }
+
+  static async delete(id: string, userId: number): Promise<boolean> {
+    const rows = await db
+      .delete(credentials)
+      .where(and(eq(credentials.id, id), eq(credentials.userId, userId)))
+      .returning({ id: credentials.id });
+    return rows.length > 0;
+  }
+}
+
+export class OauthAccountStore {
+  static async find(provider: string, providerAccountId: string): Promise<OauthAccount | undefined> {
+    return db.query.oauthAccounts.findFirst({
+      where: and(eq(oauthAccounts.provider, provider), eq(oauthAccounts.providerAccountId, providerAccountId)),
+    });
+  }
+
+  static async listByUser(userId: number): Promise<OauthAccount[]> {
+    return db.select().from(oauthAccounts).where(eq(oauthAccounts.userId, userId));
+  }
+
+  static async link(userId: number, provider: string, providerAccountId: string, email: string | null): Promise<OauthAccount> {
+    const [row] = await db.insert(oauthAccounts).values({ userId, provider, providerAccountId, email }).returning();
+    if (!row) throw new Error("failed to link the account");
+    return row;
+  }
+
+  static async unlink(id: number, userId: number): Promise<boolean> {
+    const rows = await db
+      .delete(oauthAccounts)
+      .where(and(eq(oauthAccounts.id, id), eq(oauthAccounts.userId, userId)))
+      .returning({ id: oauthAccounts.id });
     return rows.length > 0;
   }
 }
