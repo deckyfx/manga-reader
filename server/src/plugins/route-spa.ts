@@ -19,6 +19,8 @@ export const spaRoutes = {
   "/manage": index,
   "/manage/*": index,
   "/settings": index,
+  "/login": index,
+  "/setup": index,
 };
 
 /** `/` sends browsers to the landing page that links to the Studio and the reader; there's no favicon yet. */

@@ -21,6 +21,10 @@
  * GET    /manage/api/chapters/:id/run           progress of that run
  * POST   /manage/api/chapters/:id/publish       publish every page of the chapter that has unpublished edits
  * POST   /manage/api/pages/:id/publish          publish one page, so readers get its current result
+ * GET    /manage/api/users                      the accounts on this server (admin)
+ * POST   /manage/api/users                      add an account (admin)
+ * PUT    /manage/api/users/:id                  change a role, suspend, rename or reset a password (admin)
+ * DELETE /manage/api/users/:id                  delete an account (admin)
  * GET    /manage/api/inbox                      pages not filed into a chapter yet
  * PUT    /manage/api/pages/:id                  move a page between chapters / the Inbox, rename, reorder
  * DELETE /manage/api/pages/:id                  take a page out of its chapter (back to the Inbox)
@@ -37,6 +41,10 @@ import { withPageLock } from "@/queue/page-queue";
 import { CoverTooLargeError, deleteCover, saveCover } from "@/services/library-covers";
 import { copyPageIntoChapter } from "@/services/page-copy";
 import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore } from "@/stores/library-store";
+import { SessionStore, UserStore } from "@/stores/user-store";
+import { hashPassword } from "@/services/auth";
+import { authContext, toUser, UserSchema } from "@/plugins/auth/index";
+import { USER_ROLES } from "@/db/schema";
 import { PageStore } from "@/stores/page-store";
 import {
   chapterDetail,
@@ -69,6 +77,8 @@ const ChapterRunSchema = t.Object({
 });
 
 export const managePlugin = new Elysia({ prefix: "/manage/api" })
+  // For `principal`: the guard in plugins/auth/guard.ts is what enforces the roles, this is how the handlers see who it is
+  .use(authContext)
 
   // ── Series ─────────────────────────────────────────────────────────────────
 
@@ -469,6 +479,81 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       params: t.Object({ id: IdParam }),
       response: { 200: t.Composite([ChapterDetail, t.Object({ published: t.Integer() })]), 404: ErrBody },
     },
+  )
+
+  // ── Accounts (admin; the guard's table is what enforces that) ──────────────
+
+  .get("/users", async () => (await UserStore.list()).map(toUser), { response: { 200: t.Array(UserSchema) } })
+
+  .post(
+    "/users",
+    async ({ body, status }) => {
+      if (await UserStore.findByUsername(body.username)) return status(409, { error: "that username is taken" });
+      const user = await UserStore.insert({
+        username: body.username,
+        displayName: body.display_name ?? null,
+        passwordHash: await hashPassword(body.password),
+        role: body.role,
+      });
+      log.info({ userId: user.id, role: user.role }, "Account created");
+      return toUser(user);
+    },
+    {
+      body: t.Object({
+        username: t.String({ minLength: 2, maxLength: 40, pattern: "^[A-Za-z0-9._-]+$" }),
+        password: t.String({ minLength: 8, maxLength: 200 }),
+        role: t.UnionEnum([...USER_ROLES]),
+        display_name: t.Optional(t.Nullable(t.String({ maxLength: 80 }))),
+      }),
+      response: { 200: UserSchema, 409: ErrBody },
+    },
+  )
+
+  .put(
+    "/users/:id",
+    async ({ params, body, principal, status }) => {
+      const user = await UserStore.findById(params.id);
+      if (!user) return status(404, { error: "user not found" });
+      // The last admin keeps the keys: without this an install can lock itself out
+      const losingAdmin = user.role === "admin" && ((body.role !== undefined && body.role !== "admin") || body.disabled === true);
+      if (losingAdmin && (await UserStore.adminCount()) <= 1) return status(409, { error: "this is the last admin" });
+      if (body.disabled === true && principal?.user.id === params.id) return status(409, { error: "you can't suspend yourself" });
+
+      await UserStore.update(params.id, {
+        ...(body.role !== undefined ? { role: body.role } : {}),
+        ...(body.display_name !== undefined ? { displayName: body.display_name } : {}),
+        ...(body.password !== undefined ? { passwordHash: await hashPassword(body.password) } : {}),
+        ...(body.disabled !== undefined ? { disabledAt: body.disabled ? new Date().toISOString() : null } : {}),
+      });
+      // A new password, a lost role or a suspension all end the sessions that were running under the old terms
+      if (body.password !== undefined || body.role !== undefined || body.disabled === true) await SessionStore.deleteForUser(params.id);
+      const updated = await UserStore.findById(params.id);
+      return updated ? toUser(updated) : status(404, { error: "user not found" });
+    },
+    {
+      params: t.Object({ id: IdParam }),
+      body: t.Object({
+        role: t.Optional(t.UnionEnum([...USER_ROLES])),
+        display_name: t.Optional(t.Nullable(t.String({ maxLength: 80 }))),
+        password: t.Optional(t.String({ minLength: 8, maxLength: 200 })),
+        disabled: t.Optional(t.Boolean()),
+      }),
+      response: { 200: UserSchema, 404: ErrBody, 409: ErrBody },
+    },
+  )
+
+  .delete(
+    "/users/:id",
+    async ({ params, principal, status }) => {
+      const user = await UserStore.findById(params.id);
+      if (!user) return status(404, { error: "user not found" });
+      if (principal?.user.id === params.id) return status(409, { error: "you can't delete your own account" });
+      if (user.role === "admin" && (await UserStore.adminCount()) <= 1) return status(409, { error: "this is the last admin" });
+      await UserStore.delete(params.id);
+      log.info({ userId: params.id }, "Account deleted");
+      return { deleted: true };
+    },
+    { params: t.Object({ id: IdParam }), response: { 200: t.Object({ deleted: t.Boolean() }), 404: ErrBody, 409: ErrBody } },
   )
 
   // ── Pages ──────────────────────────────────────────────────────────────────

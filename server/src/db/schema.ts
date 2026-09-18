@@ -205,6 +205,58 @@ export type NewPage = typeof pages.$inferInsert;
 
 export type PageStageRow = typeof pageStages.$inferSelect;
 
+// ── Accounts ────────────────────────────────────────────────────────────────
+
+/** admin manages people and keys; contributor manages the library and the Studio; reader only reads. */
+export const USER_ROLES = ["admin", "contributor", "reader"] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** Lower-cased on the way in, so names are unique regardless of how they were typed. */
+  username: text("username").notNull(),
+  displayName: text("display_name"),
+  /** Argon2id, from Bun.password. */
+  passwordHash: text("password_hash").notNull(),
+  role: text("role").notNull().default("reader"),
+  /** Set when the account is suspended: it keeps its work but can't sign in. */
+  disabledAt: text("disabled_at"),
+  lastSeenAt: text("last_seen_at"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  usersUsernameIdx: uniqueIndex("users_username_idx").on(table.username),
+}));
+
+/** Browser sessions. Only the hash of the cookie's token is stored, so the table is useless if it leaks. */
+export const sessions = sqliteTable("sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userAgent: text("user_agent"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  lastSeenAt: text("last_seen_at").notNull().default(sql`(datetime('now'))`),
+  expiresAt: text("expires_at").notNull(),
+}, (table) => ({
+  sessionsUserIdx: index("sessions_user_idx").on(table.userId),
+  sessionsExpiryIdx: index("sessions_expiry_idx").on(table.expiresAt),
+}));
+
+/** Keys for the extension and the desktop app (`X-Api-Key`). Stored hashed; the prefix is shown to identify one. */
+export const apiKeys = sqliteTable("api_keys", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  /** First characters of the key, for telling keys apart in the list. */
+  prefix: text("prefix").notNull(),
+  keyHash: text("key_hash").notNull(),
+  lastUsedAt: text("last_used_at"),
+  revokedAt: text("revoked_at"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  apiKeysHashIdx: uniqueIndex("api_keys_hash_idx").on(table.keyHash),
+  apiKeysUserIdx: index("api_keys_user_idx").on(table.userId),
+}));
+
 export type PageBlockRow = typeof pageBlocks.$inferSelect;
 export type NewPageBlockRow = typeof pageBlocks.$inferInsert;
 
@@ -229,3 +281,12 @@ export type NewPageTranslationJob = typeof pageTranslationJobs.$inferInsert;
 
 export type PageTranslationLog = typeof pageTranslationLogs.$inferSelect;
 export type NewPageTranslationLog = typeof pageTranslationLogs.$inferInsert;
+
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+
+export type Session = typeof sessions.$inferSelect;
+export type NewSession = typeof sessions.$inferInsert;
+
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type NewApiKey = typeof apiKeys.$inferInsert;

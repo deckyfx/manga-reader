@@ -7,6 +7,8 @@ import { loggerPlugin } from "@/plugins/plugin-logger";
 import { api } from "@/api";
 import { routeSettings } from "@/plugins/route-settings";
 import { studioPlugin } from "@/plugins/studio/index";
+import { authPlugin } from "@/plugins/auth/index";
+import { authGuard } from "@/plugins/auth/guard";
 import { readPlugin } from "@/plugins/read/index";
 import { managePlugin } from "@/plugins/manage/index";
 import { routeRoot, spaRoutes } from "@/plugins/route-spa";
@@ -23,6 +25,14 @@ async function migrateDb(): Promise<void> {
   // Folders of deleted pages whose cleanup failed last time
   const swept = await PageStore.sweepDeletedPageFolders();
   if (swept > 0) bootLog.info(`Removed ${swept} leftover folder(s) of deleted pages`);
+
+  // Sessions that ran out while the server was down
+  const { SessionStore, UserStore } = await import("@/stores/user-store");
+  const expired = await SessionStore.purgeExpired();
+  if (expired > 0) bootLog.info(`Removed ${expired} expired session(s)`);
+  if ((await UserStore.count()) === 0) {
+    bootLog.warn("No accounts yet — open /setup in a browser to create the first admin; the API stays closed until then");
+  }
 }
 
 async function loadModels(): Promise<void> {
@@ -146,6 +156,9 @@ await loadModels().catch((err) => {
 const app = new Elysia({ serve: { routes: spaRoutes } })
   .use(loggerPlugin)
   .use(cors())
+  // Before every area: the table in plugins/auth/guard.ts decides what each path needs
+  .use(authGuard)
+  .use(authPlugin)
   .use(api)
   .use(routeSettings)
   .use(studioPlugin)

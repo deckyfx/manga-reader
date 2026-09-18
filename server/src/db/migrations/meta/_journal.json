@@ -57,6 +57,13 @@
       "when": 1789688580300,
       "tag": "0007_series_hierarchy",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789711022954,
+      "tag": "0008_quiet_magus",
+      "breakpoints": true
     }
   ]
 }
