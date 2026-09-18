@@ -356,7 +356,15 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         await PageStore.filePage(params.pageId, { chapterId: params.id, sortOrder: (await PageStore.maxSortOrder(params.id)) + 1 });
         filed = (await PageStore.findById(params.pageId)) ?? page;
       } else {
-        filed = await copyPageIntoChapter(page, params.id, body?.name);
+        // Under the source's lock, which a pipeline run holds for its whole duration: the copy then reads one
+        // settled state instead of a folder being rewritten around it
+        const copied = await withPageLock(params.pageId, async () => {
+          const fresh = await PageStore.findById(params.pageId);
+          if (!fresh || fresh.status === "queued" || fresh.status === "running") return null;
+          return copyPageIntoChapter(fresh, params.id, body?.name);
+        });
+        if (!copied) return status(409, { error: "page is still being translated" });
+        filed = copied;
       }
       // A page that arrives already translated is published at once: readers only ever see published snapshots, and a
       // page nobody has read yet has nothing to protect from a publish
