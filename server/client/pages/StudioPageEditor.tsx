@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlignCenter, AlignLeft, AlignRight, ArrowLeft, Eraser, History, Languages, Loader2, Megaphone, PanelRightClose, PanelRightOpen, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ArrowLeft, ChevronLeft, ChevronRight, Eraser, FolderInput, History, Languages, Loader2, Megaphone, PanelRightClose, PanelRightOpen, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
 import {
   deleteBlock,
-  deletePage,
+  getChapter,
   getPage,
   historyImageUrl,
   listHistory,
@@ -23,6 +23,8 @@ import {
   type StudioPageDetail,
 } from "../api";
 import { ActionsMenu, type MenuAction } from "../components/ActionsMenu";
+import { ChapterPicker } from "../components/ChapterPicker";
+import { DiscardPageDialog } from "../components/DiscardPageDialog";
 import { useConfirm } from "../components/ConfirmDialog";
 import { JobProgress } from "../components/JobProgress";
 import { StatusBadge } from "../components/StatusBadge";
@@ -115,15 +117,20 @@ export function StudioPageEditor() {
   const cleanSfxM = useMutation({ mutationFn: () => runStage(id, "clean_sfx"), onSuccess: afterClean });
   const publishM = useMutation({ mutationFn: () => publishPage(id), onSuccess: onPublished });
   const navigate = useNavigate();
-  const deleteM = useMutation({
-    mutationFn: () => deletePage(id),
-    onSuccess: () => {
-      qc.removeQueries({ queryKey: ["studio-page", id] });
-      void qc.invalidateQueries({ queryKey: ["studio-pages"] });
-      navigate("/studio");
-    },
-  });
+  const [discarding, setDiscarding] = useState(false);
+  const [filing, setFiling] = useState(false);
   const confirm = useConfirm();
+  // A page inside a chapter can be walked through in reading order, without going back to Manage each time
+  const chapterId = pageQ.data?.page.location?.chapter_id ?? null;
+  const chapterQ = useQuery({
+    queryKey: ["chapter", chapterId],
+    queryFn: () => getChapter(chapterId ?? 0),
+    enabled: chapterId !== null,
+  });
+  const neighbours = chapterQ.data?.pages ?? [];
+  const here = neighbours.findIndex((neighbour) => neighbour.id === id);
+  const previousPage = here > 0 ? neighbours[here - 1] : undefined;
+  const nextPage = here >= 0 ? neighbours[here + 1] : undefined;
   const deleteBlockM = useMutation({
     mutationFn: (blockId: number) => deleteBlock(id, blockId),
     onSuccess: (next) => {
@@ -146,16 +153,6 @@ export function StudioPageEditor() {
     });
     if (confirmed) deleteBlockM.mutate(blockId);
   };
-  const confirmDelete = async () => {
-    const confirmed = await confirm({
-      title: "Discard this page?",
-      message: "Its translation, edits, publish history and all its images are deleted. This can't be undone.",
-      confirmLabel: "Discard page",
-      danger: true,
-    });
-    if (confirmed) deleteM.mutate();
-  };
-
   // While the page runs in the pipeline its files are being rewritten: follow the job and reload when it ends
   const job = usePageJobEvents(isBusy(pageQ.data?.page.status) ? id : null, () => {
     void qc.invalidateQueries({ queryKey: ["studio-page", id] });
@@ -228,7 +225,7 @@ export function StudioPageEditor() {
   const sfxBlocks = blocks.filter((b) => b.kind !== "text");
   const version = `${page.updated_at}-${page.revision}-${renderStage?.updated_at ?? ""}-${imagesNonce}`;
   const cleaning = cleanTextM.isPending || cleanSfxM.isPending;
-  const actionError = cleanTextM.error ?? cleanSfxM.error ?? renderM.error ?? translateAllM.error ?? publishM.error ?? deleteM.error ?? deleteBlockM.error;
+  const actionError = cleanTextM.error ?? cleanSfxM.error ?? renderM.error ?? translateAllM.error ?? publishM.error ?? deleteBlockM.error;
 
   /** A stage's status in the latest page data: queued actions re-check it, since the saves they waited for can outdate it. */
   const latestStageStatus = (name: string) =>
@@ -307,27 +304,80 @@ export function StudioPageEditor() {
       pending: publishM.isPending,
     },
     {
-      key: "delete",
-      label: "Delete page",
-      icon: <Trash2 size={14} />,
-      hint: "Discard the page and all its images",
-      onSelect: () => void confirmDelete(),
-      unavailable: unavailableWhen([busy, "Can't discard while the page is being translated"], [deleteM.isPending, "Deleting…"]),
-      pending: deleteM.isPending,
-      danger: true,
+      key: "file",
+      label: page.location ? "Move to another chapter" : "File into a chapter",
+      icon: <FolderInput size={14} />,
+      hint: page.location ? "Copy this page into another chapter" : "Copy this draft into a chapter so it can be read",
+      onSelect: () => setFiling(true),
+      unavailable: unavailableWhen(translating),
       separated: true,
+    },
+    {
+      key: "delete",
+      label: page.location ? "Discard…" : "Delete page",
+      icon: <Trash2 size={14} />,
+      hint: page.location ? "Drop the edits, take the page out of the chapter, or delete it" : "Discard the page and all its images",
+      onSelect: () => setDiscarding(true),
+      unavailable: unavailableWhen([busy, "Can't discard while the page is being translated"]),
+      danger: true,
     },
   ];
 
   return (
     <div className="flex flex-col h-full">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-800">
-        <Link to="/studio" className="text-gray-400 hover:text-white" title="All pages">
+        <Link
+          to={page.location ? `/manage/chapters/${page.location.chapter_id}` : "/studio"}
+          className="text-gray-400 hover:text-white"
+          title={page.location ? "Back to the chapter" : "All pages"}
+        >
           <ArrowLeft size={18} />
         </Link>
-        <h1 className="text-base font-semibold truncate">Page {page.id.slice(-8)}</h1>
+        {page.location ? (
+          <>
+            <h1 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
+              <Link to={`/read/series/${page.location.series_id}`} className="truncate text-gray-400 hover:text-white">{page.location.series_title}</Link>
+              <span className="text-gray-600">›</span>
+              <Link to={`/manage/chapters/${page.location.chapter_id}`} className="truncate hover:text-indigo-300">{page.location.chapter_title}</Link>
+            </h1>
+            <div className="flex items-center gap-1 text-xs text-gray-500">
+              <Link
+                to={previousPage ? `/studio/pages/${previousPage.id}` : "#"}
+                aria-disabled={!previousPage}
+                title="Previous page in the chapter"
+                aria-label="Previous page in the chapter"
+                className={`rounded p-1 ${previousPage ? "hover:bg-gray-800 hover:text-white" : "pointer-events-none opacity-30"}`}
+              >
+                <ChevronLeft size={14} />
+              </Link>
+              <span className="tabular-nums">page {page.location.index}/{page.location.total}</span>
+              <Link
+                to={nextPage ? `/studio/pages/${nextPage.id}` : "#"}
+                aria-disabled={!nextPage}
+                title="Next page in the chapter"
+                aria-label="Next page in the chapter"
+                className={`rounded p-1 ${nextPage ? "hover:bg-gray-800 hover:text-white" : "pointer-events-none opacity-30"}`}
+              >
+                <ChevronRight size={14} />
+              </Link>
+            </div>
+          </>
+        ) : (
+          <h1 className="truncate text-base font-semibold">{page.name ?? `Page ${page.id.slice(-8)}`}</h1>
+        )}
         <StatusBadge status={page.status} />
-        <span className="text-xs text-gray-500">rev {page.revision}</span>
+        {page.has_edits ? (
+          <span
+            className="rounded-full bg-amber-900/60 px-2 py-0.5 text-xs font-medium text-amber-300"
+            title={page.published
+              ? "Burned since the last publish — readers still get the published version until you publish again"
+              : "This page has never been published, so nobody is reading it yet"}
+          >
+            {page.published ? "edited since publish" : "unpublished"}
+          </span>
+        ) : (
+          <span className="text-xs text-gray-500" title={page.published ? "Readers are seeing this revision" : undefined}>rev {page.revision}</span>
+        )}
         <div className="flex flex-wrap gap-1.5">
           {stages.map((s) => (
             <span key={s.stage} title={s.error ?? s.updated_at}>
@@ -477,6 +527,35 @@ export function StudioPageEditor() {
         </aside>
         )}
       </div>
+      )}
+
+      {filing && (
+        <ChapterPicker
+          pageId={page.id}
+          pageLabel={page.name ?? page.id.slice(-8)}
+          onClose={() => setFiling(false)}
+          onFiled={(toChapter) => {
+            setFiling(false);
+            void qc.invalidateQueries({ queryKey: ["studio-page", id] });
+            navigate(`/manage/chapters/${toChapter}`);
+          }}
+        />
+      )}
+
+      {discarding && (
+        <DiscardPageDialog
+          page={page}
+          onClose={() => setDiscarding(false)}
+          onDone={({ deleted }) => {
+            setDiscarding(false);
+            if (deleted) {
+              qc.removeQueries({ queryKey: ["studio-page", id] });
+              navigate(page.location ? `/manage/chapters/${page.location.chapter_id}` : "/studio");
+            } else {
+              void qc.invalidateQueries({ queryKey: ["studio-page", id] });
+            }
+          }}
+        />
       )}
     </div>
   );

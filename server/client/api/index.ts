@@ -39,12 +39,20 @@ export const patchEngine = (engine: string) => unwrap(api.api.settings.engine.pa
 
 // ── Studio ────────────────────────────────────────────────────────────────────
 
-export const listPages = () => unwrap(api.studio.api.pages.get());
+/** Which pages the Studio lists: the Inbox (drafts), the pages inside chapters, or both. */
+export type PageScope = "inbox" | "chapter" | "all";
+
+export const listPages = (query: { filed?: PageScope; chapter_id?: number; q?: string } = {}) =>
+  unwrap(api.studio.api.pages.get({ query }));
 
 export const getPage = (id: string) => unwrap(api.studio.api.pages({ id }).get());
 
-/** Discards a page: its data and all its images. Refused while the page is being translated. */
-export const deletePage = (id: string) => unwrap(api.studio.api.pages({ id }).delete());
+/**
+ * Discards a page: its data and all its images. Refused while the page is being translated, and refused for a page
+ * inside a chapter unless `force` — that page is part of what people read.
+ */
+export const deletePage = (id: string, force = false) =>
+  unwrap(api.studio.api.pages({ id }).delete(undefined, { query: force ? { force: true } : {} }));
 
 /** Queue a new page from an upload (base64 / data URL) or an image URL; progress arrives on `pageEventsUrl`. */
 export const createPage = (body: { image?: string; url?: string; clean_sfx?: boolean; force?: boolean }) =>
@@ -239,6 +247,16 @@ export const filePage = (id: string, body: { chapter_id?: number | null; sort_or
 /** Takes a page out of its chapter, keeping the page and its images. */
 export const unfilePage = (id: string) => unwrap(api.manage.api.pages({ id }).delete());
 
+/** Copies a draft into a chapter, keeping it in the Inbox; `keep_draft: false` moves the page instead. */
+export const copyPageIntoChapter = (chapterId: number, pageId: string, body?: { keep_draft?: boolean; name?: string | null }) =>
+  unwrap(api.manage.api.chapters({ id: chapterId }).pages({ pageId }).post(body ?? {}));
+
+/** Publishes one page: what readers get catches up with the current burn. */
+export const publishPageEdits = (id: string) => unwrap(api.manage.api.pages({ id }).publish.post());
+
+/** Publishes every page of a chapter that holds unpublished edits. */
+export const publishChapterEdits = (id: number) => unwrap(api.manage.api.chapters({ id }).publish.post());
+
 /** Runs the whole pipeline again for one page, from its stored original. */
 export const rerunPage = (id: string, body?: { clean_sfx?: boolean }) =>
   unwrap(api.studio.api.pages({ id }).rerun.post(body ?? {}));
@@ -255,6 +273,8 @@ export type StudioPageSummary = Awaited<ReturnType<typeof listPages>>[number];
 export type StudioPageDetail = Awaited<ReturnType<typeof getPage>>;
 export type StudioBlock = StudioPageDetail["blocks"][number];
 export type StudioStage = StudioPageDetail["stages"][number];
+/** Where a filed page sits: its series, its chapter and its place in the reading order. */
+export type PageLocation = NonNullable<StudioPageDetail["page"]["location"]>;
 
 /** Images stored per page, in pipeline order. */
 export const PAGE_IMAGES = [

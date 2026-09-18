@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, Download, Inbox, Loader2, Play, RefreshCw, SquarePen, Upload, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Download, Inbox, Loader2, Play, RefreshCw, Send, SquarePen, Upload, X } from "lucide-react";
 import {
   chapterExportUrl,
-  filePage,
+  copyPageIntoChapter,
   getChapter,
   getChapterRun,
   importChapterPages,
   listInbox,
+  publishChapterEdits,
+  publishPageEdits,
   readPageImageUrl,
   reorderChapterPages,
   rerunPage,
@@ -25,7 +27,13 @@ export function ManageChapterPage() {
   const chapterId = Number(id);
   const qc = useQueryClient();
   const confirm = useConfirm();
-  const chapterQ = useQuery({ queryKey: ["chapter", chapterId], queryFn: () => getChapter(chapterId), enabled: Number.isFinite(chapterId) });
+  const chapterQ = useQuery({
+    queryKey: ["chapter", chapterId],
+    queryFn: () => getChapter(chapterId),
+    enabled: Number.isFinite(chapterId),
+    // A page translating here or in the Studio rewrites its image: follow along while any of them is working
+    refetchInterval: (query) => (query.state.data?.pages.some((page) => page.status === "queued" || page.status === "running") ? 3000 : false),
+  });
   const reload = () => {
     void qc.invalidateQueries({ queryKey: ["chapter", chapterId] });
     void qc.invalidateQueries({ queryKey: ["series"], refetchType: "none" });
@@ -75,8 +83,9 @@ export function ManageChapterPage() {
       void qc.invalidateQueries({ queryKey: ["inbox"] });
     },
   });
+  const [keepDrafts, setKeepDrafts] = useState(true);
   const addM = useMutation({
-    mutationFn: (pageId: string) => filePage(pageId, { chapter_id: chapterId }),
+    mutationFn: (pageId: string) => copyPageIntoChapter(chapterId, pageId, { keep_draft: keepDrafts }),
     onSuccess: () => {
       reload();
       void qc.invalidateQueries({ queryKey: ["inbox"] });
@@ -90,11 +99,23 @@ export function ManageChapterPage() {
     },
   });
   const rerunM = useMutation({ mutationFn: (pageId: string) => rerunPage(pageId, { clean_sfx: cleanSfx }), onSuccess: reload });
+  const publishPageM = useMutation({ mutationFn: (pageId: string) => publishPageEdits(pageId), onSuccess: reload });
+  const publishChapterM = useMutation({
+    mutationFn: () => publishChapterEdits(chapterId),
+    onSuccess: (detail) => {
+      qc.setQueryData(["chapter", chapterId], detail);
+      void qc.invalidateQueries({ queryKey: ["studio-pages"] });
+    },
+  });
 
   const chapter = chapterQ.data?.chapter;
   const series = chapterQ.data?.series;
   const pages = chapterQ.data?.pages ?? [];
-  const error = chapterQ.error ?? importM.error ?? reorderM.error ?? runM.error ?? rerunM.error ?? unfileM.error ?? addM.error;
+  const error = chapterQ.error ?? importM.error ?? reorderM.error ?? runM.error ?? rerunM.error ?? unfileM.error ?? addM.error
+    ?? publishPageM.error ?? publishChapterM.error;
+
+  // Pages holding work readers can't see yet
+  const unpublished = pages.filter((page) => page.has_edits).length;
 
   const importFiles = (files: FileList | null) => {
     const list = Array.from(files ?? []);
@@ -159,6 +180,17 @@ export function ManageChapterPage() {
           >
             Force all
           </button>
+          {unpublished > 0 && (
+            <button
+              onClick={() => publishChapterM.mutate()}
+              disabled={publishChapterM.isPending || running}
+              title="Readers get the current version of every page that has been edited since it was published"
+              className="flex items-center gap-2 rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+            >
+              {publishChapterM.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              Publish {unpublished} page{unpublished === 1 ? "" : "s"}
+            </button>
+          )}
           {pages.length > 0 && (
             <>
               <Link to={`/read/chapters/${chapterId}/pages/1`} className="flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-700">
@@ -236,7 +268,14 @@ export function ManageChapterPage() {
         </div>
       )}
 
-      {showInbox && <InboxPicker onAdd={(pageId) => addM.mutate(pageId)} adding={addM.isPending} />}
+      {showInbox && (
+        <InboxPicker
+          onAdd={(pageId) => addM.mutate(pageId)}
+          adding={addM.isPending}
+          keepDrafts={keepDrafts}
+          onKeepDrafts={setKeepDrafts}
+        />
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {pages.length === 0 ? (
@@ -266,7 +305,17 @@ export function ManageChapterPage() {
                 <div className="flex items-center gap-1.5 px-2 py-1.5 text-xs">
                   <span className="tabular-nums text-gray-500">{index + 1}</span>
                   <span className="truncate text-gray-300">{page.name ?? "page"}</span>
-                  <span className="ml-auto">{page.has_result ? <StatusBadge status="done" label="translated" /> : <StatusBadge status={page.status} />}</span>
+                  <span className="ml-auto">
+                    {page.has_edits ? (
+                      <StatusBadge status="stale" label={page.published ? "edited" : "unpublished"} />
+                    ) : page.published ? (
+                      <StatusBadge status="done" label="published" />
+                    ) : page.has_result ? (
+                      <StatusBadge status="done" label="translated" />
+                    ) : (
+                      <StatusBadge status={page.status} />
+                    )}
+                  </span>
                 </div>
                 <div className="absolute right-1 top-1 flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
                   <Link
@@ -277,6 +326,17 @@ export function ManageChapterPage() {
                   >
                     <SquarePen size={13} />
                   </Link>
+                  {page.has_edits && (
+                    <button
+                      onClick={() => publishPageM.mutate(page.id)}
+                      disabled={publishPageM.isPending || running}
+                      title="Publish this page, so readers get it"
+                      aria-label="Publish this page"
+                      className="rounded bg-gray-900/90 p-1 text-amber-300 hover:text-amber-200 disabled:opacity-40"
+                    >
+                      <Send size={13} />
+                    </button>
+                  )}
                   <button
                     onClick={() => rerunM.mutate(page.id)}
                     disabled={rerunM.isPending || running}
@@ -306,12 +366,21 @@ export function ManageChapterPage() {
 }
 
 /** Pages waiting in the Inbox (extension jobs and Studio uploads), to file into this chapter. */
-function InboxPicker({ onAdd, adding }: { onAdd: (pageId: string) => void; adding: boolean }) {
+function InboxPicker({ onAdd, adding, keepDrafts, onKeepDrafts }: {
+  onAdd: (pageId: string) => void;
+  adding: boolean;
+  keepDrafts: boolean;
+  onKeepDrafts: (keep: boolean) => void;
+}) {
   const inboxQ = useQuery({ queryKey: ["inbox"], queryFn: listInbox });
   const pages = inboxQ.data ?? [];
 
   return (
     <div className="border-b border-gray-800 bg-gray-950/60 px-4 py-3">
+      <label className="mb-2 flex items-center gap-2 text-xs text-gray-400" title="Off moves the page into the chapter instead of copying it">
+        <input type="checkbox" checked={keepDrafts} onChange={(e) => onKeepDrafts(e.target.checked)} className="accent-indigo-500" />
+        Keep the draft in the Inbox (the chapter gets its own copy)
+      </label>
       {inboxQ.isLoading ? (
         <Loader2 size={14} className="animate-spin text-gray-500" />
       ) : pages.length === 0 ? (
