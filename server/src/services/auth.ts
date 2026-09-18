@@ -231,15 +231,39 @@ interface StreamToken {
   expiresAt: number;
 }
 
+/** Insertion-ordered, which is what lets the oldest be dropped when the cap is reached. */
 const streamTokens = new Map<string, StreamToken>();
+
+/** A page translation needs one token; these are per account, so the ceiling is generous and still bounded. */
+const MAX_TOKENS_PER_USER = 10;
+const MAX_TOKENS = 500;
 
 /** Issues a token for the account making the request. */
 export function issueStreamToken(userId: number): { token: string; expires_in: number } {
-  // Expired entries would otherwise pile up for as long as the server runs
   const now = Date.now();
+
+  // Expired entries would otherwise sit there until the server restarts
+  let mine = 0;
   for (const [key, value] of streamTokens) {
     if (value.expiresAt <= now) streamTokens.delete(key);
+    else if (value.userId === userId) mine++;
   }
+
+  // One account asking over and over drops its own oldest tokens, not everybody else's
+  if (mine >= MAX_TOKENS_PER_USER) {
+    for (const [key, value] of streamTokens) {
+      if (value.userId !== userId) continue;
+      streamTokens.delete(key);
+      if (--mine < MAX_TOKENS_PER_USER) break;
+    }
+  }
+  // A ceiling for the whole server, however many accounts are at it
+  while (streamTokens.size >= MAX_TOKENS) {
+    const oldest = streamTokens.keys().next();
+    if (oldest.done) break;
+    streamTokens.delete(oldest.value);
+  }
+
   const token = randomToken();
   streamTokens.set(sha256(token), { userId, expiresAt: now + STREAM_TOKEN_MINUTES * 60 * 1000 });
   return { token, expires_in: STREAM_TOKEN_MINUTES * 60 };

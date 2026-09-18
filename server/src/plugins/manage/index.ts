@@ -589,17 +589,18 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     async ({ params, body, principal, status }) => {
       const user = await UserStore.findById(params.id);
       if (!user) return status(404, { error: "user not found" });
-      // The last admin keeps the keys: without this an install can lock itself out
-      const losingAdmin = user.role === "admin" && ((body.role !== undefined && body.role !== "admin") || body.disabled === true);
-      if (losingAdmin && (await UserStore.adminCount()) <= 1) return status(409, { error: "this is the last admin" });
       if (body.disabled === true && principal?.user.id === params.id) return status(409, { error: "you can't suspend yourself" });
 
-      await UserStore.update(params.id, {
+      // The last admin keeps the keys: counted and applied together, so two demotions can't pass each other
+      const costsAdmin = (body.role !== undefined && body.role !== "admin") || body.disabled === true;
+      const outcome = await UserStore.updateGuardingLastAdmin(params.id, {
         ...(body.role !== undefined ? { role: body.role } : {}),
         ...(body.display_name !== undefined ? { displayName: body.display_name } : {}),
         ...(body.password !== undefined ? { passwordHash: await hashPassword(body.password) } : {}),
         ...(body.disabled !== undefined ? { disabledAt: body.disabled ? new Date().toISOString() : null } : {}),
-      });
+      }, costsAdmin);
+      if (outcome === "missing") return status(404, { error: "user not found" });
+      if (outcome === "last-admin") return status(409, { error: "this is the last admin" });
       // A new password, a lost role or a suspension all end the sessions that were running under the old terms
       if (body.password !== undefined || body.role !== undefined || body.disabled === true) await SessionStore.deleteForUser(params.id);
       const updated = await UserStore.findById(params.id);
@@ -620,11 +621,10 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
   .delete(
     "/users/:id",
     async ({ params, principal, status }) => {
-      const user = await UserStore.findById(params.id);
-      if (!user) return status(404, { error: "user not found" });
       if (principal?.user.id === params.id) return status(409, { error: "you can't delete your own account" });
-      if (user.role === "admin" && (await UserStore.adminCount()) <= 1) return status(409, { error: "this is the last admin" });
-      await UserStore.delete(params.id);
+      const outcome = await UserStore.deleteGuardingLastAdmin(params.id);
+      if (outcome === "missing") return status(404, { error: "user not found" });
+      if (outcome === "last-admin") return status(409, { error: "this is the last admin" });
       log.info({ userId: params.id }, "Account deleted");
       return { deleted: true };
     },

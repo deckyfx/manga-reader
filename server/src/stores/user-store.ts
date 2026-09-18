@@ -81,6 +81,50 @@ export class UserStore {
     return rows.length > 0;
   }
 
+  /**
+   * Applies a change that may cost the account its admin rights, refusing when it would leave the server with none.
+   * Counting and writing happen in one transaction: two admins demoting each other at the same instant would
+   * otherwise both see two admins and both go through.
+   */
+  static async updateGuardingLastAdmin(
+    id: number,
+    fields: Partial<Omit<NewUser, "id" | "username">>,
+    costsAdmin: boolean,
+  ): Promise<"updated" | "last-admin" | "missing"> {
+    return db.transaction((tx) => {
+      const user = tx.select().from(users).where(eq(users.id, id)).get();
+      if (!user) return "missing";
+      if (costsAdmin && user.role === "admin") {
+        const row = tx
+          .select({ count: sql<number>`count(*)` })
+          .from(users)
+          .where(and(eq(users.role, "admin"), isNull(users.disabledAt)))
+          .get();
+        if ((row?.count ?? 0) <= 1) return "last-admin";
+      }
+      tx.update(users).set({ ...fields, updatedAt: sql`(datetime('now'))` }).where(eq(users.id, id)).run();
+      return "updated";
+    });
+  }
+
+  /** Deletes an account unless it is the last admin, again as one transaction. */
+  static async deleteGuardingLastAdmin(id: number): Promise<"deleted" | "last-admin" | "missing"> {
+    return db.transaction((tx) => {
+      const user = tx.select().from(users).where(eq(users.id, id)).get();
+      if (!user) return "missing";
+      if (user.role === "admin") {
+        const row = tx
+          .select({ count: sql<number>`count(*)` })
+          .from(users)
+          .where(and(eq(users.role, "admin"), isNull(users.disabledAt)))
+          .get();
+        if ((row?.count ?? 0) <= 1) return "last-admin";
+      }
+      tx.delete(users).where(eq(users.id, id)).run();
+      return "deleted";
+    });
+  }
+
   /** How many admins are left, so the last one can't lock everybody out. */
   static async adminCount(): Promise<number> {
     const row = await db
