@@ -797,23 +797,26 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
       es.onerror = () => {
         if (activeEventSource !== es) return;
         es.close();
-        const next = opened ? 1 : failures + 1;
-        if (next > MAX_STREAM_FAILURES) {
-          activeEventSource = null;
-          hideImageTranslateLoading(false, "Connection to server lost");
-          return;
-        }
-        setTimeout(() => {
-          // Another translation started, or this one finished, while waiting
-          if (activeEventSource !== es || !isCurrent()) return;
-          openJobStream(next).catch((err: unknown) => {
-            // A stale reopen failing must not tear down a newer translation's stream and panel
-            if (!isCurrent()) return;
-            activeEventSource = null;
-            hideImageTranslateLoading(false, err instanceof Error ? err.message : String(err));
-          });
-        }, reopenDelay(next));
+        reopenJob(opened ? 1 : failures + 1);
       };
+    };
+
+    /**
+     * Tries again after a dropped stream. Fetching the fresh token can fail too — the server restarting, the network
+     * blinking — and that counts as one more failure against the same budget rather than ending the translation.
+     */
+    const reopenJob = (failures: number): void => {
+      if (failures > MAX_STREAM_FAILURES) {
+        // A stale translation giving up must not tear down a newer one's panel
+        if (!isCurrent()) return;
+        activeEventSource = null;
+        hideImageTranslateLoading(false, "Connection to server lost");
+        return;
+      }
+      setTimeout(() => {
+        if (!isCurrent()) return;
+        openJobStream(failures).catch(() => reopenJob(failures + 1));
+      }, reopenDelay(failures));
     };
 
     await openJobStream(0);
@@ -900,7 +903,8 @@ async function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string
   try {
     url = await streamUrl(serverUrl, `api/translate-page/${jobId}/live`, apiKey);
   } catch (err) {
-    if (watcherGenerations.get(jobId) === generation) watcherGenerations.delete(jobId);
+    // A first start that fails leaves nothing behind; a reopen keeps its claim so it can be tried again
+    if (failures === 0 && watcherGenerations.get(jobId) === generation) watcherGenerations.delete(jobId);
     throw err;
   }
   // Stopped, or started again, while the token was being fetched: this attempt is no longer wanted
@@ -934,18 +938,26 @@ async function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string
   // stream — most often because its token has expired, which a new token fixes
   es.onerror = () => {
     if (es.readyState !== EventSource.CLOSED || pageWatchers.get(jobId) !== es) return;
-    const next = opened ? 1 : failures + 1;
-    if (next > MAX_STREAM_FAILURES) {
-      stopWatching(jobId);
-      return;
-    }
-    setTimeout(() => {
-      // Stopped, or replaced, while waiting: the page no longer wants this stream
-      if (pageWatchers.get(jobId) !== es || watcherGenerations.get(jobId) !== generation) return;
-      pageWatchers.delete(jobId);
-      watchPageUpdates(serverUrl, jobId, apiKey, next).catch(() => stopWatching(jobId));
-    }, reopenDelay(next));
+    // Out of the map while it waits, so the reopen can take its place; the claim stays, so a stop still cancels it
+    pageWatchers.delete(jobId);
+    reopenWatcher(serverUrl, jobId, apiKey, opened ? 1 : failures + 1);
   };
+}
+
+/**
+ * Tries a watcher again after its stream closed. As with the job stream, a fresh token that can't be fetched is one
+ * more failure within the budget, not a reason to stop listening for publishes.
+ */
+function reopenWatcher(serverUrl: string, jobId: string, apiKey: string, failures: number): void {
+  if (failures > MAX_STREAM_FAILURES) {
+    stopWatching(jobId);
+    return;
+  }
+  setTimeout(() => {
+    // Stopped while waiting (the image left the page), or already running again
+    if (!watcherGenerations.has(jobId) || pageWatchers.has(jobId)) return;
+    watchPageUpdates(serverUrl, jobId, apiKey, failures).catch(() => reopenWatcher(serverUrl, jobId, apiKey, failures + 1));
+  }, reopenDelay(failures));
 }
 
 /** Link from the progress panel to the page in the Studio. */
