@@ -6,6 +6,9 @@ import { HomePage } from "./pages/HomePage";
 import { StudioPagesPage } from "./pages/StudioPagesPage";
 import { StudioPageEditor } from "./pages/StudioPageEditor";
 import { ReadPage } from "./pages/ReadPage";
+import { ManagePage } from "./pages/ManagePage";
+import { ManageSeriesPage } from "./pages/ManageSeriesPage";
+import { ManageChapterPage } from "./pages/ManageChapterPage";
 import { SeriesPage } from "./pages/SeriesPage";
 import { ReaderPage } from "./pages/ReaderPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -30,6 +33,9 @@ export function App() {
             <Route path="read" element={<ReadPage />} />
             <Route path="read/series/:id" element={<SeriesPage />} />
             <Route path="read/chapters/:id/pages/:n" element={<ReaderPage />} />
+            <Route path="manage" element={<ManagePage />} />
+            <Route path="manage/series/:id" element={<ManageSeriesPage />} />
+            <Route path="manage/chapters/:id" element={<ManageChapterPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>

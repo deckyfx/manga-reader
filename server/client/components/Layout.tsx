@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router";
-import { BookOpen, Layers, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
+import { BookOpen, FolderCog, Layers, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 
 const STORAGE_KEY = "sidebar-expanded";
 
@@ -61,6 +61,7 @@ export function Layout() {
           </button>
         </div>
         <NavItem to="/studio" icon={<Layers size={20} />} label="Studio" expanded={expanded} />
+        <NavItem to="/manage" icon={<FolderCog size={20} />} label="Manage" expanded={expanded} />
         <NavItem to="/read" icon={<BookOpen size={20} />} label="Read" expanded={expanded} />
         <div className="mt-auto">
           <NavItem to="/settings" icon={<Settings size={20} />} label="Settings" expanded={expanded} />

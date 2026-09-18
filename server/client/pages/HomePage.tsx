@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { BookOpen, Layers } from "lucide-react";
+import { BookOpen, FolderCog, Layers } from "lucide-react";
 
 const AREAS = [
   {
@@ -9,10 +9,16 @@ const AREAS = [
     description: "Translate pages, review each stage, fix regions and text, then publish to open browser tabs.",
   },
   {
+    to: "/manage",
+    icon: FolderCog,
+    title: "Manage",
+    description: "Build the library: series, volumes, chapters, and the pages inside them.",
+  },
+  {
     to: "/read",
     icon: BookOpen,
     title: "Read",
-    description: "Manage volumes and chapters and read translated pages.",
+    description: "Browse the library by title or tag and read translated chapters.",
   },
 ] as const;
 
@@ -23,7 +29,7 @@ export function HomePage() {
       <div className="max-w-3xl mx-auto px-4 py-12">
         <h1 className="text-2xl font-semibold">Web OCR</h1>
         <p className="mt-1 text-sm text-gray-400">Where do you want to go?</p>
-        <div className="mt-8 grid gap-4 sm:grid-cols-2">
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {AREAS.map(({ to, icon: Icon, title, description }) => (
             <Link
               key={to}
