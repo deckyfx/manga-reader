@@ -43,6 +43,16 @@ class EnvConfig {
   get isDev(): boolean { return this.NODE_ENV === "development"; }
   get isProd(): boolean { return this.NODE_ENV === "production"; }
 
+  // ── Where runtime files live ─────────────────────────────────────────────
+
+  /**
+   * The folder everything the server writes goes under: the database, page folders, covers, logs and the secret key.
+   * One setting, so a test run (or a second instance) can be pointed somewhere else wholesale.
+   */
+  get DATA_DIR(): string {
+    return Bun.env.DATA_DIR ?? "./data";
+  }
+
   // ── Secrets at rest ──────────────────────────────────────────────────────
 
   /** 32 bytes of base64 that seal TOTP secrets. Left unset, a key file is made beside the database. */
@@ -52,7 +62,7 @@ class EnvConfig {
 
   /** Where that key is kept when SECRET_KEY isn't set. Back it up with the database. */
   get SECRET_KEY_FILE(): string {
-    return Bun.env.SECRET_KEY_FILE ?? "./data/secret.key";
+    return Bun.env.SECRET_KEY_FILE ?? `${this.DATA_DIR}/secret.key`;
   }
 
   // ── Passkeys ─────────────────────────────────────────────────────────────
@@ -80,7 +90,7 @@ class EnvConfig {
   // ── Database ─────────────────────────────────────────────────────────────
 
   get DATABASE_URL(): string {
-    return Bun.env.DATABASE_URL ?? "./data/ocr.db";
+    return Bun.env.DATABASE_URL ?? `${this.DATA_DIR}/ocr.db`;
   }
 
   // ── Model directories ────────────────────────────────────────────────────

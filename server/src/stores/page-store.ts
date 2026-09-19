@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { db } from "@/db/index";
+import { env } from "@/env";
 import { childLogger } from "@/lib/logger";
 import { pageBlocks, pages, pageStages, type NewPage, type Page, type PageStageRow } from "@/db/schema";
 import type { BlockShape, JobRepository, PageBlock, PageJob } from "@/services/page-pipeline";
@@ -25,7 +26,7 @@ export interface BlockGeometry {
 }
 
 /** Stage images of every page live in `<PAGE_JOBS_DIR>/<page id>/`. */
-export const PAGE_JOBS_DIR = "./data/jobs";
+export const PAGE_JOBS_DIR = `${env.DATA_DIR}/jobs`;
 
 export const STAGE_NAMES = ["detect", "ocr", "translate", "clean_text", "clean_sfx", "render"] as const;
 export type StageName = (typeof STAGE_NAMES)[number];

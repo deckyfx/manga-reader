@@ -1,2 +1,6 @@
 [serve.static]
 plugins = ["bun-plugin-tailwind"]
+
+[test]
+# Points the server at a throwaway data folder before any test imports it (see test/preload.ts)
+preload = ["./test/preload.ts"]

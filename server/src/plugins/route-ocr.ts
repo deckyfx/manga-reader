@@ -7,6 +7,7 @@ import { ErrBody } from "@/lib/schemas";
 import { join } from "path";
 import { env } from "@/env";
 import { runtimeSettings } from "@/stores/settings-store";
+import { PAGE_JOBS_DIR } from "@/stores/page-store";
 
 export const routeOcr = new Elysia()
   // ── POST /ocr ─────────────────────────────────────────────────────────────
@@ -123,7 +124,7 @@ export const routeOcr = new Elysia()
     const job = await JobStore.findById(params.id);
     if (!job) return error(404, { error: "not found" });
 
-    const resultPath = join("./data/jobs", params.id, "result.png");
+    const resultPath = join(PAGE_JOBS_DIR, params.id, "result.png");
     const file = Bun.file(resultPath);
     if (!(await file.exists())) return error(404, { error: "result image not found" });
 
