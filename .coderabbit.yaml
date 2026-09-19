@@ -1,5 +1,14 @@
 reviews:
   path_instructions:
+    - path: "{README.md,server/.env.example,server/src/env.ts,server/src/plugins/auth/**,server/src/services/auth.ts,extension/src/**,extension/static/**}"
+      instructions: |
+        Plain http during development is intentional and accepted: the server defaults to 127.0.0.1, and the
+        developer runs it with HOST=0.0.0.0 over plain http on their own LAN to test from other devices. Do not flag
+        cleartext transport (CWE-319) or ask for TLS to be required or enforced on that basis. The guards already
+        in place are deliberate: the docs say plain http is for development and a real deployment needs TLS in
+        front (TRUST_PROXY for the proxy's forwarded scheme); session cookies are marked Secure over https; and
+        the extension only sends its API key to a plain-http non-loopback server after the user ticks
+        allowInsecureServer. Do flag a change that weakens one of those guards.
     - path: "server/{src/services/page-pipeline.ts,src/shared/typeset.ts,client/studio/text/**,client/studio/canvas/**}"
       instructions: |
         Lettering areas are stored UNSHIFTED on purpose. `PageBlock.area` / `page_blocks.area_json` hold the

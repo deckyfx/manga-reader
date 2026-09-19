@@ -16,9 +16,9 @@ class EnvConfig {
   }
 
   /**
-   * Interface the TCP listener binds to. Loopback by default. `HOST=0.0.0.0` opens it to other devices; sign-in
-   * guards it, but over plain http passwords and session cookies travel in clear, so put TLS in front (and set
-   * `TRUST_PROXY`) for anything beyond your own network.
+   * Interface the TCP listener binds to. Loopback by default. `HOST=0.0.0.0` opens it to other devices. Plain http is
+   * for development only (passwords and session cookies cross the network in clear); a real deployment reachable
+   * beyond this machine needs TLS in front, with `TRUST_PROXY` set.
    */
   get HOST(): string {
     return Bun.env.HOST ?? "127.0.0.1";

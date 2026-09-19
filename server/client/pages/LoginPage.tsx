@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import { useMutation } from "@tanstack/react-query";
-import { KeyRound, LogIn, ShieldCheck } from "lucide-react";
+import { KeyRound, Loader2, LogIn, ShieldCheck } from "lucide-react";
 import {
   login,
   loginWithPasskey,
@@ -15,12 +15,13 @@ import { startAssertion } from "../auth/webauthn";
 import { AuthButton } from "../components/AuthButton";
 import { AuthField } from "../components/AuthField";
 import { AuthShell } from "../components/AuthShell";
+import { LoadFailure } from "../components/LoadFailure";
 
 /** Sign-in: a password, then a second factor when the account carries one. */
 export function LoginPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const { account, needsSetup, registrationEnabled, refresh } = useAuth();
+  const { account, needsSetup, registrationEnabled, loading, error: authError, retry, refresh } = useAuth();
   // Where the server sent us from, when a link needed signing in first; only ever a path on this server
   const next = params.get("next");
   const destination = next && next.startsWith("/") && !next.startsWith("//") ? next : "/home";
@@ -67,6 +68,15 @@ export function LoginPage() {
   });
 
   // A server with no accounts wants its first admin before anything else
+  // Until the server has said who you are (a 401 counts as "a guest"), the form would be a guess
+  if (loading) {
+    return (
+      <div className="flex min-h-full items-center justify-center">
+        <Loader2 className="animate-spin text-gray-600" />
+      </div>
+    );
+  }
+  if (authError) return <LoadFailure message={authError.message} onRetry={() => void retry()} />;
   if (needsSetup) return <Navigate to="/setup" replace />;
   if (account) return <Navigate to={destination} replace />;
 

@@ -71,7 +71,7 @@ Put settings such as `DEEPL_API_KEY` in `server/.env`.
 
 **First run**: open the server in a browser and it asks for one admin account at `/setup`; that page closes itself as soon as an account exists. Reading stays open to anyone. Everything else — the library, the Studio, OCR, translation, the dictionary — needs an account, and an admin decides from `/admin` whether other people may register themselves.
 
-The server binds to `127.0.0.1` by default. Set `HOST=0.0.0.0` to reach it from other devices, bearing in mind that plain http sends passwords across the network in clear, and that passkeys only work on `localhost` or over https.
+The server binds to `127.0.0.1` by default. Set `HOST=0.0.0.0` to reach it from other devices. Plain http is fine for development, but it sends passwords and session cookies across the network in clear, so put TLS in front of any real deployment (and set `TRUST_PROXY`). Passkeys only work on `localhost` or over https.
 
 `data/secret.key` appears on first start and encrypts the authenticator secrets. Back it up with the database: without it, enrolled authenticator apps stop working and have to be set up again.
 
