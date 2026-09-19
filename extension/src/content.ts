@@ -391,6 +391,13 @@ async function replacePageImages(jobId: string, resultUrl: string): Promise<void
     console.warn(`[web-ocr] ignored a revision from ${target.origin}: it isn't the configured server`);
     return;
   }
+  // …and only this page's result image: the key must not be spendable on any other route of that server
+  const params = [...target.searchParams.keys()];
+  const revOnly = params.length === 0 || (params.length === 1 && /^[1-9]\d{0,9}$/.test(target.searchParams.get("rev") ?? ""));
+  if (target.pathname !== `/api/translate-page/${encodeURIComponent(jobId)}/result` || !revOnly || target.hash) {
+    console.warn("[web-ocr] ignored a revision that isn't this page's result image");
+    return;
+  }
 
   // Older than something already asked for: not worth downloading, it would only be discarded
   const revision = revisionOf(target.toString());

@@ -176,7 +176,7 @@ export class SessionStore {
     await db.delete(sessions).where(eq(sessions.userId, userId));
   }
 
-  /** Drops sessions that have run out; called at startup. */
+  /** Drops sessions that have run out; called at startup and then every 15 minutes. */
   static async purgeExpired(): Promise<number> {
     const rows = await db
       .delete(sessions)

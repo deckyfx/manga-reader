@@ -26,10 +26,18 @@ async function migrateDb(): Promise<void> {
   const swept = await PageStore.sweepDeletedPageFolders();
   if (swept > 0) bootLog.info(`Removed ${swept} leftover folder(s) of deleted pages`);
 
-  // Sessions that ran out while the server was down
-  const { SessionStore, UserStore } = await import("@/stores/user-store");
-  const expired = await SessionStore.purgeExpired();
-  if (expired > 0) bootLog.info(`Removed ${expired} expired session(s)`);
+  // Sessions and sign-in challenges that ran out while the server was down, then every so often while it runs:
+  // nothing else removes a challenge somebody abandoned halfway through signing in
+  const { MfaChallengeStore, SessionStore, UserStore } = await import("@/stores/user-store");
+  const purgeExpired = async (): Promise<void> => {
+    const [expired, challenges] = await Promise.all([SessionStore.purgeExpired(), MfaChallengeStore.purgeExpired()]);
+    if (expired > 0) bootLog.info(`Removed ${expired} expired session(s)`);
+    if (challenges > 0) bootLog.debug(`Removed ${challenges} expired sign-in challenge(s)`);
+  };
+  await purgeExpired();
+  setInterval(() => {
+    purgeExpired().catch((err: unknown) => bootLog.error({ err }, "Purging expired sessions failed"));
+  }, 15 * 60_000).unref();
   if ((await UserStore.count()) === 0) {
     bootLog.warn("No accounts yet — open /setup in a browser to create the first admin; the API stays closed until then");
   }
