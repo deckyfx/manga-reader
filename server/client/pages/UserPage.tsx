@@ -56,7 +56,7 @@ export function UserPage() {
   );
 }
 
-/** A list that couldn't be loaded: say so, rather than showing it as empty. */
+/** A list that couldn't be loaded (or reloaded): say so, rather than showing it empty or out of date. */
 function ListError({ error, onRetry }: { error: Error; onRetry: () => void }) {
   return (
     <p className="text-sm text-red-400">
@@ -171,7 +171,7 @@ function AuthenticatorSection() {
     <Section title="Authenticator apps" description="A code from an app, on top of your password. Add as many devices as you like.">
       {listQ.isLoading ? (
         <Loader2 size={16} className="animate-spin text-gray-500" />
-      ) : !listQ.data && listQ.isError ? (
+      ) : listQ.isError ? (
         <ListError error={listQ.error} onRetry={() => void listQ.refetch()} />
       ) : devices.length === 0 ? (
         <p className="text-sm text-gray-500">None yet — your password alone signs you in.</p>
@@ -346,7 +346,7 @@ function PasskeySection({ canUse }: { canUse: boolean }) {
       )}
       {listQ.isLoading ? (
         <Loader2 size={16} className="animate-spin text-gray-500" />
-      ) : !listQ.data && listQ.isError ? (
+      ) : listQ.isError ? (
         <ListError error={listQ.error} onRetry={() => void listQ.refetch()} />
       ) : keys.length === 0 ? (
         <p className="text-sm text-gray-500">None yet.</p>
@@ -432,7 +432,7 @@ function ApiKeySection({ canUse }: { canUse: boolean }) {
     <Section title="API keys" description="What the browser extension and the desktop app sign in with. OCR refuses to run without one.">
       {listQ.isLoading ? (
         <Loader2 size={16} className="animate-spin text-gray-500" />
-      ) : !listQ.data && listQ.isError ? (
+      ) : listQ.isError ? (
         <ListError error={listQ.error} onRetry={() => void listQ.refetch()} />
       ) : keys.length === 0 ? (
         <p className="text-sm text-gray-500">No keys yet.</p>
@@ -513,7 +513,7 @@ function SessionSection() {
     <Section title="Where you're signed in" description="Sign out anything you don't recognise.">
       {listQ.isLoading ? (
         <Loader2 size={16} className="animate-spin text-gray-500" />
-      ) : !listQ.data && listQ.isError ? (
+      ) : listQ.isError ? (
         <ListError error={listQ.error} onRetry={() => void listQ.refetch()} />
       ) : (
         <ul className="divide-y divide-gray-800 overflow-hidden rounded-lg border border-gray-800">

@@ -210,6 +210,8 @@ function clientAddress(request: Request, server: Server): string {
  */
 const loginsPerAddress = new RateLimiter(50, 15 * 60_000);
 const loginsPerAccount = new RateLimiter(10, 15 * 60_000);
+/** Making an account hashes its password too: setup and self-registration share this, per address. */
+const accountsPerAddress = new RateLimiter(10, 60 * 60_000);
 
 function writeSessionCookie(cookie: Record<string, { set: (options: Record<string, unknown>) => void; remove: () => void }>, request: Request, token: string | null, expires?: Date): void {
   const jar = cookie[SESSION_COOKIE];
@@ -262,7 +264,10 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
 
   .post(
     "/setup",
-    async ({ body, cookie, request, status }) => {
+    async ({ body, cookie, request, server, status }) => {
+      // Refused before the password is hashed: a finished setup mustn't be a free way to spend argon2 time
+      if (!(await needsSetup())) return status(409, { error: "this server already has an account" });
+      if (!accountsPerAddress.take(clientAddress(request, server))) return status(429, { error: "too many attempts — wait a while and try again" });
       // Only ever available on an empty install; afterwards accounts are made by an admin. The check and the insert
       // are one transaction, so a second request racing this one is refused rather than given its own admin.
       const user = await UserStore.insertFirstAdmin({
@@ -279,17 +284,18 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     },
     {
       body: t.Object({ username: Username, password: Password, display_name: t.Optional(t.Nullable(t.String({ maxLength: 80 }))) }),
-      response: { 200: UserSchema, 409: ErrBody },
+      response: { 200: UserSchema, 409: ErrBody, 429: ErrBody },
     },
   )
 
   .post(
     "/register",
-    async ({ body, cookie, request, status }) => {
+    async ({ body, cookie, request, server, status }) => {
       const policy = await serverPolicy();
       // Off by default: while it is off, accounts come from an admin
       if (!policy.registrationEnabled) return status(403, { error: "this server isn't taking new accounts" });
       if (await needsSetup()) return status(409, { error: "this server hasn't been set up yet" });
+      if (!accountsPerAddress.take(clientAddress(request, server))) return status(429, { error: "too many new accounts from here — wait a while and try again" });
       if (await UserStore.findByUsername(body.username)) return status(409, { error: "that username is taken" });
 
       const user = await UserStore.insertIfFree({
@@ -308,7 +314,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     },
     {
       body: t.Object({ username: Username, password: Password, display_name: t.Optional(t.Nullable(t.String({ maxLength: 80 }))) }),
-      response: { 200: UserSchema, 403: ErrBody, 409: ErrBody },
+      response: { 200: UserSchema, 403: ErrBody, 409: ErrBody, 429: ErrBody },
     },
   )
 

@@ -13,18 +13,23 @@ import type { UserRole } from "@/db/schema";
 /**
  * What a path needs: nothing, a role, and whether a tool's API key may be used at all. First match wins, so order
  * matters. `sessionOnly` marks the places where a stolen extension key must not reach — an API key exists to run
- * OCR, not to hand out accounts.
+ * OCR, not to hand out accounts. `exact` matches that one path only; without it an entry covers its whole subtree.
  */
-const POLICY: { prefix: string; needs: UserRole | "public"; sessionOnly?: boolean }[] = [
+const POLICY: { prefix: string; needs: UserRole | "public"; sessionOnly?: boolean; exact?: boolean }[] = [
   // Reading is open to everyone, signed in or not
   { prefix: "/read/api", needs: "public" },
   // Signing in, setting up, registering and asking who you are. Listed one by one rather than as all of /auth/api,
-  // so an account route added later falls to the closed default instead of being public
-  { prefix: "/auth/api/me", needs: "public" },
-  { prefix: "/auth/api/setup", needs: "public" },
-  { prefix: "/auth/api/register", needs: "public" },
-  { prefix: "/auth/api/login", needs: "public" },
-  { prefix: "/auth/api/logout", needs: "public" },
+  // so an account route added later falls to the closed default instead of being public. Exact paths, for the same
+  // reason: nothing nested under a public route inherits it.
+  { prefix: "/auth/api/me", needs: "public", exact: true },
+  { prefix: "/auth/api/setup", needs: "public", exact: true },
+  { prefix: "/auth/api/register", needs: "public", exact: true },
+  { prefix: "/auth/api/login", needs: "public", exact: true },
+  { prefix: "/auth/api/login/totp", needs: "public", exact: true },
+  { prefix: "/auth/api/login/recovery", needs: "public", exact: true },
+  { prefix: "/auth/api/login/passkey", needs: "public", exact: true },
+  { prefix: "/auth/api/login/passkey/options", needs: "public", exact: true },
+  { prefix: "/auth/api/logout", needs: "public", exact: true },
   // Your own account: any role, from the browser only (a tool's key must not add factors, mint keys or list sessions)
   { prefix: "/auth/api/password", needs: "reader", sessionOnly: true },
   { prefix: "/auth/api/recovery", needs: "reader", sessionOnly: true },
@@ -58,7 +63,7 @@ const POLICY: { prefix: string; needs: UserRole | "public"; sessionOnly?: boolea
 
 /** The rule for a path; anything unlisted needs an admin through a browser, so a new route is never left open. */
 export function ruleFor(pathname: string): { needs: UserRole | "public"; sessionOnly: boolean } {
-  const rule = POLICY.find((entry) => pathname === entry.prefix || pathname.startsWith(`${entry.prefix}/`));
+  const rule = POLICY.find((entry) => pathname === entry.prefix || (!entry.exact && pathname.startsWith(`${entry.prefix}/`)));
   return { needs: rule?.needs ?? "admin", sessionOnly: rule?.sessionOnly ?? rule === undefined };
 }
 

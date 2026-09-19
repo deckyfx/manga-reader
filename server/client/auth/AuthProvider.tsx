@@ -58,15 +58,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [qc]);
 
   const value = useMemo<AuthState>(() => {
-    const account = meQ.data?.user ?? null;
+    // A 401 means signed out now, whatever an earlier answer still cached says
+    const signedOut = meQ.error instanceof ApiError && meQ.error.status === 401;
+    const account = signedOut ? null : (meQ.data?.user ?? null);
     return {
       account,
-      factors: (meQ.data?.factors ?? []) as SecondFactor[],
+      factors: signedOut ? [] : ((meQ.data?.factors ?? []) as SecondFactor[]),
       needsSetup: meQ.data?.needs_setup ?? false,
       registrationEnabled: meQ.data?.registration_enabled ?? false,
       loading: meQ.isLoading,
       // A 401 is the guest answer (see `retry` above), not a failure to ask
-      error: meQ.isError && !(meQ.error instanceof ApiError && meQ.error.status === 401) ? (meQ.error as Error) : null,
+      error: meQ.isError && !signedOut ? (meQ.error as Error) : null,
       retry: refresh,
       can: (role) => (account ? RANK[account.role as UserRole] >= RANK[role] : false),
       refresh,

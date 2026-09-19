@@ -4,7 +4,7 @@
  */
 import { and, desc, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db/index";
-import { open, seal } from "@/lib/secret-box";
+import { isSealed, open, seal } from "@/lib/secret-box";
 import {
   apiKeys,
   credentials,
@@ -403,6 +403,20 @@ export class TotpDeviceStore {
   static async findById(id: number): Promise<TotpDevice | undefined> {
     const row = await db.query.totpDevices.findFirst({ where: eq(totpDevices.id, id) });
     return row ? TotpDeviceStore.unseal(row) : undefined;
+  }
+
+  /**
+   * Seals any secret still stored in the clear (authenticators enrolled before secrets were sealed at rest). Safe to
+   * run on every start: sealed rows are left alone. Returns how many were sealed.
+   */
+  static async sealLegacy(): Promise<number> {
+    const rows = await db.select({ id: totpDevices.id, secret: totpDevices.secret }).from(totpDevices);
+    const plain = rows.filter((row) => !isSealed(row.secret));
+    for (const row of plain) {
+      // Only if it is still the plain value read above, so a concurrent change isn't overwritten
+      await db.update(totpDevices).set({ secret: seal(row.secret) }).where(and(eq(totpDevices.id, row.id), eq(totpDevices.secret, row.secret)));
+    }
+    return plain.length;
   }
 
   static async insert(userId: number, name: string, secret: string): Promise<TotpDevice> {

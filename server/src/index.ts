@@ -28,7 +28,10 @@ async function migrateDb(): Promise<void> {
 
   // Sessions and sign-in challenges that ran out while the server was down, then every so often while it runs:
   // nothing else removes a challenge somebody abandoned halfway through signing in
-  const { MfaChallengeStore, SessionStore, UserStore } = await import("@/stores/user-store");
+  const { MfaChallengeStore, SessionStore, TotpDeviceStore, UserStore } = await import("@/stores/user-store");
+  // Authenticators enrolled before secrets were sealed at rest
+  const sealed = await TotpDeviceStore.sealLegacy();
+  if (sealed > 0) bootLog.info(`Sealed ${sealed} authenticator secret(s) stored in the clear`);
   const purgeExpired = async (): Promise<void> => {
     const [expired, challenges] = await Promise.all([SessionStore.purgeExpired(), MfaChallengeStore.purgeExpired()]);
     if (expired > 0) bootLog.info(`Removed ${expired} expired session(s)`);

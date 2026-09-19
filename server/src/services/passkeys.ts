@@ -127,7 +127,14 @@ export async function verifyAssertion(user: User, response: AuthenticationRespon
   }
   if (!verification.verified) return false;
 
-  // A counter that hasn't moved on is how a cloned authenticator shows up
-  await CredentialStore.touch(credential.id, verification.authenticationInfo.newCounter);
+  // A counter that hasn't moved on is how a cloned authenticator shows up, and the conditional update is also what
+  // decides between two assertions racing on separate challenges: only the one that advanced it signs in. Keys that
+  // always report zero have no counter to go by, and are let through as before.
+  const newCounter = verification.authenticationInfo.newCounter;
+  const advanced = await CredentialStore.touch(credential.id, newCounter);
+  if (newCounter !== 0 && !advanced) {
+    log.warn({ userId: user.id, credentialId: credential.id }, "Passkey counter did not advance");
+    return false;
+  }
   return true;
 }
