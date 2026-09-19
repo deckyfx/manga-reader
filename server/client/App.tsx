@@ -38,7 +38,8 @@ const queryClient: QueryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, staleTime: 10_000 },
   },
-  queryCache: new QueryCache({ onError: onUnauthorised }),
+  // `["me"]` is the question this handler re-asks, so its own failures must not trigger it again
+  queryCache: new QueryCache({ onError: (error, query) => { if (query.queryKey[0] !== "me") onUnauthorised(error); } }),
   mutationCache: new MutationCache({ onError: onUnauthorised }),
 });
 

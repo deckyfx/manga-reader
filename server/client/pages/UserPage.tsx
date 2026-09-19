@@ -56,6 +56,16 @@ export function UserPage() {
   );
 }
 
+/** A list that couldn't be loaded: say so, rather than showing it as empty. */
+function ListError({ error, onRetry }: { error: Error; onRetry: () => void }) {
+  return (
+    <p className="text-sm text-red-400">
+      Couldn't load this list: {error.message}{" "}
+      <button type="button" onClick={onRetry} className="text-gray-300 underline hover:text-white">Try again</button>
+    </p>
+  );
+}
+
 function Section({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
     <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
@@ -161,6 +171,8 @@ function AuthenticatorSection() {
     <Section title="Authenticator apps" description="A code from an app, on top of your password. Add as many devices as you like.">
       {listQ.isLoading ? (
         <Loader2 size={16} className="animate-spin text-gray-500" />
+      ) : !listQ.data && listQ.isError ? (
+        <ListError error={listQ.error} onRetry={() => void listQ.refetch()} />
       ) : devices.length === 0 ? (
         <p className="text-sm text-gray-500">None yet — your password alone signs you in.</p>
       ) : (
@@ -206,7 +218,17 @@ function AuthenticatorSection() {
             <button type="submit" disabled={!code.trim() || confirmM.isPending} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
               {confirmM.isPending ? <Loader2 size={14} className="animate-spin" /> : "Confirm"}
             </button>
-            <button type="button" onClick={() => setEnrolling(null)} className="rounded-lg px-3 py-1.5 text-sm text-gray-400 hover:bg-gray-800">Cancel</button>
+            <button
+              type="button"
+              onClick={() => {
+                setEnrolling(null);
+                // The device was created when enrolment started; show the list as the server has it now
+                void qc.invalidateQueries({ queryKey: ["authenticators"] });
+              }}
+              className="rounded-lg px-3 py-1.5 text-sm text-gray-400 hover:bg-gray-800"
+            >
+              Cancel
+            </button>
           </form>
         </div>
       ) : (
@@ -324,6 +346,8 @@ function PasskeySection({ canUse }: { canUse: boolean }) {
       )}
       {listQ.isLoading ? (
         <Loader2 size={16} className="animate-spin text-gray-500" />
+      ) : !listQ.data && listQ.isError ? (
+        <ListError error={listQ.error} onRetry={() => void listQ.refetch()} />
       ) : keys.length === 0 ? (
         <p className="text-sm text-gray-500">None yet.</p>
       ) : (
@@ -408,6 +432,8 @@ function ApiKeySection({ canUse }: { canUse: boolean }) {
     <Section title="API keys" description="What the browser extension and the desktop app sign in with. OCR refuses to run without one.">
       {listQ.isLoading ? (
         <Loader2 size={16} className="animate-spin text-gray-500" />
+      ) : !listQ.data && listQ.isError ? (
+        <ListError error={listQ.error} onRetry={() => void listQ.refetch()} />
       ) : keys.length === 0 ? (
         <p className="text-sm text-gray-500">No keys yet.</p>
       ) : (
@@ -487,6 +513,8 @@ function SessionSection() {
     <Section title="Where you're signed in" description="Sign out anything you don't recognise.">
       {listQ.isLoading ? (
         <Loader2 size={16} className="animate-spin text-gray-500" />
+      ) : !listQ.data && listQ.isError ? (
+        <ListError error={listQ.error} onRetry={() => void listQ.refetch()} />
       ) : (
         <ul className="divide-y divide-gray-800 overflow-hidden rounded-lg border border-gray-800">
           {sessions.map((session) => (

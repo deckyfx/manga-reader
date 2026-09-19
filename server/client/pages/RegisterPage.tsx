@@ -7,13 +7,14 @@ import { useAuth } from "../auth/AuthProvider";
 import { AuthButton } from "../components/AuthButton";
 import { AuthField } from "../components/AuthField";
 import { AuthShell } from "../components/AuthShell";
+import { LoadFailure } from "../components/LoadFailure";
 import { useToast } from "../components/Toast";
 
 /** Self-registration, which only exists while an admin has it switched on. */
 export function RegisterPage() {
   const navigate = useNavigate();
   const toast = useToast();
-  const { account, needsSetup, registrationEnabled, loading, refresh } = useAuth();
+  const { account, needsSetup, registrationEnabled, loading, error, retry, refresh } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -40,6 +41,8 @@ export function RegisterPage() {
       </div>
     );
   }
+  // An unreachable server hasn't said registration is off
+  if (error) return <LoadFailure message={error.message} onRetry={() => void retry()} />;
   if (needsSetup) return <Navigate to="/setup" replace />;
   if (account) return <Navigate to="/home" replace />;
 

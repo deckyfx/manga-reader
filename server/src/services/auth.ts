@@ -198,8 +198,8 @@ const hashRecoveryCode = (code: string): Promise<string> => Bun.password.hash(co
 /**
  * Issuing ten codes means ten argon2 hashes, and Bun's defaults ask for 64 MiB each. Ten at once is 640 MiB, and two
  * people asking at the same moment is 1.3 GB — on a machine that is also holding ONNX models in memory. So the
- * hashing is sequential, and one issuance runs at a time across the whole process. It happens rarely and nobody is
- * waiting on it.
+ * hashing is sequential, and one issuance (or one recovery-code check) runs at a time across the whole process. Both
+ * are rare, so a short wait is the better trade.
  */
 let issuing: Promise<unknown> = Promise.resolve();
 
@@ -213,10 +213,14 @@ function queued<T>(work: () => Promise<T>): Promise<T> {
 export async function useRecoveryCode(userId: number, code: string): Promise<boolean> {
   const typed = code.trim().toUpperCase();
   if (!typed) return false;
-  for (const stored of await RecoveryCodeStore.listUnused(userId)) {
-    if (await verifyPassword(typed, stored.codeHash)) return RecoveryCodeStore.consume(stored.id);
-  }
-  return false;
+  // Up to ten argon2id checks per attempt: queued like issuing, so concurrent attempts can't stack their memory. The
+  // list is read inside the queue, so a set issued meanwhile is the one checked.
+  return queued(async () => {
+    for (const stored of await RecoveryCodeStore.listUnused(userId)) {
+      if (await verifyPassword(typed, stored.codeHash)) return RecoveryCodeStore.consume(stored.id);
+    }
+    return false;
+  });
 }
 
 /** Ten fresh codes: the plain list is returned once, only the hashes are kept. */

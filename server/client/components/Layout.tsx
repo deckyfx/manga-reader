@@ -3,6 +3,7 @@ import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-route
 import { BookOpen, FolderCog, Layers, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Settings, ShieldCheck, UserRound } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { ThemeToggle } from "./ThemeToggle";
+import { useToast } from "./Toast";
 
 const STORAGE_KEY = "sidebar-expanded";
 
@@ -37,6 +38,8 @@ export function Layout() {
   const { account, can, needsSetup, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const toast = useToast();
+  const [signingOut, setSigningOut] = useState(false);
 
   // An empty server has nothing to show until it has an admin
   if (needsSetup && location.pathname !== "/setup") return <Navigate to="/setup" replace />;
@@ -81,9 +84,16 @@ export function Layout() {
             <>
               <NavItem to="/user" icon={<UserRound size={20} />} label={account.display_name ?? account.username} expanded={expanded} />
               <button
-                onClick={() => void signOut().then(() => navigate("/read"))}
+                disabled={signingOut}
+                onClick={() => {
+                  setSigningOut(true);
+                  signOut()
+                    .then(() => navigate("/read"))
+                    .catch((error: unknown) => toast.error(`Couldn't sign out: ${error instanceof Error ? error.message : String(error)}`))
+                    .finally(() => setSigningOut(false));
+                }}
                 title={expanded ? undefined : "Sign out"}
-                className="flex w-full items-center gap-3 rounded-lg p-2.5 text-sm text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+                className="flex w-full items-center gap-3 rounded-lg p-2.5 text-sm text-gray-400 transition-colors hover:bg-gray-800 hover:text-white disabled:opacity-50"
               >
                 <span className="shrink-0"><LogOut size={20} /></span>
                 {expanded && <span className="truncate">Sign out</span>}

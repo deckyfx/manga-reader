@@ -81,6 +81,8 @@ The server binds to `127.0.0.1` by default. Set `HOST=0.0.0.0` to reach it from 
 2. In extension settings, choose the **Remote Server** tab, enter the server URL and paste the key.
 3. Click **Test Connection** — it reports whether the server is up *and* whether the key was accepted, naming the account it belongs to. Then save.
 
+For a plain-`http` address that isn't on this machine (a LAN server, say), the extension withholds the key, and Test Connection refuses, until you tick **Send the key over plain http anyway**: anyone on that network could read the key.
+
 Without a key the server refuses OCR, translation and page jobs. The desktop app takes the same key in its settings.
 
 To build a single executable: `bun run build` (outputs `server/app`).
