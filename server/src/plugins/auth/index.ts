@@ -183,16 +183,21 @@ export const requireRole = (role: UserRole) =>
     });
 
 /** Sets or clears the session cookie. Secure is set only over https, so a loopback server still works. */
+type Server = { requestIP: (request: Request) => { address: string } | null } | null;
+
+/** Requests whose direct peer is a trusted proxy, so their forwarded headers may be believed. */
+const viaTrustedProxy = new WeakSet<Request>();
+
 /** Whether the browser reached us over https: directly, or through a trusted proxy that terminated TLS. */
 function isHttps(request: Request): boolean {
   if (request.url.startsWith("https://")) return true;
-  if (!env.TRUST_PROXY) return false;
+  if (!viaTrustedProxy.has(request)) return false;
   return request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase() === "https";
 }
 
-/** Who is asking, for sign-in limits: the socket's address, or the proxy's report of it when the proxy is trusted. */
-function clientAddress(request: Request, server: { requestIP: (request: Request) => { address: string } | null } | null): string {
-  if (env.TRUST_PROXY) {
+/** Who is asking, for sign-in limits: the socket's address, or a trusted proxy's report of it. */
+function clientAddress(request: Request, server: Server): string {
+  if (viaTrustedProxy.has(request)) {
     const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
     if (forwarded) return forwarded;
   }
@@ -224,6 +229,11 @@ function writeSessionCookie(cookie: Record<string, { set: (options: Record<strin
 }
 
 export const authPlugin = new Elysia({ prefix: "/auth/api" })
+  // Marks requests arriving from a configured proxy, before any handler reads a forwarded header
+  .onRequest(({ request, server }) => {
+    const peer = server?.requestIP(request)?.address;
+    if (peer && env.TRUSTED_PROXIES.includes(peer)) viaTrustedProxy.add(request);
+  })
   .use(authContext)
 
   .get(

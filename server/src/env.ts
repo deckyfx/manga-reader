@@ -25,12 +25,15 @@ class EnvConfig {
   }
 
   /**
-   * Set to `true` only when a reverse proxy you run sits in front and terminates TLS. Then its `X-Forwarded-Proto`
-   * decides whether session cookies are marked Secure, and `X-Forwarded-For` is the client address sign-in limits
-   * count against. Left off, both headers are ignored, since anyone could send them.
+   * The reverse proxies (that terminate TLS) whose `X-Forwarded-Proto` and `X-Forwarded-For` are believed: `true` for
+   * one on this machine (loopback), or a comma-separated list of their addresses. The headers are ignored from anyone
+   * else, since any client could send them. Unset: ignored from everyone.
    */
-  get TRUST_PROXY(): boolean {
-    return Bun.env.TRUST_PROXY === "true";
+  get TRUSTED_PROXIES(): string[] {
+    const raw = (Bun.env.TRUST_PROXY ?? "").trim();
+    if (raw === "" || raw === "false") return [];
+    if (raw === "true") return ["127.0.0.1", "::1", "::ffff:127.0.0.1"];
+    return raw.split(",").map((address) => address.trim()).filter(Boolean);
   }
 
   get NODE_ENV(): "development" | "production" | "test" {
