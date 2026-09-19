@@ -217,6 +217,12 @@ export const startWorkspaceRun = (id: number, body: { force?: boolean; clean_sfx
 /** Progress of that run, or `{ pending }` when none has started. */
 export const getWorkspaceRun = (id: number) => unwrap(api.studio.api.workspaces({ id }).run.get());
 
+/** Publishes every page of the workspace holding work readers can't see yet (a draft publishes over its origin). */
+export const publishWorkspace = (id: number) => unwrap(api.studio.api.workspaces({ id }).publish.post());
+
+/** Works on a chapter in the Studio: a workspace of draft copies, made or extended. */
+export const sendChapterToStudio = (id: number) => unwrap(api.manage.api.chapters({ id })["to-studio"].post());
+
 /** Moves the workspace's pages into a chapter, in order, publishing the translated ones. */
 export const fileWorkspace = (id: number, chapterId: number) =>
   unwrap(api.studio.api.workspaces({ id }).file.post({ chapter_id: chapterId }));

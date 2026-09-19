@@ -90,6 +90,9 @@ regionScans: id, userId (fk users, set null), apiKeyId (fk api_keys, set null),
 
 ## 5. P3: workspaces + send chapter to Studio
 
+**Status (2026-09-20): done** — schema + store, `/studio/api/workspaces` (CRUD, batched uploads, run, file, publish),
+`POST /manage/api/chapters/:id/to-studio`, the Studio list / workspace page / editor navigation, and a `bun test` suite.
+
 A **workspace** is a folder of Studio pages. A page can sit loose (as it does now) or in exactly one workspace.
 
 ```ts

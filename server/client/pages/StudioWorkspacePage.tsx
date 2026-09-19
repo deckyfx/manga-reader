@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, Check, FolderInput, ImageUp, Loader2, Pencil, Play, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, FolderInput, ImageUp, Loader2, Pencil, Play, Send, Trash2 } from "lucide-react";
 import {
   deleteWorkspace,
   getWorkspace,
   getWorkspaceRun,
+  publishWorkspace,
   renameWorkspace,
   startWorkspaceRun,
   uploadWorkspacePages,
@@ -51,6 +52,16 @@ export function StudioWorkspacePage() {
     onSuccess: refresh,
     onError: (error) => toast.error(error.message),
   });
+  const publishM = useMutation({
+    mutationFn: () => publishWorkspace(id),
+    onSuccess: (result) => {
+      refresh();
+      void qc.invalidateQueries({ queryKey: ["studio-pages"] });
+      toast.info(`Published ${result.published} page${result.published === 1 ? "" : "s"}`);
+      for (const entry of result.skipped) toast.error(entry.reason);
+    },
+    onError: (error) => toast.error(error.message),
+  });
   const renameM = useMutation({
     mutationFn: (name: string) => renameWorkspace(id, { name }),
     onSuccess: () => {
@@ -75,6 +86,8 @@ export function StudioWorkspacePage() {
   const { workspace, pages } = detail;
   const run = runQ.data && "running" in runQ.data ? runQ.data : null;
   const pending = runQ.data && "pending" in runQ.data ? runQ.data.pending : null;
+  // A draft's badge is measured against the chapter page it replaces, so this counts what readers can't see yet
+  const unpublished = pages.filter((page) => page.has_edits).length;
 
   /** Sends the chosen images as one batch, appended after the pages already here. */
   const addPages = async (files: FileList | null) => {
@@ -185,6 +198,19 @@ export function StudioWorkspacePage() {
             >
               <BookOpen size={14} /> Its chapter
             </Link>
+          )}
+          {unpublished > 0 && (
+            <button
+              onClick={() => publishM.mutate()}
+              disabled={publishM.isPending}
+              title={workspace.chapter_id === null
+                ? "Readers get the current version of every page edited since it was published"
+                : "Copy each edited draft over its chapter page and publish it"}
+              className="flex items-center gap-2 rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-amber-500 disabled:opacity-50"
+            >
+              {publishM.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              Publish {unpublished}
+            </button>
           )}
           <button
             onClick={() => runM.mutate()}
