@@ -756,6 +756,13 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
     let seen = 0;
 
     const onJobEvent = (es: EventSource, event: MessageEvent<string>, skip: { remaining: number }): void => {
+      // A newer translation owns the panel from the moment it claims its number — even while it is still uploading.
+      // This stream's news is no longer anybody's, so it closes itself rather than writing into the other's overlay.
+      if (!isCurrent()) {
+        es.close();
+        if (activeEventSource === es) activeEventSource = null;
+        return;
+      }
       if (skip.remaining > 0) {
         skip.remaining--;
         return;
