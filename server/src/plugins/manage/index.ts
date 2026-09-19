@@ -564,12 +564,14 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     "/users",
     async ({ body, status }) => {
       if (await UserStore.findByUsername(body.username)) return status(409, { error: "that username is taken" });
-      const user = await UserStore.insert({
+      const user = await UserStore.insertIfFree({
         username: body.username,
         displayName: body.display_name ?? null,
         passwordHash: await hashPassword(body.password),
         role: body.role,
       });
+      // Taken between the check above and here
+      if (!user) return status(409, { error: "that username is taken" });
       log.info({ userId: user.id, role: user.role }, "Account created");
       return toUser(user);
     },

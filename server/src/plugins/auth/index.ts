@@ -34,6 +34,8 @@ import {
   authenticate,
   checkTotp,
   removeTotpDevice,
+  spendMfaAttempt,
+  withAccountLock,
   endMfaChallenge,
   issueRecoveryCodes,
   pendingUser,
@@ -255,12 +257,14 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       if (await needsSetup()) return status(409, { error: "this server hasn't been set up yet" });
       if (await UserStore.findByUsername(body.username)) return status(409, { error: "that username is taken" });
 
-      const user = await UserStore.insert({
+      const user = await UserStore.insertIfFree({
         username: body.username,
         displayName: body.display_name ?? null,
         passwordHash: await hashPassword(body.password),
         role: policy.defaultRole,
       });
+      // Taken between the check above and here
+      if (!user) return status(409, { error: "that username is taken" });
       // A new account has no second factor yet; it can add one from its own page once it is in
       const { token, expiresAt } = await startSession(user.id, request.headers.get("user-agent"));
       writeSessionCookie(cookie, request.url, token, expiresAt);
@@ -303,6 +307,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     async ({ body, cookie, request, status }) => {
       const pending = await pendingUser(body.challenge);
       if (!pending) return status(401, { error: "this sign-in has expired — start again" });
+      if (!(await spendMfaAttempt(pending.tokenHash))) return status(401, { error: "too many wrong codes — sign in again" });
       if (!(await checkTotp(pending.user, body.code))) {
         log.warn({ userId: pending.user.id }, "Wrong authenticator code");
         return status(401, { error: "that code isn't right" });
@@ -326,6 +331,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     async ({ body, cookie, request, status }) => {
       const pending = await pendingUser(body.challenge);
       if (!pending) return status(401, { error: "this sign-in has expired — start again" });
+      if (!(await spendMfaAttempt(pending.tokenHash))) return status(401, { error: "too many wrong codes — sign in again" });
       if (!(await useRecoveryCode(pending.user.id, body.code))) {
         log.warn({ userId: pending.user.id }, "Wrong or spent recovery code");
         return status(401, { error: "that recovery code isn't right, or has been used" });
@@ -480,10 +486,13 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
+      const userId = principal.user.id;
       // Only one enrolment can be half-finished at a time; starting again replaces the abandoned one
-      await TotpDeviceStore.deleteUnconfirmed(principal.user.id);
       const secret = newTotpSecret();
-      const device = await TotpDeviceStore.insert(principal.user.id, body.name, secret);
+      const device = await withAccountLock(userId, async () => {
+        await TotpDeviceStore.deleteUnconfirmed(userId);
+        return TotpDeviceStore.insert(userId, body.name, secret);
+      });
       return { id: device.id, name: device.name, secret, uri: otpauthUri(secret, `${principal.user.username} (${body.name})`) };
     },
     {
@@ -498,17 +507,21 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
-      const device = await TotpDeviceStore.findById(params.id);
-      if (!device || device.userId !== principal.user.id) return status(404, { error: "that authenticator isn't on this account" });
-      if (device.confirmedAt) return status(409, { error: "this authenticator is already set up" });
-      if (!verifyTotp(device.secret, body.code)) return status(422, { error: "that code isn't right — check the app's clock" });
+      const userId = principal.user.id;
+      // Read, decide and write as one step per account: two confirmations at once must not both count as the first
+      return withAccountLock(userId, async () => {
+        const device = await TotpDeviceStore.findById(params.id);
+        if (!device || device.userId !== userId) return status(404, { error: "that authenticator isn't on this account" });
+        if (device.confirmedAt) return status(409, { error: "this authenticator is already set up" });
+        if (!verifyTotp(device.secret, body.code)) return status(422, { error: "that code isn't right — check the app's clock" });
 
-      const first = (await TotpDeviceStore.listConfirmed(principal.user.id)).length === 0;
-      await TotpDeviceStore.confirm(device.id);
-      // Recovery codes come with the first device; the rest join an account that already has them
-      const codes = first ? await issueRecoveryCodes(principal.user.id) : [];
-      log.info({ userId: principal.user.id, deviceId: device.id, first }, "Authenticator enrolled");
-      return { confirmed: true, recovery_codes: codes };
+        const first = (await TotpDeviceStore.listConfirmed(userId)).length === 0;
+        await TotpDeviceStore.confirm(device.id);
+        // Recovery codes come with the first device; the rest join an account that already has them
+        const codes = first ? await issueRecoveryCodes(userId) : [];
+        log.info({ userId, deviceId: device.id, first }, "Authenticator enrolled");
+        return { confirmed: true, recovery_codes: codes };
+      });
     },
     {
       params: t.Object({ id: t.Integer({ minimum: 1 }) }),
@@ -525,7 +538,8 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
       // The password again: a borrowed session shouldn't be able to strip a factor off the account
       if (!(await verifyPassword(body.password, principal.user.passwordHash))) return status(403, { error: "the password doesn't match" });
-      if (!(await removeTotpDevice(principal.user.id, params.id))) return status(404, { error: "that authenticator isn't on this account" });
+      const userId = principal.user.id;
+      if (!(await withAccountLock(userId, () => removeTotpDevice(userId, params.id)))) return status(404, { error: "that authenticator isn't on this account" });
       log.info({ userId: principal.user.id, deviceId: params.id }, "Authenticator removed");
       return { removed: true };
     },

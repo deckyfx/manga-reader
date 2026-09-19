@@ -26,7 +26,8 @@ export async function loadSettings(): Promise<Settings> {
   // Anything an older build left in sync comes out of sync, whether or not it is still needed here
   const inSync = SECRET_KEYS.filter((key) => typeof synced[key] === "string" && synced[key] !== "");
   if (inSync.length > 0) {
-    const rescued = Object.fromEntries(inSync.filter((key) => !local[key]).map((key) => [key, synced[key]]));
+    // Only keys this machine has never stored: an empty local value is a key the user cleared, not one to restore
+    const rescued = Object.fromEntries(inSync.filter((key) => !Object.hasOwn(local, key)).map((key) => [key, synced[key]]));
     if (Object.keys(rescued).length > 0) {
       await chrome.storage.local.set(rescued);
       Object.assign(local, rescued);
@@ -47,12 +48,9 @@ export async function saveSettings(settings: Settings): Promise<void> {
     if (isSecret(key)) secrets[key] = String(value);
     else shared[key] = value;
   }
-  await Promise.all([
-    chrome.storage.local.set(secrets),
-    chrome.storage.sync.set(shared),
-    // Older builds may still have them in sync; don't leave a copy behind
-    chrome.storage.sync.remove([...SECRET_KEYS]),
-  ]);
+  await Promise.all([chrome.storage.local.set(secrets), chrome.storage.sync.set(shared)]);
+  // Older builds may still have them in sync; drop that copy only once the local write has landed
+  await chrome.storage.sync.remove([...SECRET_KEYS]);
 }
 
 /** Just the pieces the content script needs to talk to the server. */

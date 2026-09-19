@@ -29,6 +29,14 @@ import {
 /** Usernames are matched lower-cased, so "Decky" and "decky" are the same account. */
 export const normaliseUsername = (name: string): string => name.trim().toLowerCase();
 
+/** Whether an insert failed on the users' unique username (Drizzle wraps the SQLite error in `cause`). */
+function isUsernameConflict(err: unknown): boolean {
+  for (let e: unknown = err; e instanceof Error; e = e.cause) {
+    if (/UNIQUE constraint failed: users\.username/.test(e.message)) return true;
+  }
+  return false;
+}
+
 export class UserStore {
   /** Whether anyone has an account yet; false means the server is still waiting to be set up. */
   static async count(): Promise<number> {
@@ -59,6 +67,19 @@ export class UserStore {
       const rows = tx.insert(users).values({ ...user, username: normaliseUsername(user.username), role: "admin" }).returning().all();
       return rows[0] ?? null;
     });
+  }
+
+  /**
+   * `insert`, or null when the username is already taken. The unique index is what decides: a check beforehand can't,
+   * since two requests for the same name can both pass it.
+   */
+  static async insertIfFree(user: NewUser): Promise<User | null> {
+    try {
+      return await UserStore.insert(user);
+    } catch (err) {
+      if (isUsernameConflict(err)) return null;
+      throw err;
+    }
   }
 
   static async insert(user: NewUser): Promise<User> {

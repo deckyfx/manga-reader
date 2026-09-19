@@ -248,7 +248,52 @@ export async function removeTotpDevice(userId: number, deviceId: number): Promis
  * Ends a challenge once it has been used. The answer matters: only the request that removed it may go on to make a
  * session, so a challenge can't be turned into two.
  */
-export const endMfaChallenge = (tokenHash: string): Promise<boolean> => MfaChallengeStore.delete(tokenHash);
+export const endMfaChallenge = (tokenHash: string): Promise<boolean> => {
+  mfaAttempts.delete(tokenHash);
+  return MfaChallengeStore.delete(tokenHash);
+};
+
+/** Codes one sign-in challenge may be checked against before it is thrown away and the password is needed again. */
+const MAX_MFA_ATTEMPTS = 5;
+/** Attempts per open challenge (by token hash), with when the entry can be forgotten. */
+const mfaAttempts = new Map<string, { count: number; until: number }>();
+
+/**
+ * Takes one attempt from a challenge before a code is checked against it; false (and the challenge ended) once they
+ * are used up. Taken before the check rather than after a failure, so parallel requests can't all guess at once. Kept
+ * in memory: a challenge lives minutes, and a restart only hands out a fresh few to someone who already has the
+ * password.
+ */
+export async function spendMfaAttempt(tokenHash: string): Promise<boolean> {
+  const now = Date.now();
+  if (mfaAttempts.size > 1000) {
+    for (const [hash, entry] of mfaAttempts) if (entry.until < now) mfaAttempts.delete(hash);
+  }
+  const entry = mfaAttempts.get(tokenHash) ?? { count: 0, until: now + MFA_CHALLENGE_MINUTES * 60 * 1000 };
+  entry.count++;
+  mfaAttempts.set(tokenHash, entry);
+  if (entry.count <= MAX_MFA_ATTEMPTS) return true;
+  // The count stays until it expires, so a request already past the challenge lookup can't start over from zero
+  await MfaChallengeStore.delete(tokenHash);
+  return false;
+}
+
+const accountLocks = new Map<number, Promise<unknown>>();
+
+/**
+ * Runs `task` after every earlier one for the same account settles. Changes to an account's second factors (start an
+ * enrolment, confirm the first device and issue its codes, remove one) read, decide and write in several steps; two
+ * at once could leave two half-finished devices, or two sets of recovery codes of which only the last works.
+ */
+export function withAccountLock<T>(userId: number, task: () => Promise<T>): Promise<T> {
+  const result = (accountLocks.get(userId) ?? Promise.resolve()).then(task);
+  const settled = result.then(() => {}, () => {});
+  accountLocks.set(userId, settled);
+  void settled.then(() => {
+    if (accountLocks.get(userId) === settled) accountLocks.delete(userId);
+  });
+  return result;
+}
 
 export { sha256 as hashSecret };
 

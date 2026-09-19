@@ -50,9 +50,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     await logoutRequest();
-    // Everything on screen was fetched as somebody: start again as a guest
-    qc.clear();
-    await qc.invalidateQueries({ queryKey: ["me"] });
+    // Everything on screen was fetched as somebody: start again as a guest. `["me"]` is reset rather than removed, so
+    // the observer above (still mounted) is handed the guest answer instead of keeping the old account.
+    qc.getMutationCache().clear();
+    qc.removeQueries({ predicate: (query) => query.queryKey[0] !== "me" });
+    await qc.resetQueries({ queryKey: ["me"], exact: true });
   }, [qc]);
 
   const value = useMemo<AuthState>(() => {
