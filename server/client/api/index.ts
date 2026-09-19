@@ -217,6 +217,10 @@ export const startWorkspaceRun = (id: number, body: { force?: boolean; clean_sfx
 /** Progress of that run, or `{ pending }` when none has started. */
 export const getWorkspaceRun = (id: number) => unwrap(api.studio.api.workspaces({ id }).run.get());
 
+/** Moves the workspace's pages into a chapter, in order, publishing the translated ones. */
+export const fileWorkspace = (id: number, chapterId: number) =>
+  unwrap(api.studio.api.workspaces({ id }).file.post({ chapter_id: chapterId }));
+
 export type StudioWorkspace = Awaited<ReturnType<typeof listWorkspaces>>[number];
 export type WorkspaceRunState = Awaited<ReturnType<typeof getWorkspaceRun>>;
 

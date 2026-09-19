@@ -129,3 +129,32 @@ describe("running a workspace", () => {
     expect(state.error).toContain("not ready");
   });
 });
+
+describe("filing a workspace into a chapter", () => {
+  test("moves its pages in order and binds the workspace to the chapter", async () => {
+    const series = await call<{ series: { id: number } }>("POST", "/manage/api/series", { title: `Filed ${crypto.randomUUID()}` }, { cookie });
+    const seriesId = series.body.series.id;
+    const detail = await call<{ unsorted: { id: number }[] }>("POST", "/manage/api/chapters", { series_id: seriesId, title: "Chapter 1" }, { cookie });
+    const chapterId = detail.body.unsorted[0]!.id;
+
+    const id = await create({ name: "To file" });
+    await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(0, ["a.png", "b.png"]), { cookie });
+
+    const filed = await call("POST", `/studio/api/workspaces/${id}/file`, { chapter_id: chapterId }, { cookie });
+    expect(filed.status).toBe(200);
+    // Nothing is translated yet, so nothing is published: the pages move and wait to be run
+    expect(filed.body).toMatchObject({ filed: 2, published: 0, skipped: [] });
+    expect(filed.body.workspace.chapter_id).toBe(chapterId);
+
+    // They are the chapter's pages now, in workspace order, and still listed with the workspace
+    const inChapter = await call<{ id: string }[]>("GET", `/studio/api/pages?filed=chapter&chapter_id=${chapterId}`, undefined, { cookie });
+    expect(inChapter.body.map((p) => p.id).sort()).toEqual(filed.body.pages.map((p: { id: string }) => p.id).sort());
+    expect(filed.body.pages.every((p: { chapter_id: number | null }) => p.chapter_id === chapterId)).toBe(true);
+  });
+
+  test("refuse an unknown workspace or chapter", async () => {
+    const id = await create({ name: "Nowhere" });
+    expect((await call("POST", `/studio/api/workspaces/${id}/file`, { chapter_id: 999999 }, { cookie })).status).toBe(404);
+    expect((await call("POST", "/studio/api/workspaces/999999/file", { chapter_id: 1 }, { cookie })).status).toBe(404);
+  });
+});

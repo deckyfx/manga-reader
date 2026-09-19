@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, ImageUp, Loader2, Pencil, Play, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, FolderInput, ImageUp, Loader2, Pencil, Play, Trash2 } from "lucide-react";
 import {
   deleteWorkspace,
   getWorkspace,
@@ -10,6 +10,7 @@ import {
   startWorkspaceRun,
   uploadWorkspacePages,
 } from "../api";
+import { ChapterPicker } from "../components/ChapterPicker";
 import { useConfirm } from "../components/ConfirmDialog";
 import { LoadFailure } from "../components/LoadFailure";
 import { StudioPageCard } from "../components/StudioPageCard";
@@ -28,6 +29,7 @@ export function StudioWorkspacePage() {
   const confirm = useConfirm();
   const fileRef = useRef<HTMLInputElement>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [filing, setFiling] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   const workspaceQ = useQuery({ queryKey: ["workspace", id], queryFn: () => getWorkspace(id), enabled: Number.isInteger(id) });
@@ -166,6 +168,24 @@ export function StudioWorkspacePage() {
           >
             {uploading ? <Loader2 size={14} className="animate-spin" /> : <ImageUp size={14} />} Add pages
           </button>
+          {workspace.chapter_id === null ? (
+            <button
+              onClick={() => setFiling(true)}
+              disabled={pages.length === 0}
+              title="Move these pages into a chapter, publishing the translated ones"
+              className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-800 disabled:opacity-40"
+            >
+              <FolderInput size={14} /> File into chapter
+            </button>
+          ) : (
+            <Link
+              to={`/manage/chapters/${workspace.chapter_id}`}
+              title="This workspace works on that chapter"
+              className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-800"
+            >
+              <BookOpen size={14} /> Its chapter
+            </Link>
+          )}
           <button
             onClick={() => runM.mutate()}
             disabled={runM.isPending || run?.running === true || pages.length === 0}
@@ -211,6 +231,19 @@ export function StudioWorkspacePage() {
           </div>
         )}
       </div>
+
+      {filing && (
+        <ChapterPicker
+          workspaceId={id}
+          pageLabel={workspace.name}
+          onClose={() => setFiling(false)}
+          onFiled={() => {
+            setFiling(false);
+            refresh();
+            toast.info("Filed into the chapter");
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, Loader2, Search } from "lucide-react";
-import { copyPageIntoChapter, getSeries, listSeries } from "../api";
+import { copyPageIntoChapter, fileWorkspace, getSeries, listSeries } from "../api";
 import { Modal } from "./Modal";
 
 interface ChapterPickerProps {
-  pageId: string;
+  /** The draft being filed; leave out and give `workspaceId` to file a whole workspace. */
+  pageId?: string;
+  /** Files every page of this workspace instead of one draft, keeping the workspace's order. */
+  workspaceId?: number;
   /** True when the page already belongs to a chapter: it can only be copied from there, never moved out. */
   filed?: boolean;
   /** Shown in the dialog so it's clear which page is being filed. */
@@ -18,7 +21,7 @@ interface ChapterPickerProps {
  * Files a Studio draft into a chapter: pick the series, then the chapter. The draft is copied by default, so the
  * Studio keeps the original to work from; unticking "keep the draft" moves the page itself.
  */
-export function ChapterPicker({ pageId, pageLabel, filed = false, onClose, onFiled }: ChapterPickerProps) {
+export function ChapterPicker({ pageId, workspaceId, pageLabel, filed = false, onClose, onFiled }: ChapterPickerProps) {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [seriesId, setSeriesId] = useState<number | null>(null);
@@ -28,10 +31,18 @@ export function ChapterPicker({ pageId, pageLabel, filed = false, onClose, onFil
   const detailQ = useQuery({ queryKey: ["series", seriesId], queryFn: () => getSeries(seriesId ?? 0), enabled: seriesId !== null });
 
   const fileM = useMutation({
-    mutationFn: (chapterId: number) => copyPageIntoChapter(chapterId, pageId, { keep_draft: filed || keepDraft }),
-    onSuccess: (_detail, chapterId) => {
+    // Both answer with a detail this dialog doesn't use; it closes and lets the queries reload
+    mutationFn: async (chapterId: number) => {
+      if (workspaceId !== undefined) await fileWorkspace(workspaceId, chapterId);
+      else await copyPageIntoChapter(chapterId, pageId ?? "", { keep_draft: filed || keepDraft });
+    },
+    onSuccess: (_result, chapterId) => {
       void qc.invalidateQueries({ queryKey: ["studio-pages"] });
       void qc.invalidateQueries({ queryKey: ["inbox"] });
+      if (workspaceId !== undefined) {
+        void qc.invalidateQueries({ queryKey: ["workspace", workspaceId] });
+        void qc.invalidateQueries({ queryKey: ["workspaces"] });
+      }
       void qc.invalidateQueries({ queryKey: ["chapter", chapterId] });
       void qc.invalidateQueries({ queryKey: ["series"], refetchType: "none" });
       onFiled(chapterId);
@@ -47,7 +58,11 @@ export function ChapterPicker({ pageId, pageLabel, filed = false, onClose, onFil
       footer={
         <>
           {fileM.error && <span className="mr-auto self-center text-xs text-red-400">{fileM.error.message}</span>}
-          {filed ? (
+          {workspaceId !== undefined ? (
+            <span className="mr-auto self-center text-xs text-gray-500">
+              The pages move into the chapter in this order, and the translated ones are published.
+            </span>
+          ) : filed ? (
             <span className="mr-auto self-center text-xs text-gray-500">The chapter gets its own copy; this page stays where it is.</span>
           ) : (
             <label className="mr-auto flex items-center gap-2 self-center text-xs text-gray-400" title="Off moves the page instead of copying it">

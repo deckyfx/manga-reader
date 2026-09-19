@@ -7,6 +7,7 @@
  * PATCH  /studio/api/workspaces/:id           rename it, or flip its adult flag
  * DELETE /studio/api/workspaces/:id           remove the workspace; its pages stay, loose
  * POST   /studio/api/workspaces/:id/pages     append uploaded images at `start_index` (a retried batch skips pages it already stored)
+ * POST   /studio/api/workspaces/:id/file      move its pages into a chapter, publishing the translated ones
  * POST   /studio/api/workspaces/:id/run       translate the pages that need it ("Run all"); progress is polled
  * GET    /studio/api/workspaces/:id/run       progress of that run, or how many pages one would translate now
  */
@@ -16,7 +17,9 @@ import { ErrBody } from "@/lib/schemas";
 import { authContext } from "@/plugins/auth/index";
 import { PageSummary, toSummary } from "@/plugins/studio/page-summary";
 import { batchRun, pagesNeedingRun, startBatchRun } from "@/services/page-batch";
+import { fileWorkspaceIntoChapter } from "@/services/workspace-file";
 import { importIntoWorkspace, type WorkspaceUpload } from "@/services/workspace-import";
+import { ChapterStore } from "@/stores/library-store";
 import { WorkspaceStore, type WorkspaceCounts } from "@/stores/workspace-store";
 
 const WorkspaceParams = t.Object({ id: t.Integer({ minimum: 1 }) });
@@ -239,5 +242,29 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
     {
       params: WorkspaceParams,
       response: { 200: t.Union([WorkspaceRun, t.Object({ workspace_id: t.Integer(), pending: t.Integer() })]), 404: ErrBody },
+    },
+    )
+
+  .post(
+    "/:id/file",
+    async ({ params, body, status }) => {
+      if (!(await WorkspaceStore.findById(params.id))) return status(404, { error: "workspace not found" });
+      if (!(await ChapterStore.findById(body.chapter_id))) return status(404, { error: "chapter not found" });
+      const report = await fileWorkspaceIntoChapter(params.id, body.chapter_id);
+      const detail = await workspaceDetail(params.id);
+      if (!detail) return status(404, { error: "workspace not found" });
+      return { ...detail, ...report };
+    },
+    {
+      params: WorkspaceParams,
+      body: t.Object({ chapter_id: t.Integer({ minimum: 1 }) }),
+      response: {
+        200: t.Composite([WorkspaceDetail, t.Object({
+          filed: t.Integer(),
+          published: t.Integer(),
+          skipped: t.Array(t.Object({ pageId: t.String(), reason: t.String() })),
+        })]),
+        404: ErrBody,
+      },
     },
   );
