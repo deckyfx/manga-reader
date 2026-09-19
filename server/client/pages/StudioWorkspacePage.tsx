@@ -265,10 +265,13 @@ export function StudioWorkspacePage() {
           workspaceId={id}
           pageLabel={workspace.name}
           onClose={() => setFiling(false)}
-          onFiled={() => {
+          onFiled={(_chapterId, skipped) => {
             setFiling(false);
             refresh();
+            void qc.invalidateQueries({ queryKey: ["studio-pages"] });
             toast.info("Filed into the chapter");
+            // Pages that moved but couldn't be published, or were left behind: say so rather than look complete
+            for (const entry of skipped ?? []) toast.error(entry.reason);
           }}
         />
       )}

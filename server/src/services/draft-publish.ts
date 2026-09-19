@@ -40,13 +40,13 @@ export async function publishDraft(draft: Page): Promise<PublishOutcome> {
     return { ok: true, revision, notified, pageId: draft.id };
   }
 
-  const origin = await PageStore.findById(draft.originPageId);
-  // The chapter page is gone: the draft is orphaned, and can only be filed as a new page
-  if (!origin) return { ok: false, code: 409, error: "the page this draft replaces has been deleted — file it as a new page instead" };
-
-  return withPageLock(origin.id, async () => {
+  return withPageLock(draft.originPageId, async () => {
+    // Read under the lock: a deletion that got there first must be seen, not worked around
+    const origin = draft.originPageId === null ? undefined : await PageStore.findById(draft.originPageId);
+    // The chapter page is gone: the draft is orphaned, and can only be filed as a new page
+    if (!origin) return { ok: false as const, code: 409 as const, error: "the page this draft replaces has been deleted — file it as a new page instead" };
     if (origin.status === "queued" || origin.status === "running") {
-      return { ok: false, code: 409, error: "the chapter page is still being translated" };
+      return { ok: false as const, code: 409 as const, error: "the chapter page is still being translated" };
     }
     await PageStore.update(origin.id, {
       width: draft.width,

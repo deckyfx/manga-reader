@@ -115,6 +115,12 @@ export function StudioPagesPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
+        {workspacesQ.isError && (
+          <p className="mb-4 text-sm text-red-400">
+            The workspaces couldn't be loaded: {workspacesQ.error.message}{" "}
+            <button type="button" onClick={() => void workspacesQ.refetch()} className="text-gray-300 underline hover:text-white">Try again</button>
+          </p>
+        )}
         {workspaces.length > 0 && (
           <section className="mb-6">
             <h2 className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-gray-500">

@@ -52,7 +52,8 @@ export async function sendChapterToStudio(chapter: Chapter, createdBy: number | 
       PageStore.listByChapter(chapter.id),
       WorkspaceStore.draftOrigins(workspace.id),
     ]);
-    let order = (await WorkspaceStore.pages(workspace.id)).length;
+    // Past every position in use, not the count: a deleted page leaves a gap, and two drafts must not share an order
+    let order = (await WorkspaceStore.pages(workspace.id)).reduce((highest, page) => Math.max(highest, page.sortOrder), 0);
 
     for (const page of pages) {
       // A page of this workspace that was filed into the chapter needs no draft: it is already being worked on here

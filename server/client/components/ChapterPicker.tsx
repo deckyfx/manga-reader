@@ -14,7 +14,8 @@ interface ChapterPickerProps {
   /** Shown in the dialog so it's clear which page is being filed. */
   pageLabel?: string;
   onClose: () => void;
-  onFiled: (chapterId: number) => void;
+  /** `skipped` is filled when a whole workspace was filed: pages moved but not published, or left behind. */
+  onFiled: (chapterId: number, skipped?: { pageId: string; reason: string }[]) => void;
 }
 
 /**
@@ -31,12 +32,15 @@ export function ChapterPicker({ pageId, workspaceId, pageLabel, filed = false, o
   const detailQ = useQuery({ queryKey: ["series", seriesId], queryFn: () => getSeries(seriesId ?? 0), enabled: seriesId !== null });
 
   const fileM = useMutation({
-    // Both answer with a detail this dialog doesn't use; it closes and lets the queries reload
+    // Filing a workspace can leave pages behind, and the caller reports those; a single page has nothing to report
     mutationFn: async (chapterId: number) => {
-      if (workspaceId !== undefined) await fileWorkspace(workspaceId, chapterId);
-      else await copyPageIntoChapter(chapterId, pageId ?? "", { keep_draft: filed || keepDraft });
+      if (workspaceId === undefined) {
+        await copyPageIntoChapter(chapterId, pageId ?? "", { keep_draft: filed || keepDraft });
+        return undefined;
+      }
+      return (await fileWorkspace(workspaceId, chapterId)).skipped;
     },
-    onSuccess: (_result, chapterId) => {
+    onSuccess: (skipped, chapterId) => {
       void qc.invalidateQueries({ queryKey: ["studio-pages"] });
       void qc.invalidateQueries({ queryKey: ["inbox"] });
       if (workspaceId !== undefined) {
@@ -45,7 +49,7 @@ export function ChapterPicker({ pageId, workspaceId, pageLabel, filed = false, o
       }
       void qc.invalidateQueries({ queryKey: ["chapter", chapterId] });
       void qc.invalidateQueries({ queryKey: ["series"], refetchType: "none" });
-      onFiled(chapterId);
+      onFiled(chapterId, skipped);
     },
   });
 

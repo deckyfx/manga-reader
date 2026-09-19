@@ -21,7 +21,7 @@ import { publishBlocker, publishDraft } from "@/services/draft-publish";
 import { batchRun, pagesNeedingRun, startBatchRun } from "@/services/page-batch";
 import { fileWorkspaceIntoChapter } from "@/services/workspace-file";
 import { importIntoWorkspace, type WorkspaceUpload } from "@/services/workspace-import";
-import { withPageLock } from "@/queue/page-queue";
+import { withPageLock, withWorkspaceLock } from "@/queue/page-queue";
 import { ChapterStore } from "@/stores/library-store";
 import { PageStore } from "@/stores/page-store";
 import { WorkspaceStore, type WorkspaceCounts } from "@/stores/workspace-store";
@@ -223,10 +223,12 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
     async ({ params, body, status }) => {
       if (!(await WorkspaceStore.findById(params.id))) return status(404, { error: "workspace not found" });
       // Drafts aren't published by a run: that happens when they are filed, or published on purpose
-      const state = await startBatchRun(runKey(params.id), () => pagesToRun(params.id, body?.force ?? false), {
-        cleanSfx: body?.clean_sfx ?? false,
-        publish: false,
-      });
+      // Registered under the workspace's lock, so filing (which holds it) and a run can't start on top of each other
+      const state = await withWorkspaceLock(params.id, () =>
+        startBatchRun(runKey(params.id), () => pagesToRun(params.id, body?.force ?? false), {
+          cleanSfx: body?.clean_sfx ?? false,
+          publish: false,
+        }));
       if (!state) return status(409, { error: "this workspace is already being translated" });
       return status(202, { ...state, workspaceId: params.id });
     },
@@ -263,10 +265,11 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         return status(409, { error: "this workspace already works on a chapter" });
       }
       if (!(await ChapterStore.findById(body.chapter_id))) return status(404, { error: "chapter not found" });
-      const report = await fileWorkspaceIntoChapter(params.id, body.chapter_id);
+      const result = await fileWorkspaceIntoChapter(params.id, body.chapter_id);
+      if (!result.ok) return status(409, { error: result.error });
       const detail = await workspaceDetail(params.id);
       if (!detail) return status(404, { error: "workspace not found" });
-      return { ...detail, ...report };
+      return { ...detail, ...result.report };
     },
     {
       params: WorkspaceParams,

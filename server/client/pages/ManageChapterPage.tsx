@@ -21,6 +21,7 @@ import {
 } from "../api";
 import { useConfirm } from "../components/ConfirmDialog";
 import { StatusBadge } from "../components/StatusBadge";
+import { useToast } from "../components/Toast";
 
 /** One chapter's pages: importing, reordering, translating the whole chapter and exporting it. */
 export function ManageChapterPage() {
@@ -28,6 +29,7 @@ export function ManageChapterPage() {
   const chapterId = Number(id);
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const toast = useToast();
   const confirm = useConfirm();
   const chapterQ = useQuery({
     queryKey: ["chapter", chapterId],
@@ -107,6 +109,9 @@ export function ManageChapterPage() {
     mutationFn: () => sendChapterToStudio(chapterId),
     onSuccess: (report) => {
       void qc.invalidateQueries({ queryKey: ["workspaces"] });
+      // A page still in the pipeline has no draft yet; the workspace would otherwise look complete
+      for (const entry of report.skipped) toast.error(`A page wasn't copied: ${entry.reason}`);
+      if (report.copied === 0 && report.existing > 0) toast.info("Every page already has a draft here");
       navigate(`/studio/w/${report.workspace_id}`);
     },
   });

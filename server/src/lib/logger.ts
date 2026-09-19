@@ -63,7 +63,8 @@ const transport = pino.transport({
 
 export const logger = pino(
   {
-    level: consoleLevel,
+    // The lowest level any target wants: the root filters first, so a higher level here would starve the file
+    level: isDev ? "debug" : "info",
     base: { pid: process.pid },
     timestamp: pino.stdTimeFunctions.isoTime,
     serializers: {

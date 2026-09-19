@@ -81,7 +81,8 @@ export class PageStore {
    * nothing more — each is a complete page — so it is left unguarded rather than serialised.
    */
   static async findOrCreate(imageHash: string, source: string): Promise<{ page: Page; created: boolean }> {
-    const inbox = and(eq(pages.imageHash, imageHash), isNull(pages.chapterId));
+    // Loose only: a workspace's page belongs to that workspace, and must not be handed back to the extension
+    const inbox = and(eq(pages.imageHash, imageHash), isNull(pages.chapterId), isNull(pages.workspaceId));
     const existing = await db.query.pages.findFirst({ where: inbox, orderBy: desc(pages.createdAt) });
     if (existing) return { page: existing, created: false };
     const [row] = await db.insert(pages).values({ id: randomUUIDv7(), imageHash, source }).returning();

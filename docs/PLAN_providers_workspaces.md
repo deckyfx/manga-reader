@@ -117,6 +117,10 @@ pages.originPageId: nullable fk pages, on delete set null       // the chapter p
     `importIntoChapter`'s normalising (`normalisePage`, `original.png`, idle pages) with a workspace target instead of a
     chapter. The extension uploads in batches through it, and `start_index` makes a retried batch idempotent: an index
     that already has a page is skipped.
+    **Limitation (2026-09-20):** the position is the whole idempotency key — a batch resent with *different* content
+    for a position that already holds a page is skipped and reported as `existing`, not stored. That suits a retry of
+    the same chapter; if P4 ever resends a position with new content, the upload needs a per-page key (the image hash,
+    or an id from the extractor) and a conflict when it doesn't match.
   - `POST /workspaces/:id/run` runs the pipeline over the pages that need it ("Run all"); `GET /workspaces/:id/run`
     reports progress, or how many pages a run would take now.
   - **Decision (2026-09-20):** progress is polled, not SSE (the plan first said SSE). Progress only moves once per
@@ -142,8 +146,13 @@ published, and then that copy's result replaces the chapter page.
    `copyPageIntoChapter`'s copy logic with the target switched to "draft", under the source's page lock. It optionally
    starts "Run all" on the copies.
 2. Sending again reuses the chapter's open workspace and only copies pages that have no draft yet, so work in progress
-   is never overwritten. If a chapter page was deleted, its draft shows as "orphaned". Its publish is refused, but it
-   can still be filed as a new page.
+   is never overwritten. Pages of the workspace that were filed into the chapter need no draft: they are already being
+   worked on there.
+   **Built (2026-09-20):** `pages.origin_page_id` is a foreign key with `ON DELETE SET NULL`, so a draft whose chapter
+   page is deleted loses the link and becomes an ordinary loose draft: it publishes itself and can be filed as a new
+   page, with no "orphaned" badge. An explicit orphan state would mean keeping the id without the foreign key (a
+   tombstone) and a migration; not worth it while the outcome — the draft survives and can be filed — is the same.
+   `publishDraft` still refuses when the origin has gone, for the window before the column is cleared.
 3. **Publish a draft** that has an `originPageId`: under both page locks, copy the draft's state (stage rows, blocks,
    masks, stage images) over the origin page, then run `publishPage(origin)`. The origin keeps its own publish history,
    so the chapter can be rolled back to the version before. The draft stays in the workspace for further edits and can
@@ -185,8 +194,8 @@ published, and then that copy's result replaces the chapter page.
 | Download images | background worker `fetch` (host permission covers CORS) | CDNs are cross-origin; the worker isn't bound by the page's CSP |
 | Upload to the server | background worker, typed Eden client (`extension/src/api.ts`) | Existing API key + server URL; the same "don't send the key over plain http" and "no redirects" rules apply |
 
-- **Referer:** some CDNs check it, and a worker `fetch` can't set it. During an import the extension adds a
-  `declarativeNetRequest` **session rule** that sets `Referer: <chapter URL>` for requests from the extension to the
+- **Referer (unconfirmed):** some CDNs check it, and a worker `fetch` can't set it. The intended approach is a
+  `declarativeNetRequest` **session rule** setting `Referer: <chapter URL>` for requests from the extension to the
   image hosts, and removes it afterwards. It's a new `declarativeNetRequest` permission; no new host permissions are
   needed (`<all_urls>` is already granted).
 - **Worker lifetime:** MV3 workers sleep when idle. The import is a queue persisted in `chrome.storage.session`
@@ -328,5 +337,6 @@ Decided 2026-09-19:
 To settle in the P4 spike (on rawkuma first):
 - Does Chrome send the site's cookies on the worker's cross-site image fetches? It only matters for CDNs that need
   them; rawkuma's don't.
-- Does the `declarativeNetRequest` Referer rule apply to the extension's own fetches?
+- Does the `declarativeNetRequest` Referer rule apply to the extension's own fetches? (P4 spike: until this is answered, the
+  Referer rule above is a plan, not a dependency to build on.)
 - Does the worker survive a 100-page import, or does it need the offscreen document?
