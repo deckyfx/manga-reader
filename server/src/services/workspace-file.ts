@@ -7,6 +7,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { childLogger } from "@/lib/logger";
 import { withPageLock, withWorkspaceLock } from "@/queue/page-queue";
+import { publishBlocker } from "@/services/draft-publish";
 import { publishPage } from "@/services/page-publish";
 import { pageDir, PageStore } from "@/stores/page-store";
 import { WorkspaceStore } from "@/stores/workspace-store";
@@ -40,8 +41,14 @@ export function fileWorkspaceIntoChapter(workspaceId: number, chapterId: number)
       // The page itself moves: the workspace keeps showing it, now as a page of the chapter
       await PageStore.filePage(page.id, { chapterId, sortOrder: ++order });
       report.filed++;
-      // Only a page with a burnt result can be published; the rest become readable when they are run and published
+      // Only what the publish route would allow: no result, or a render made stale by a later edit, means the page
+      // waits to be run and published rather than showing readers an image that isn't current
       if (!existsSync(join(pageDir(page.id), "result.png"))) continue;
+      const blocker = publishBlocker(page, await PageStore.listStages(page.id));
+      if (blocker) {
+        report.skipped.push({ pageId: page.id, reason: `moved, not published: ${blocker}` });
+        continue;
+      }
       try {
         await withPageLock(page.id, () => publishPage(page.id));
         report.published++;

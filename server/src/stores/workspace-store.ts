@@ -21,9 +21,11 @@ export interface WorkspaceCounts {
   running: number;
   /** First page in workspace order, for the card's thumbnail. */
   firstPageId: string | null;
+  /** Where the next upload batch starts (0-based), past every position in use — deletions leave gaps. */
+  nextIndex: number;
 }
 
-const EMPTY_COUNTS: WorkspaceCounts = { pages: 0, done: 0, idle: 0, stale: 0, error: 0, running: 0, firstPageId: null };
+const EMPTY_COUNTS: WorkspaceCounts = { pages: 0, done: 0, idle: 0, stale: 0, error: 0, running: 0, firstPageId: null, nextIndex: 0 };
 
 export class WorkspaceStore {
   static async findById(id: number): Promise<Workspace | undefined> {
@@ -107,7 +109,7 @@ export class WorkspaceStore {
     const staleStage = sql<number>`exists (select 1 from ${pageStages} where ${pageStages.pageId} = ${pages.id} and ${pageStages.status} = 'stale')`;
     const rendered = sql<number>`exists (select 1 from ${pageStages} where ${pageStages.pageId} = ${pages.id} and ${pageStages.stage} = 'render' and ${pageStages.status} = 'fresh')`;
     const rows = await db
-      .select({ workspaceId: pages.workspaceId, id: pages.id, status: pages.status, stale: staleStage, rendered })
+      .select({ workspaceId: pages.workspaceId, id: pages.id, sortOrder: pages.sortOrder, status: pages.status, stale: staleStage, rendered })
       .from(pages)
       .where(inArray(pages.workspaceId, ids))
       .orderBy(asc(pages.sortOrder), asc(pages.createdAt), asc(pages.id));
@@ -116,6 +118,7 @@ export class WorkspaceStore {
       if (!entry) continue;
       entry.pages++;
       entry.firstPageId ??= row.id;
+      entry.nextIndex = Math.max(entry.nextIndex, row.sortOrder);
       if (row.status === "queued" || row.status === "running") entry.running++;
       else if (row.status === "error") entry.error++;
       else if (Number(row.stale) === 1) entry.stale++;

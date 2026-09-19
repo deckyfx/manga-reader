@@ -10,7 +10,7 @@
  * never overwritten.
  */
 import { childLogger } from "@/lib/logger";
-import { withPageLock, withWorkspaceLock } from "@/queue/page-queue";
+import { withChapterLock, withPageLock, withWorkspaceLock } from "@/queue/page-queue";
 import { copyPageAsDraft } from "@/services/page-copy";
 import { PageStore } from "@/stores/page-store";
 import { WorkspaceStore } from "@/stores/workspace-store";
@@ -33,15 +33,18 @@ export interface SendReport {
  * workspace shows an owner.
  */
 export async function sendChapterToStudio(chapter: Chapter, createdBy: number | null): Promise<SendReport> {
-  const existing = await WorkspaceStore.findByChapter(chapter.id);
-  const workspace = existing ?? (await WorkspaceStore.create({
-    name: chapter.title,
-    chapterId: chapter.id,
-    createdBy,
-    sourceUrl: null,
-    sourceProvider: null,
-    adult: false,
-  }));
+  // Find-or-create under one lock per chapter: two sends at once would otherwise each make a workspace
+  const workspace = await withChapterLock(chapter.id, async () => {
+    const existing = await WorkspaceStore.findByChapter(chapter.id);
+    return existing ?? WorkspaceStore.create({
+      name: chapter.title,
+      chapterId: chapter.id,
+      createdBy,
+      sourceUrl: null,
+      sourceProvider: null,
+      adult: false,
+    });
+  });
 
   return withWorkspaceLock(workspace.id, async () => {
     const report: SendReport = { workspace, copied: 0, existing: 0, skipped: [] };
@@ -52,7 +55,8 @@ export async function sendChapterToStudio(chapter: Chapter, createdBy: number | 
     let order = (await WorkspaceStore.pages(workspace.id)).length;
 
     for (const page of pages) {
-      if (alreadyDrafted.has(page.id)) {
+      // A page of this workspace that was filed into the chapter needs no draft: it is already being worked on here
+      if (alreadyDrafted.has(page.id) || page.workspaceId === workspace.id) {
         report.existing++;
         continue;
       }

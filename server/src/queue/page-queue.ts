@@ -56,3 +56,11 @@ export function withPageLock<T>(pageId: string, task: () => Promise<T>): Promise
 export function withWorkspaceLock<T>(workspaceId: number, task: () => Promise<T>): Promise<T> {
   return withPageLock(`workspace:${workspaceId}`, task);
 }
+
+/**
+ * `withPageLock` for a chapter, for steps that read then write a chapter's Studio workspace. Page ids never contain
+ * a colon, so the keys can't collide.
+ */
+export function withChapterLock<T>(chapterId: number, task: () => Promise<T>): Promise<T> {
+  return withPageLock(`chapter:${chapterId}`, task);
+}

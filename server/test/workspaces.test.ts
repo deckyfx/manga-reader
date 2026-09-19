@@ -79,6 +79,20 @@ describe("workspaces", () => {
     expect(a.body.skipped.concat(b.body.skipped)).toContainEqual({ name: "004.txt", index: 3, reason: "not an image, or it could not be stored" });
   });
 
+  test("append past a gap left by a deleted page", async () => {
+    const id = await create({ name: "Gappy" });
+    const first = await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(0, ["1.png", "2.png"]), { cookie });
+    const gone: string = first.body.pages[0].id;
+    expect((await call("DELETE", `/studio/api/pages/${gone}`, undefined, { cookie })).status).toBe(200);
+
+    // Position 0 is free again, but the next batch belongs after page 2 — the client is told where that is
+    const detail = await call("GET", `/studio/api/workspaces/${id}`, undefined, { cookie });
+    expect(detail.body.workspace.next_index).toBe(2);
+    const added = await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(detail.body.workspace.next_index, ["3.png"]), { cookie });
+    expect(added.body).toMatchObject({ imported: 1, existing: [] });
+    expect(added.body.pages.map((p: { name: string }) => p.name)).toEqual(["2", "3"]);
+  });
+
   test("refuse a sources list that doesn't match the files", async () => {
     const id = await create({ name: "Mismatch" });
     const res = await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(0, ["a.png", "b.png"], ["only one"]), { cookie });
@@ -153,6 +167,18 @@ describe("filing a workspace into a chapter", () => {
     const inChapter = await call<{ id: string }[]>("GET", `/studio/api/pages?filed=chapter&chapter_id=${chapterId}`, undefined, { cookie });
     expect(inChapter.body.map((p) => p.id).sort()).toEqual(filed.body.pages.map((p: { id: string }) => p.id).sort());
     expect(filed.body.pages.every((p: { chapter_id: number | null }) => p.chapter_id === chapterId)).toBe(true);
+  });
+
+  test("won't file a workspace that already works on a chapter", async () => {
+    const series = await call<{ series: { id: number } }>("POST", "/manage/api/series", { title: `Twice ${crypto.randomUUID()}` }, { cookie });
+    const made = await call<{ unsorted: { id: number }[] }>("POST", "/manage/api/chapters", { series_id: series.body.series.id, title: "One" }, { cookie });
+    const chapterId = made.body.unsorted[0]!.id;
+    const id = await create({ name: "Filed once" });
+    await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(0, ["a.png"]), { cookie });
+
+    expect((await call("POST", `/studio/api/workspaces/${id}/file`, { chapter_id: chapterId }, { cookie })).status).toBe(200);
+    // Filing again would move its pages out from under the chapter it is bound to
+    expect((await call("POST", `/studio/api/workspaces/${id}/file`, { chapter_id: chapterId }, { cookie })).status).toBe(409);
   });
 
   test("refuse an unknown workspace or chapter", async () => {

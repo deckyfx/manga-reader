@@ -128,14 +128,15 @@ export function StudioPageEditor() {
     queryFn: () => getChapter(chapterId ?? 0),
     enabled: chapterId !== null,
   });
-  // A draft in a workspace walks through that workspace instead, in import order
-  const workspaceId = chapterId === null ? (pageQ.data?.page.workspace_id ?? null) : null;
+  // A page in a workspace walks through that workspace, in its order — including one filed into a chapter, which
+  // belongs to both; the workspace is what is being worked on
+  const workspaceId = pageQ.data?.page.workspace_id ?? null;
   const workspaceQ = useQuery({
     queryKey: ["workspace", workspaceId],
     queryFn: () => getWorkspace(workspaceId ?? 0),
     enabled: workspaceId !== null,
   });
-  const neighbours = chapterId !== null ? (chapterQ.data?.pages ?? []) : (workspaceQ.data?.pages ?? []);
+  const neighbours = workspaceId !== null ? (workspaceQ.data?.pages ?? []) : (chapterQ.data?.pages ?? []);
   const here = neighbours.findIndex((neighbour) => neighbour.id === id);
   const previousPage = here > 0 ? neighbours[here - 1] : undefined;
   const nextPage = here >= 0 ? neighbours[here + 1] : undefined;
@@ -335,13 +336,13 @@ export function StudioPageEditor() {
     <div className="flex flex-col h-full">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-800">
         <Link
-          to={page.location ? `/manage/chapters/${page.location.chapter_id}` : workspaceId !== null ? `/studio/w/${workspaceId}` : "/studio"}
+          to={workspaceId !== null ? `/studio/w/${workspaceId}` : page.location ? `/manage/chapters/${page.location.chapter_id}` : "/studio"}
           className="text-gray-400 hover:text-white"
-          title={page.location ? "Back to the chapter" : workspaceId !== null ? "Back to the workspace" : "All pages"}
+          title={workspaceId !== null ? "Back to the workspace" : page.location ? "Back to the chapter" : "All pages"}
         >
           <ArrowLeft size={18} />
         </Link>
-        {page.location ? (
+        {workspaceId === null && page.location ? (
           <>
             <h1 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
               <Link to={`/read/series/${page.location.series_id}`} className="truncate text-gray-400 hover:text-white">{page.location.series_title}</Link>

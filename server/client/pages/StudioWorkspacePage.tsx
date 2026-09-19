@@ -94,7 +94,9 @@ export function StudioWorkspacePage() {
     if (!files || files.length === 0) return;
     setUploading(true);
     try {
-      const report = await uploadWorkspacePages(id, Array.from(files), pages.length);
+      // Past every position in use, not the page count: a deleted page leaves a gap, and a batch landing on a
+      // position that already has a page is skipped as a retry
+      const report = await uploadWorkspacePages(id, Array.from(files), workspace.next_index);
       refresh();
       const skipped = report.skipped.length;
       toast.info(`Added ${report.imported} page${report.imported === 1 ? "" : "s"}${skipped > 0 ? `, skipped ${skipped}` : ""}`);

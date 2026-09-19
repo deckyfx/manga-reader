@@ -163,9 +163,12 @@ export class PageStore {
     return db.select().from(pages).where(eq(pages.chapterId, chapterId)).orderBy(pages.sortOrder, pages.createdAt, pages.id);
   }
 
-  /** Pages not filed into a chapter yet (extension jobs and uploads), newest first. */
+  /**
+   * Pages not filed into a chapter yet (extension jobs and uploads), newest first. Workspace pages are left out, as
+   * in the Studio's list: they are filed with their workspace, not one at a time.
+   */
   static async listInbox(): Promise<Page[]> {
-    return db.select().from(pages).where(isNull(pages.chapterId)).orderBy(desc(pages.createdAt));
+    return db.select().from(pages).where(and(isNull(pages.chapterId), isNull(pages.workspaceId))).orderBy(desc(pages.createdAt));
   }
 
   /** How many pages each of these chapters holds. */

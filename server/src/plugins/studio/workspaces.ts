@@ -46,6 +46,8 @@ const WorkspaceSummary = t.Object({
   error: t.Integer(),
   running: t.Integer(),
   first_page_id: t.Nullable(t.String()),
+  /** Where the next upload batch should start, so a batch lands after every page already here. */
+  next_index: t.Integer(),
 });
 
 const WorkspaceDetail = t.Object({ workspace: WorkspaceSummary, pages: t.Array(PageSummary) });
@@ -74,7 +76,7 @@ const pagesToRun = async (id: number, force: boolean) => pagesNeedingRun(await W
 const Name = t.String({ minLength: 1, maxLength: 200 });
 
 function toWorkspace(workspace: Workspace, counts: WorkspaceCounts | undefined) {
-  const c = counts ?? { pages: 0, done: 0, idle: 0, stale: 0, error: 0, running: 0, firstPageId: null };
+  const c = counts ?? { pages: 0, done: 0, idle: 0, stale: 0, error: 0, running: 0, firstPageId: null, nextIndex: 0 };
   return {
     id: workspace.id,
     name: workspace.name,
@@ -92,6 +94,7 @@ function toWorkspace(workspace: Workspace, counts: WorkspaceCounts | undefined) 
     error: c.error,
     running: c.running,
     first_page_id: c.firstPageId,
+    next_index: c.nextIndex,
   };
 }
 
@@ -252,7 +255,13 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
   .post(
     "/:id/file",
     async ({ params, body, status }) => {
-      if (!(await WorkspaceStore.findById(params.id))) return status(404, { error: "workspace not found" });
+      const workspace = await WorkspaceStore.findById(params.id);
+      if (!workspace) return status(404, { error: "workspace not found" });
+      // Already working on a chapter: its pages belong there (filed, or drafts of it), so filing again would move
+      // them out from under it
+      if (workspace.chapterId !== null) {
+        return status(409, { error: "this workspace already works on a chapter" });
+      }
       if (!(await ChapterStore.findById(body.chapter_id))) return status(404, { error: "chapter not found" });
       const report = await fileWorkspaceIntoChapter(params.id, body.chapter_id);
       const detail = await workspaceDetail(params.id);
@@ -269,6 +278,7 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
           skipped: t.Array(t.Object({ pageId: t.String(), reason: t.String() })),
         })]),
         404: ErrBody,
+        409: ErrBody,
       },
     },
     )
