@@ -2,29 +2,31 @@
  * Where settings live.
  *
  * `chrome.storage.sync` is copied to Google's servers and to every browser signed into the same profile, which is
- * fine for a server URL or a language choice and wrong for a credential. The two secrets — the server's API key and
- * the DeepL key — are kept in `chrome.storage.local`, which stays on this machine.
+ * fine for a language choice and wrong for a credential. The two secrets (the server's API key and the DeepL key) are
+ * kept in `chrome.storage.local`, which stays on this machine, and so is everything that decides where the server key
+ * goes: the server URL and the consent to send it over plain http. Were those synced, another browser changing the
+ * URL would have this one hand its key to the new address unasked.
  *
- * A key already saved into sync by an older build is moved across on first read and removed from sync.
+ * Anything an older build saved into sync is moved across on first read and removed from sync.
  */
 import { DEFAULT_SETTINGS, type Settings } from "./types";
 
 /** Settings that never leave this machine. */
-const SECRET_KEYS = ["serverApiKey", "deeplApiKey"] as const;
-type SecretKey = (typeof SECRET_KEYS)[number];
+const LOCAL_KEYS = ["serverApiKey", "deeplApiKey", "serverUrl", "allowInsecureServer"] as const;
+type LocalKey = (typeof LOCAL_KEYS)[number];
 
-const isSecret = (key: string): key is SecretKey => (SECRET_KEYS as readonly string[]).includes(key);
+const isLocal = (key: string): key is LocalKey => (LOCAL_KEYS as readonly string[]).includes(key);
 
-/** Every setting, secrets included, with anything an older build left in sync pulled across. */
+/** Every setting, with anything an older build left in sync pulled across. */
 export async function loadSettings(): Promise<Settings> {
   const keys = Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[];
   const [synced, local] = await Promise.all([
     chrome.storage.sync.get(keys) as Promise<Partial<Settings>>,
-    chrome.storage.local.get([...SECRET_KEYS]) as Promise<Partial<Settings>>,
+    chrome.storage.local.get([...LOCAL_KEYS]) as Promise<Partial<Settings>>,
   ]);
 
   // Anything an older build left in sync comes out of sync, whether or not it is still needed here
-  const inSync = SECRET_KEYS.filter((key) => typeof synced[key] === "string" && synced[key] !== "");
+  const inSync = LOCAL_KEYS.filter((key) => Object.hasOwn(synced, key));
   if (inSync.length > 0) {
     // Only keys this machine has never stored: an empty local value is a key the user cleared, not one to restore
     const rescued = Object.fromEntries(inSync.filter((key) => !Object.hasOwn(local, key)).map((key) => [key, synced[key]]));
@@ -36,21 +38,21 @@ export async function loadSettings(): Promise<Settings> {
     await chrome.storage.sync.remove([...inSync]);
   }
 
-  const publicSettings = Object.fromEntries(Object.entries(synced).filter(([key]) => !isSecret(key)));
-  return { ...DEFAULT_SETTINGS, ...publicSettings, ...local } as Settings;
+  const shared = Object.fromEntries(Object.entries(synced).filter(([key]) => !isLocal(key)));
+  return { ...DEFAULT_SETTINGS, ...shared, ...local } as Settings;
 }
 
-/** Saves everything, sending the secrets to local storage and the rest to sync. */
+/** Saves everything, sending the machine-local settings to local storage and the rest to sync. */
 export async function saveSettings(settings: Settings): Promise<void> {
-  const secrets: Record<string, string> = {};
+  const local: Record<string, unknown> = {};
   const shared: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(settings)) {
-    if (isSecret(key)) secrets[key] = String(value);
+    if (isLocal(key)) local[key] = value;
     else shared[key] = value;
   }
-  await Promise.all([chrome.storage.local.set(secrets), chrome.storage.sync.set(shared)]);
+  await Promise.all([chrome.storage.local.set(local), chrome.storage.sync.set(shared)]);
   // Older builds may still have them in sync; drop that copy only once the local write has landed
-  await chrome.storage.sync.remove([...SECRET_KEYS]);
+  await chrome.storage.sync.remove([...LOCAL_KEYS]);
 }
 
 /** Just the pieces the content script needs to talk to the server. */

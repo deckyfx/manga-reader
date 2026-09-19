@@ -18,8 +18,21 @@ import type { UserRole } from "@/db/schema";
 const POLICY: { prefix: string; needs: UserRole | "public"; sessionOnly?: boolean }[] = [
   // Reading is open to everyone, signed in or not
   { prefix: "/read/api", needs: "public" },
-  // Signing in, and asking who you are
-  { prefix: "/auth/api", needs: "public" },
+  // Signing in, setting up, registering and asking who you are. Listed one by one rather than as all of /auth/api,
+  // so an account route added later falls to the closed default instead of being public
+  { prefix: "/auth/api/me", needs: "public" },
+  { prefix: "/auth/api/setup", needs: "public" },
+  { prefix: "/auth/api/register", needs: "public" },
+  { prefix: "/auth/api/login", needs: "public" },
+  { prefix: "/auth/api/logout", needs: "public" },
+  // Your own account: any role, from the browser only (a tool's key must not add factors, mint keys or list sessions)
+  { prefix: "/auth/api/password", needs: "reader", sessionOnly: true },
+  { prefix: "/auth/api/recovery", needs: "reader", sessionOnly: true },
+  { prefix: "/auth/api/totp", needs: "reader", sessionOnly: true },
+  { prefix: "/auth/api/passkeys", needs: "reader", sessionOnly: true },
+  { prefix: "/auth/api/sessions", needs: "reader", sessionOnly: true },
+  // Listing is open to every account (a reader sees the section, disabled); creating one checks for a contributor
+  { prefix: "/auth/api/keys", needs: "reader", sessionOnly: true },
   // Readiness, so a client can tell "still loading models" from "needs a key"
   { prefix: "/health", needs: "public" },
 

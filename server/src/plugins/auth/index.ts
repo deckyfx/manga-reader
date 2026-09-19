@@ -29,6 +29,8 @@
 import Elysia, { t } from "elysia";
 import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
+import { RateLimiter } from "@/lib/rate-limit";
+import { env } from "@/env";
 import {
   AUTH_FAILED,
   authenticate,
@@ -56,7 +58,7 @@ import {
   verifyPassword,
   type Principal,
 } from "@/services/auth";
-import { ApiKeyStore, CredentialStore, MfaChallengeStore, RecoveryCodeStore, SessionStore, TotpDeviceStore, UserStore } from "@/stores/user-store";
+import { ApiKeyStore, CredentialStore, MfaChallengeStore, normaliseUsername, RecoveryCodeStore, SessionStore, TotpDeviceStore, UserStore } from "@/stores/user-store";
 import { newTotpSecret, otpauthUri, verifyTotp } from "@/services/totp";
 import { authenticationOptions, registrationOptions, saveRegistration, verifyAssertion } from "@/services/passkeys";
 import { USER_ROLES, type User, type UserRole } from "@/db/schema";
@@ -181,7 +183,30 @@ export const requireRole = (role: UserRole) =>
     });
 
 /** Sets or clears the session cookie. Secure is set only over https, so a loopback server still works. */
-function writeSessionCookie(cookie: Record<string, { set: (options: Record<string, unknown>) => void; remove: () => void }>, url: string, token: string | null, expires?: Date): void {
+/** Whether the browser reached us over https: directly, or through a trusted proxy that terminated TLS. */
+function isHttps(request: Request): boolean {
+  if (request.url.startsWith("https://")) return true;
+  if (!env.TRUST_PROXY) return false;
+  return request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase() === "https";
+}
+
+/** Who is asking, for sign-in limits: the socket's address, or the proxy's report of it when the proxy is trusted. */
+function clientAddress(request: Request, server: { requestIP: (request: Request) => { address: string } | null } | null): string {
+  if (env.TRUST_PROXY) {
+    const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+    if (forwarded) return forwarded;
+  }
+  return server?.requestIP(request)?.address ?? "unknown";
+}
+
+/**
+ * Password checks are argon2id, deliberately slow: unbounded, they are both a guessing channel and a way to starve
+ * real sign-ins. Every attempt counts (not only failures), so a burst is cut off before it reaches the hash.
+ */
+const loginsPerAddress = new RateLimiter(50, 15 * 60_000);
+const loginsPerAccount = new RateLimiter(10, 15 * 60_000);
+
+function writeSessionCookie(cookie: Record<string, { set: (options: Record<string, unknown>) => void; remove: () => void }>, request: Request, token: string | null, expires?: Date): void {
   const jar = cookie[SESSION_COOKIE];
   if (!jar) return;
   if (token === null) {
@@ -193,7 +218,7 @@ function writeSessionCookie(cookie: Record<string, { set: (options: Record<strin
     httpOnly: true,
     sameSite: "lax",
     path: "/",
-    secure: url.startsWith("https://"),
+    secure: isHttps(request),
     expires,
   });
 }
@@ -238,7 +263,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       });
       if (!user) return status(409, { error: "this server already has an account" });
       const { token, expiresAt } = await startSession(user.id, request.headers.get("user-agent"));
-      writeSessionCookie(cookie, request.url, token, expiresAt);
+      writeSessionCookie(cookie, request, token, expiresAt);
       log.info({ userId: user.id, username: user.username }, "First admin created");
       return toUser(user);
     },
@@ -267,7 +292,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       if (!user) return status(409, { error: "that username is taken" });
       // A new account has no second factor yet; it can add one from its own page once it is in
       const { token, expiresAt } = await startSession(user.id, request.headers.get("user-agent"));
-      writeSessionCookie(cookie, request.url, token, expiresAt);
+      writeSessionCookie(cookie, request, token, expiresAt);
       log.info({ userId: user.id, role: user.role }, "Account self-registered");
       return toUser(user);
     },
@@ -279,12 +304,20 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
 
   .post(
     "/login",
-    async ({ body, cookie, request, status }) => {
+    async ({ body, cookie, request, server, status }) => {
+      const address = clientAddress(request, server);
+      // Keyed by address and name together, so a stranger's guesses can't lock the owner out from elsewhere
+      const accountKey = `${address}|${normaliseUsername(body.username)}`;
+      if (!loginsPerAddress.take(address) || !loginsPerAccount.take(accountKey)) {
+        log.warn({ address, username: body.username }, "Sign-in attempts limited");
+        return status(429, { error: "too many sign-in attempts — wait a few minutes and try again" });
+      }
       const user = await authenticate(body.username, body.password);
       if (!user) {
         log.warn({ username: body.username }, "Failed sign-in");
         return status(401, { error: "wrong username or password" });
       }
+      loginsPerAccount.reset(accountKey);
       // A second factor means no session yet: the password only buys a short-lived challenge
       const factors = await secondFactors(user);
       if (factors.length > 0) {
@@ -292,13 +325,13 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
         return { user: null, mfa_required: true, methods: factors, challenge };
       }
       const { token, expiresAt } = await startSession(user.id, request.headers.get("user-agent"));
-      writeSessionCookie(cookie, request.url, token, expiresAt);
+      writeSessionCookie(cookie, request, token, expiresAt);
       await UserStore.touch(user.id);
       return { user: toUser(user), mfa_required: false, methods: [], challenge: null };
     },
     {
       body: t.Object({ username: t.String({ maxLength: 40 }), password: t.String({ maxLength: 200 }) }),
-      response: { 200: LoginResult, 401: ErrBody, 403: ErrBody },
+      response: { 200: LoginResult, 401: ErrBody, 403: ErrBody, 429: ErrBody },
     },
   )
 
@@ -316,7 +349,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       // Whoever spends the challenge gets the session; a second request holding the same one gets nothing
       if (!(await endMfaChallenge(pending.tokenHash))) return status(401, { error: "this sign-in has expired — start again" });
       const { token, expiresAt } = await startSession(pending.user.id, request.headers.get("user-agent"));
-      writeSessionCookie(cookie, request.url, token, expiresAt);
+      writeSessionCookie(cookie, request, token, expiresAt);
       await UserStore.touch(pending.user.id);
       return { user: toUser(pending.user), mfa_required: false, methods: [], challenge: null };
     },
@@ -339,7 +372,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       // Whoever spends the challenge gets the session; a second request holding the same one gets nothing
       if (!(await endMfaChallenge(pending.tokenHash))) return status(401, { error: "this sign-in has expired — start again" });
       const { token, expiresAt } = await startSession(pending.user.id, request.headers.get("user-agent"));
-      writeSessionCookie(cookie, request.url, token, expiresAt);
+      writeSessionCookie(cookie, request, token, expiresAt);
       const left = (await RecoveryCodeStore.listUnused(pending.user.id)).length;
       log.info({ userId: pending.user.id, left }, "Signed in with a recovery code");
       return { user: toUser(pending.user), mfa_required: false, methods: [], challenge: null };
@@ -377,7 +410,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       // Whoever spends the challenge gets the session; a second request holding the same one gets nothing
       if (!(await endMfaChallenge(pending.tokenHash))) return status(401, { error: "this sign-in has expired — start again" });
       const { token, expiresAt } = await startSession(pending.user.id, request.headers.get("user-agent"));
-      writeSessionCookie(cookie, request.url, token, expiresAt);
+      writeSessionCookie(cookie, request, token, expiresAt);
       await UserStore.touch(pending.user.id);
       return { user: toUser(pending.user), mfa_required: false, methods: [], challenge: null };
     },
@@ -555,7 +588,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     async ({ cookie, request }) => {
       const token = cookie[SESSION_COOKIE]?.value;
       if (typeof token === "string" && token) await endSession(token);
-      writeSessionCookie(cookie, request.url, null);
+      writeSessionCookie(cookie, request, null);
       return { signed_out: true };
     },
     { response: { 200: t.Object({ signed_out: t.Boolean() }) } },
@@ -572,7 +605,7 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
       // Every session goes, including this one: a password change signs the account out everywhere
       await SessionStore.deleteForUser(principal.user.id);
       const { token, expiresAt } = await startSession(principal.user.id, request.headers.get("user-agent"));
-      writeSessionCookie(cookie, request.url, token, expiresAt);
+      writeSessionCookie(cookie, request, token, expiresAt);
       log.info({ userId: principal.user.id }, "Password changed");
       return { changed: true };
     },

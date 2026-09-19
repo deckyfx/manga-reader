@@ -65,7 +65,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       needsSetup: meQ.data?.needs_setup ?? false,
       registrationEnabled: meQ.data?.registration_enabled ?? false,
       loading: meQ.isLoading,
-      error: meQ.isError ? (meQ.error as Error) : null,
+      // A 401 is the guest answer (see `retry` above), not a failure to ask
+      error: meQ.isError && !(meQ.error instanceof ApiError && meQ.error.status === 401) ? (meQ.error as Error) : null,
       retry: refresh,
       can: (role) => (account ? RANK[account.role as UserRole] >= RANK[role] : false),
       refresh,

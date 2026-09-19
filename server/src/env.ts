@@ -16,12 +16,21 @@ class EnvConfig {
   }
 
   /**
-   * Interface the TCP listener binds to. Loopback by default: nothing in `/manage/api` or the Studio asks who you
-   * are yet (that is phase 5.4), so a server on 0.0.0.0 would let anyone on the network edit the library. Set
-   * `HOST=0.0.0.0` deliberately to read from other devices, and put it behind something that authenticates.
+   * Interface the TCP listener binds to. Loopback by default. `HOST=0.0.0.0` opens it to other devices; sign-in
+   * guards it, but over plain http passwords and session cookies travel in clear, so put TLS in front (and set
+   * `TRUST_PROXY`) for anything beyond your own network.
    */
   get HOST(): string {
     return Bun.env.HOST ?? "127.0.0.1";
+  }
+
+  /**
+   * Set to `true` only when a reverse proxy you run sits in front and terminates TLS. Then its `X-Forwarded-Proto`
+   * decides whether session cookies are marked Secure, and `X-Forwarded-For` is the client address sign-in limits
+   * count against. Left off, both headers are ignored, since anyone could send them.
+   */
+  get TRUST_PROXY(): boolean {
+    return Bun.env.TRUST_PROXY === "true";
   }
 
   get NODE_ENV(): "development" | "production" | "test" {
