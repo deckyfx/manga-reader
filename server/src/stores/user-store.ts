@@ -411,12 +411,17 @@ export class TotpDeviceStore {
    */
   static async sealLegacy(): Promise<number> {
     const rows = await db.select({ id: totpDevices.id, secret: totpDevices.secret }).from(totpDevices);
-    const plain = rows.filter((row) => !isSealed(row.secret));
-    for (const row of plain) {
+    let sealed = 0;
+    for (const row of rows.filter((r) => !isSealed(r.secret))) {
       // Only if it is still the plain value read above, so a concurrent change isn't overwritten
-      await db.update(totpDevices).set({ secret: seal(row.secret) }).where(and(eq(totpDevices.id, row.id), eq(totpDevices.secret, row.secret)));
+      const updated = await db
+        .update(totpDevices)
+        .set({ secret: seal(row.secret) })
+        .where(and(eq(totpDevices.id, row.id), eq(totpDevices.secret, row.secret)))
+        .returning({ id: totpDevices.id });
+      sealed += updated.length;
     }
-    return plain.length;
+    return sealed;
   }
 
   static async insert(userId: number, name: string, secret: string): Promise<TotpDevice> {
