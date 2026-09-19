@@ -11,14 +11,15 @@ import { childLogger } from "@/lib/logger";
 import { MAX_IMAGE_BYTES } from "@/services/page-jobs";
 import { normalisePage } from "@/services/page-pipeline";
 import { pageDir, PageStore } from "@/stores/page-store";
+import type { Page } from "@/db/schema";
 
 const log = childLogger("chapter-import");
 
 /** Archives expand in memory, so cap what one import may hold. */
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 /** Pages accepted in a single import, so one bad archive can't fill the disk. */
-const MAX_PAGES_PER_IMPORT = 500;
-const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|gif|bmp|avif|tiff?)$/i;
+export const MAX_PAGES_PER_IMPORT = 500;
+export const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|gif|bmp|avif|tiff?)$/i;
 const ARCHIVE_EXTENSIONS = /\.(zip|cbz)$/i;
 
 export interface ImportSource {
@@ -38,7 +39,7 @@ export interface ImportReport {
 }
 
 /** Filename without its directory or extension, for the page name. */
-const baseName = (path: string): string => {
+export const baseName = (path: string): string => {
   const file = path.split("/").pop() ?? path;
   return file.replace(/\.[^.]+$/, "");
 };
@@ -124,6 +125,37 @@ async function collectImages(sources: readonly ImportSource[]): Promise<ImportRe
 }
 
 /**
+ * Normalises one image (EXIF rotation applied, transparency flattened) into a new page's folder as `original.png`. The
+ * page starts idle with no stages, until a batch run translates it. `create` makes the row from the image's hash;
+ * null when the image couldn't be read or stored, in which case nothing of it is left behind.
+ */
+export async function storePageImage(image: ImportSource, create: (imageHash: string) => Promise<Page>): Promise<Page | null> {
+  let created: string | null = null;
+  try {
+    const normalised = await normalisePage(sharp(Buffer.from(image.bytes))).png().toBuffer();
+    const { width = 0, height = 0 } = await sharp(normalised).metadata();
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update(normalised);
+    const page = await create(hasher.digest("hex"));
+    created = page.id;
+    await mkdir(pageDir(page.id), { recursive: true });
+    await Bun.write(join(pageDir(page.id), "original.png"), normalised);
+    await PageStore.update(page.id, { width, height, status: "done" });
+    return { ...page, width, height, status: "done" };
+  } catch (err) {
+    log.warn({ err, entry: image.name }, "Page could not be imported");
+    // The row is written before the image: a page whose image never landed would show up empty
+    if (created) {
+      const pageId = created;
+      await PageStore.deletePage(pageId).catch((cleanup: unknown) => log.error({ err: cleanup, pageId }, "Couldn't remove a half-imported page"));
+      await rm(pageDir(pageId), { recursive: true, force: true })
+        .catch((cleanup: unknown) => log.error({ err: cleanup, pageId }, "Couldn't remove a half-imported page's folder"));
+    }
+    return null;
+  }
+}
+
+/**
  * Stores images (and the contents of ZIP / CBZ archives) as pages of `chapterId`, appended after the pages already
  * there. Each image is normalised (EXIF rotation applied, transparency flattened) into its page folder.
  */
@@ -141,30 +173,10 @@ export async function importIntoChapter(chapterId: number, sources: readonly Imp
       skipped.push({ name: image.name, reason: "image too large (max 15 MB)" });
       continue;
     }
-    let created: string | null = null;
-    try {
-      const normalised = await normalisePage(sharp(Buffer.from(image.bytes))).png().toBuffer();
-      const { width = 0, height = 0 } = await sharp(normalised).metadata();
-      const hasher = new Bun.CryptoHasher("sha256");
-      hasher.update(normalised);
-      const name = baseName(image.name);
-      const page = await PageStore.createInChapter(hasher.digest("hex"), "import", chapterId, ++order, name);
-      created = page.id;
-      await mkdir(pageDir(page.id), { recursive: true });
-      await Bun.write(join(pageDir(page.id), "original.png"), normalised);
-      // Imported pages are idle with no stages until a batch run translates them
-      await PageStore.update(page.id, { width, height, status: "done" });
-      pages.push({ id: page.id, name });
-    } catch (err) {
-      log.warn({ err, entry: image.name }, "Page could not be imported");
-      // The row is written before the image: a page whose image never landed would show up empty in the chapter
-      if (created) {
-        await PageStore.deletePage(created).catch((cleanup: unknown) => log.error({ err: cleanup, pageId: created }, "Couldn't remove a half-imported page"));
-        await rm(pageDir(created), { recursive: true, force: true })
-          .catch((cleanup: unknown) => log.error({ err: cleanup, pageId: created }, "Couldn't remove a half-imported page's folder"));
-      }
-      skipped.push({ name: image.name, reason: "image could not be stored" });
-    }
+    const name = baseName(image.name);
+    const page = await storePageImage(image, (imageHash) => PageStore.createInChapter(imageHash, "import", chapterId, ++order, name));
+    if (page) pages.push({ id: page.id, name });
+    else skipped.push({ name: image.name, reason: "image could not be stored" });
   }
 
   log.info({ chapterId, imported: pages.length, skipped: skipped.length }, "Imported pages into chapter");

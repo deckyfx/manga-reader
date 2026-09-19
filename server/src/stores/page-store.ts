@@ -96,6 +96,13 @@ export class PageStore {
     return row;
   }
 
+  /** A page appended to a Studio workspace at `sortOrder` (its import position); never reuses an existing page. */
+  static async createInWorkspace(imageHash: string, source: string, workspaceId: number, sortOrder: number, name: string | null): Promise<Page> {
+    const [row] = await db.insert(pages).values({ id: randomUUIDv7(), imageHash, source, workspaceId, sortOrder, name }).returning();
+    if (!row) throw new Error("failed to create page");
+    return row;
+  }
+
   /**
    * Pages for the Studio's list: the Inbox, the pages inside chapters, or both, newest first. `search` matches the
    * page name and its source.
@@ -103,7 +110,8 @@ export class PageStore {
   static async listFiltered(options: { filed?: "inbox" | "chapter" | "all"; chapterId?: number; search?: string; limit?: number } = {}): Promise<Page[]> {
     const filters = [];
     if (options.chapterId !== undefined) filters.push(eq(pages.chapterId, options.chapterId));
-    else if (options.filed === "inbox") filters.push(isNull(pages.chapterId));
+    // Pages in a workspace are listed with it, not among the loose ones
+    else if (options.filed === "inbox") filters.push(isNull(pages.chapterId), isNull(pages.workspaceId));
     else if (options.filed === "chapter") filters.push(isNotNull(pages.chapterId));
     const search = options.search?.trim();
     if (search) {

@@ -65,7 +65,7 @@ export async function signedIn(role: UserRole = "contributor"): Promise<{ id: nu
 }
 
 /** A small valid PNG of one colour, for uploads. */
-export async function png(colour = "#3366cc", width = 24, height = 32): Promise<Uint8Array> {
+export async function png(colour = "#3366cc", width = 24, height = 32): Promise<Uint8Array<ArrayBuffer>> {
   const sharp = (await import("sharp")).default;
-  return new Uint8Array(await sharp({ create: { width, height, channels: 3, background: colour } }).png().toBuffer());
+  return Uint8Array.from(await sharp({ create: { width, height, channels: 3, background: colour } }).png().toBuffer());
 }

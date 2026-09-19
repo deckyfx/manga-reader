@@ -22,6 +22,8 @@
  * GET   /studio/api/pages/:id/history/:revision  a snapshot image
  * POST  /studio/api/pages/:id/rollback           publish an earlier snapshot again
  *
+ * Workspaces live in ./workspaces.ts.
+ *
  * Mutations of one page (edit, run, publish, rollback) run under a per-page lock so their steps never interleave.
  */
 import Elysia, { t } from "elysia";
@@ -34,7 +36,7 @@ import { ErrBody, optionalEnum } from "@/lib/schemas";
 import { runExclusiveResult, withPageLock } from "@/queue/page-queue";
 import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
-import { hasUnpublishedEdits, historyFile, listHistory, publishedFile, restoreResult } from "@/services/page-history";
+import { historyFile, listHistory, restoreResult } from "@/services/page-history";
 import { pageLocation, pageLocations } from "@/services/page-location";
 import { publishPage } from "@/services/page-publish";
 import { decodeBase64Image, runStoredPage, submitPageJob } from "@/services/page-jobs";
@@ -43,6 +45,8 @@ import { FONT_FILES } from "@/services/typeset-service";
 import { FONT_VARIANTS, TEXT_ALIGNS } from "@/shared/typeset";
 import { imageSize, maskFromImage, maskToPng } from "@/lib/mask";
 import { PAGE_JOBS_DIR, pageDir, PageStore, type StageName } from "@/stores/page-store";
+import { PageSummary, toSummary } from "@/plugins/studio/page-summary";
+import { workspacesPlugin } from "@/plugins/studio/workspaces";
 
 const log = childLogger("studio");
 
@@ -148,39 +152,6 @@ function geometryError(page: Page, geometry: { x: number; y: number; w: number; 
   return null;
 }
 
-const PageLocationSchema = t.Object({
-  series_id: t.Integer(),
-  series_title: t.String(),
-  chapter_id: t.Integer(),
-  chapter_title: t.String(),
-  chapter_number: t.Nullable(t.String()),
-  index: t.Integer(),
-  total: t.Integer(),
-});
-
-const PageSummary = t.Object({
-  id: t.String(),
-  source: t.String(),
-  width: t.Integer(),
-  height: t.Integer(),
-  status: t.String(),
-  error: t.Nullable(t.String()),
-  clean_sfx: t.Boolean(),
-  revision: t.Integer(),
-  created_at: t.String(),
-  updated_at: t.String(),
-  has_result: t.Boolean(),
-  /** Published at least once: this is the version readers get. */
-  published: t.Boolean(),
-  /** The current burn is newer than the last publish, so readers can't see it yet. */
-  has_edits: t.Boolean(),
-  /** Chapter the page belongs to; null = Inbox. */
-  chapter_id: t.Nullable(t.Integer()),
-  name: t.Nullable(t.String()),
-  /** Series, chapter and reading position, for pages filed into a chapter. */
-  location: t.Optional(t.Nullable(PageLocationSchema)),
-});
-
 const StageSchema = t.Object({
   stage: t.String(),
   status: t.String(),
@@ -212,26 +183,6 @@ const PageDetail = t.Object({ page: PageSummary, stages: t.Array(StageSchema), b
 
 const PublishResult = t.Object({ revision: t.Integer(), notified: t.Integer() });
 
-function toSummary(page: Page) {
-  return {
-    id: page.id,
-    source: page.source,
-    width: page.width,
-    height: page.height,
-    status: page.status,
-    error: page.errorMessage,
-    clean_sfx: page.cleanSfx,
-    revision: page.revision,
-    created_at: page.createdAt,
-    updated_at: page.updatedAt,
-    has_result: existsSync(join(pageDir(page.id), "result.png")),
-    published: publishedFile(page.id) !== null,
-    has_edits: hasUnpublishedEdits(page.id),
-    chapter_id: page.chapterId,
-    name: page.name,
-  };
-}
-
 function toStage(row: PageStageRow) {
   return { stage: row.stage, status: row.status, file: row.file, error: row.errorMessage, updated_at: row.updatedAt };
 }
@@ -257,6 +208,8 @@ async function editablePage(id: string): Promise<{ page: Page } | { code: 404 | 
 }
 
 export const studioPlugin = new Elysia({ prefix: "/studio/api" })
+  .use(workspacesPlugin)
+
   .get(
     "/pages",
     async ({ query }) => {
