@@ -114,7 +114,12 @@ pages.originPageId: nullable fk pages, on delete set null       // the chapter p
     `importIntoChapter`'s normalising (`normalisePage`, `original.png`, idle pages) with a workspace target instead of a
     chapter. The extension uploads in batches through it, and `start_index` makes a retried batch idempotent: an index
     that already has a page is skipped.
-  - `POST /workspaces/:id/run` runs the pipeline over the pages that need it ("Run all"), with SSE progress.
+  - `POST /workspaces/:id/run` runs the pipeline over the pages that need it ("Run all"); `GET /workspaces/:id/run`
+    reports progress, or how many pages a run would take now.
+  - **Decision (2026-09-20):** progress is polled, not SSE (the plan first said SSE). Progress only moves once per
+    page, so a stream would idle between pages; the chapter run already polls, so the Studio keeps one pattern; and
+    the extension (P4) can poll with its `X-Api-Key` header, instead of a stream token in the URL — the thing the
+    PR #24 review flagged and that is on the backlog.
 
 ### File a workspace into the library
 
