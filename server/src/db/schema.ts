@@ -205,6 +205,144 @@ export type NewPage = typeof pages.$inferInsert;
 
 export type PageStageRow = typeof pageStages.$inferSelect;
 
+/**
+ * Server-level settings an admin can change at runtime, as key/value text. A table rather than env vars, because a
+ * switch flipped in /admin has to survive a restart, and because the values are policy rather than deployment.
+ */
+export const serverSettings = sqliteTable("server_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+});
+
+// ── Accounts ────────────────────────────────────────────────────────────────
+
+/** admin manages people and keys; contributor manages the library and the Studio; reader only reads. */
+export const USER_ROLES = ["admin", "contributor", "reader"] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** Lower-cased on the way in, so names are unique regardless of how they were typed. */
+  username: text("username").notNull(),
+  displayName: text("display_name"),
+  /** Argon2id, from Bun.password. */
+  passwordHash: text("password_hash").notNull(),
+  /** From Google sign-in, or set by an admin; unique when present. */
+  email: text("email"),
+  role: text("role").notNull().default("reader"),
+  /** Set when the account is suspended: it keeps its work but can't sign in. */
+  disabledAt: text("disabled_at"),
+  lastSeenAt: text("last_seen_at"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  usersUsernameIdx: uniqueIndex("users_username_idx").on(table.username),
+  usersEmailIdx: uniqueIndex("users_email_idx").on(table.email),
+}));
+
+/** Browser sessions. Only the hash of the cookie's token is stored, so the table is useless if it leaks. */
+export const sessions = sqliteTable("sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userAgent: text("user_agent"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  lastSeenAt: text("last_seen_at").notNull().default(sql`(datetime('now'))`),
+  expiresAt: text("expires_at").notNull(),
+}, (table) => ({
+  sessionsUserIdx: index("sessions_user_idx").on(table.userId),
+  sessionsExpiryIdx: index("sessions_expiry_idx").on(table.expiresAt),
+}));
+
+/**
+ * Authenticator apps, one row per device: a phone and a laptop can both hold a code for the same account, each with
+ * its own secret, so losing one doesn't mean re-enrolling the other. A device guards nothing until `confirmedAt`.
+ */
+export const totpDevices = sqliteTable("totp_devices", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  /** Base32, as the app stores it. */
+  secret: text("secret").notNull(),
+  confirmedAt: text("confirmed_at"),
+  /** The 30-second step this device last signed in with; a code is good once, not for its whole window. */
+  lastStep: integer("last_step"),
+  lastUsedAt: text("last_used_at"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  totpDevicesUserIdx: index("totp_devices_user_idx").on(table.userId),
+}));
+
+/** Single-use codes for getting back in when the authenticator is gone. Stored hashed, like every other secret. */
+export const recoveryCodes = sqliteTable("recovery_codes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  codeHash: text("code_hash").notNull(),
+  usedAt: text("used_at"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  recoveryCodesUserIdx: index("recovery_codes_user_idx").on(table.userId),
+}));
+
+/**
+ * The gap between "the password was right" and "you are signed in", while a second factor is checked. Short-lived,
+ * stored hashed, and useless on its own: it can only be exchanged for a session by passing the second step.
+ */
+export const mfaChallenges = sqliteTable("mfa_challenges", {
+  tokenHash: text("token_hash").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** WebAuthn assertion challenge, once one has been asked for. */
+  webauthnChallenge: text("webauthn_challenge"),
+  userAgent: text("user_agent"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  expiresAt: text("expires_at").notNull(),
+});
+
+/** Registered passkeys. Second factor: a passkey confirms a password, it doesn't replace one. */
+export const credentials = sqliteTable("credentials", {
+  /** The credential id from the authenticator (base64url). */
+  id: text("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  publicKey: text("public_key").notNull(),
+  /** Signature counter, to notice a cloned authenticator. */
+  counter: integer("counter").notNull().default(0),
+  transports: text("transports"),
+  lastUsedAt: text("last_used_at"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  credentialsUserIdx: index("credentials_user_idx").on(table.userId),
+}));
+
+/** A Google account linked to a user. One row per provider account, so the same Google login always lands here. */
+export const oauthAccounts = sqliteTable("oauth_accounts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  providerAccountId: text("provider_account_id").notNull(),
+  email: text("email"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  oauthProviderIdx: uniqueIndex("oauth_provider_account_idx").on(table.provider, table.providerAccountId),
+  oauthUserIdx: index("oauth_user_idx").on(table.userId),
+}));
+
+/** Keys for the extension and the desktop app (`X-Api-Key`). Stored hashed; the prefix is shown to identify one. */
+export const apiKeys = sqliteTable("api_keys", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  /** First characters of the key, for telling keys apart in the list. */
+  prefix: text("prefix").notNull(),
+  keyHash: text("key_hash").notNull(),
+  lastUsedAt: text("last_used_at"),
+  revokedAt: text("revoked_at"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  apiKeysHashIdx: uniqueIndex("api_keys_hash_idx").on(table.keyHash),
+  apiKeysUserIdx: index("api_keys_user_idx").on(table.userId),
+}));
+
 export type PageBlockRow = typeof pageBlocks.$inferSelect;
 export type NewPageBlockRow = typeof pageBlocks.$inferInsert;
 
@@ -229,3 +367,21 @@ export type NewPageTranslationJob = typeof pageTranslationJobs.$inferInsert;
 
 export type PageTranslationLog = typeof pageTranslationLogs.$inferSelect;
 export type NewPageTranslationLog = typeof pageTranslationLogs.$inferInsert;
+
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+
+export type Session = typeof sessions.$inferSelect;
+export type NewSession = typeof sessions.$inferInsert;
+
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type NewApiKey = typeof apiKeys.$inferInsert;
+
+export type TotpDevice = typeof totpDevices.$inferSelect;
+export type RecoveryCode = typeof recoveryCodes.$inferSelect;
+export type MfaChallenge = typeof mfaChallenges.$inferSelect;
+export type Credential = typeof credentials.$inferSelect;
+export type NewCredential = typeof credentials.$inferInsert;
+export type OauthAccount = typeof oauthAccounts.$inferSelect;
+
+export type ServerSetting = typeof serverSettings.$inferSelect;

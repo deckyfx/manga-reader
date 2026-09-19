@@ -1,5 +1,55 @@
 @import "tailwindcss";
 
+/*
+ * Day and night.
+ *
+ * Every component is written against the grey ramp (bg-gray-950, text-gray-100, border-gray-800…), and Tailwind v4
+ * compiles those to `var(--color-gray-*)`. So the light theme is the same ramp turned upside down — 950 becomes the
+ * lightest surface, 100 the darkest text — and not a single class has to change. Accent colours are left alone.
+ *
+ * `data-theme` is set on <html> before React renders (see client/lib/theme.ts), so there is no flash of the wrong one.
+ */
+:root[data-theme="light"] {
+  --color-gray-950: oklch(98.5% 0.002 247.839);
+  --color-gray-900: oklch(96.7% 0.003 264.542);
+  --color-gray-800: oklch(92.8% 0.006 264.531);
+  --color-gray-700: oklch(87.2% 0.01 258.338);
+  --color-gray-600: oklch(70.7% 0.022 261.325);
+  --color-gray-500: oklch(55.1% 0.027 264.364);
+  --color-gray-400: oklch(44.6% 0.03 256.802);
+  --color-gray-300: oklch(37.3% 0.034 259.733);
+  --color-gray-200: oklch(27.8% 0.033 256.848);
+  --color-gray-100: oklch(21% 0.034 264.665);
+  --color-gray-50: oklch(13% 0.028 261.692);
+}
+
+@layer base {
+  /*
+   * The app's own pages sit inside Layout, which paints the background; the sign-in screens don't, and were landing
+   * as a dark card on a white page. Setting it here means every route starts dark, and gives the full-height chain
+   * (html → body → #root) that `h-full` needs to centre anything.
+   */
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-gray-950);
+    color: var(--color-gray-100);
+  }
+
+  /*
+   * Tailwind v4 draws a placeholder as the input's own colour at 50% transparency, which on this dark theme lands
+   * close enough to the real text to be mistaken for it. A fixed dim grey keeps the hint clearly a hint.
+   */
+  ::placeholder {
+    color: var(--color-gray-500);
+    opacity: 1;
+  }
+}
+
 /* Tailwind v4's preflight resets buttons to the default cursor; bring back the pointer for everything clickable. */
 @layer base {
   button,

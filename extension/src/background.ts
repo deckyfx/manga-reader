@@ -11,6 +11,7 @@ import type {
   ImageUpdatedMsg,
 } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
+import { loadSettings, usableApiKey } from "./settings-store";
 import { errorMessage, serverApi } from "./api";
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -167,7 +168,7 @@ async function runServerFlow(
   const start = Date.now();
 
   try {
-    const { data, error } = await serverApi(settings.serverUrl).ocr.post({
+    const { data, error } = await serverApi(settings.serverUrl, usableApiKey(settings)).ocr.post({
       image: `data:image/jpeg;base64,${imageB64}`,
       translate_engine: settings.serverTranslation,
     });
@@ -198,7 +199,7 @@ async function handleExplain(text: string, tabId: number): Promise<void> {
   }
 
   try {
-    const { data, error } = await serverApi(settings.serverUrl).analyze.post({ text, sanitize: true, mode: settings.dictMode });
+    const { data, error } = await serverApi(settings.serverUrl, usableApiKey(settings)).analyze.post({ text, sanitize: true, mode: settings.dictMode });
 
     if (error) {
       sendToTab(tabId, { type: "explain-error", message: errorMessage(error) });
@@ -305,11 +306,7 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-async function loadSettings(): Promise<Settings> {
-  const keys = Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[];
-  const stored = await chrome.storage.sync.get(keys) as Partial<Settings>;
-  return { ...DEFAULT_SETTINGS, ...stored };
-}
+
 
 async function cropToBase64(dataUrl: string, rect: SelectionRect): Promise<string> {
   const comma = dataUrl.indexOf(",");

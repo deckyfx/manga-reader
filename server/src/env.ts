@@ -16,12 +16,24 @@ class EnvConfig {
   }
 
   /**
-   * Interface the TCP listener binds to. Loopback by default: nothing in `/manage/api` or the Studio asks who you
-   * are yet (that is phase 5.4), so a server on 0.0.0.0 would let anyone on the network edit the library. Set
-   * `HOST=0.0.0.0` deliberately to read from other devices, and put it behind something that authenticates.
+   * Interface the TCP listener binds to. Loopback by default. `HOST=0.0.0.0` opens it to other devices. Plain http is
+   * for development only (passwords and session cookies cross the network in clear); a real deployment reachable
+   * beyond this machine needs TLS in front, with `TRUST_PROXY` set.
    */
   get HOST(): string {
     return Bun.env.HOST ?? "127.0.0.1";
+  }
+
+  /**
+   * The reverse proxies (that terminate TLS) whose `X-Forwarded-Proto` and `X-Forwarded-For` are believed: `true` for
+   * one on this machine (loopback), or a comma-separated list of their addresses. The headers are ignored from anyone
+   * else, since any client could send them. Unset: ignored from everyone.
+   */
+  get TRUSTED_PROXIES(): string[] {
+    const raw = (Bun.env.TRUST_PROXY ?? "").trim();
+    if (raw === "" || raw === "false") return [];
+    if (raw === "true") return ["127.0.0.1", "::1", "::ffff:127.0.0.1"];
+    return raw.split(",").map((address) => address.trim()).filter(Boolean);
   }
 
   get NODE_ENV(): "development" | "production" | "test" {
@@ -30,6 +42,37 @@ class EnvConfig {
 
   get isDev(): boolean { return this.NODE_ENV === "development"; }
   get isProd(): boolean { return this.NODE_ENV === "production"; }
+
+  // ── Secrets at rest ──────────────────────────────────────────────────────
+
+  /** 32 bytes of base64 that seal TOTP secrets. Left unset, a key file is made beside the database. */
+  get SECRET_KEY(): string | undefined {
+    return Bun.env.SECRET_KEY || undefined;
+  }
+
+  /** Where that key is kept when SECRET_KEY isn't set. Back it up with the database. */
+  get SECRET_KEY_FILE(): string {
+    return Bun.env.SECRET_KEY_FILE ?? "./data/secret.key";
+  }
+
+  // ── Passkeys ─────────────────────────────────────────────────────────────
+
+  /**
+   * The domain passkeys are bound to. A passkey made on one origin can't be used on another, and the browser only
+   * offers WebAuthn on a secure context — `http://localhost` counts, a plain-http LAN address does not.
+   */
+  get WEBAUTHN_RP_ID(): string {
+    return Bun.env.WEBAUTHN_RP_ID ?? "localhost";
+  }
+
+  get WEBAUTHN_RP_NAME(): string {
+    return Bun.env.WEBAUTHN_RP_NAME ?? "web-ocr";
+  }
+
+  /** Where the browser thinks it is; must match exactly, scheme and port included. */
+  get WEBAUTHN_ORIGIN(): string {
+    return Bun.env.WEBAUTHN_ORIGIN ?? `http://localhost:${this.PORT}`;
+  }
 
   /** Unix socket path — when set the server binds here instead of TCP. */
   get SOCKET_PATH(): string | undefined { return Bun.env.SOCKET_PATH || undefined; }

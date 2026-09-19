@@ -7,6 +7,8 @@ import { loggerPlugin } from "@/plugins/plugin-logger";
 import { api } from "@/api";
 import { routeSettings } from "@/plugins/route-settings";
 import { studioPlugin } from "@/plugins/studio/index";
+import { authPlugin } from "@/plugins/auth/index";
+import { authGuard } from "@/plugins/auth/guard";
 import { readPlugin } from "@/plugins/read/index";
 import { managePlugin } from "@/plugins/manage/index";
 import { routeRoot, spaRoutes } from "@/plugins/route-spa";
@@ -23,6 +25,25 @@ async function migrateDb(): Promise<void> {
   // Folders of deleted pages whose cleanup failed last time
   const swept = await PageStore.sweepDeletedPageFolders();
   if (swept > 0) bootLog.info(`Removed ${swept} leftover folder(s) of deleted pages`);
+
+  // Sessions and sign-in challenges that ran out while the server was down, then every so often while it runs:
+  // nothing else removes a challenge somebody abandoned halfway through signing in
+  const { MfaChallengeStore, SessionStore, TotpDeviceStore, UserStore } = await import("@/stores/user-store");
+  // Authenticators enrolled before secrets were sealed at rest
+  const sealed = await TotpDeviceStore.sealLegacy();
+  if (sealed > 0) bootLog.info(`Sealed ${sealed} authenticator secret(s) stored in the clear`);
+  const purgeExpired = async (): Promise<void> => {
+    const [expired, challenges] = await Promise.all([SessionStore.purgeExpired(), MfaChallengeStore.purgeExpired()]);
+    if (expired > 0) bootLog.info(`Removed ${expired} expired session(s)`);
+    if (challenges > 0) bootLog.debug(`Removed ${challenges} expired sign-in challenge(s)`);
+  };
+  await purgeExpired();
+  setInterval(() => {
+    purgeExpired().catch((err: unknown) => bootLog.error({ err }, "Purging expired sessions failed"));
+  }, 15 * 60_000).unref();
+  if ((await UserStore.count()) === 0) {
+    bootLog.warn("No accounts yet — open /setup in a browser to create the first admin; the API stays closed until then");
+  }
 }
 
 async function loadModels(): Promise<void> {
@@ -146,6 +167,9 @@ await loadModels().catch((err) => {
 const app = new Elysia({ serve: { routes: spaRoutes } })
   .use(loggerPlugin)
   .use(cors())
+  // Before every area: the table in plugins/auth/guard.ts decides what each path needs
+  .use(authGuard)
+  .use(authPlugin)
   .use(api)
   .use(routeSettings)
   .use(studioPlugin)

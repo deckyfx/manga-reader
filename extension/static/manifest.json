@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Selfhost OCR",
-  "version": "1.4.0",
+  "version": "1.4.16",
   "description": "OCR screen regions using Tesseract.js or your self-hosted server.",
   "permissions": [
     "activeTab",

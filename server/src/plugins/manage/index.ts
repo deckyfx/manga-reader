@@ -21,13 +21,21 @@
  * GET    /manage/api/chapters/:id/run           progress of that run
  * POST   /manage/api/chapters/:id/publish       publish every page of the chapter that has unpublished edits
  * POST   /manage/api/pages/:id/publish          publish one page, so readers get its current result
+ * GET    /manage/api/settings                   server policy: registration, default role (admin)
+ * PUT    /manage/api/settings                   change it (admin)
+ * GET    /manage/api/sessions                   every signed-in session (admin)
+ * DELETE /manage/api/sessions/:id               sign one out (admin)
+ * GET    /manage/api/users                      the accounts on this server (admin)
+ * POST   /manage/api/users                      add an account (admin)
+ * PUT    /manage/api/users/:id                  change a role, suspend, rename or reset a password (admin)
+ * DELETE /manage/api/users/:id                  delete an account (admin)
  * GET    /manage/api/inbox                      pages not filed into a chapter yet
  * PUT    /manage/api/pages/:id                  move a page between chapters / the Inbox, rename, reorder
  * DELETE /manage/api/pages/:id                  take a page out of its chapter (back to the Inbox)
  */
 import Elysia, { t } from "elysia";
 import { childLogger } from "@/lib/logger";
-import { ErrBody } from "@/lib/schemas";
+import { ErrBody, optionalEnum } from "@/lib/schemas";
 import { chapterRun, pagesToRun, startChapterRun } from "@/services/chapter-batch";
 import { exportChapter } from "@/services/chapter-export";
 import { importIntoChapter, type ImportSource } from "@/services/chapter-import";
@@ -37,6 +45,12 @@ import { withPageLock } from "@/queue/page-queue";
 import { CoverTooLargeError, deleteCover, saveCover } from "@/services/library-covers";
 import { copyPageIntoChapter } from "@/services/page-copy";
 import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore } from "@/stores/library-store";
+import { SessionStore, UserStore } from "@/stores/user-store";
+import { hashSecret, SESSION_COOKIE } from "@/services/auth";
+import { hashPassword } from "@/services/auth";
+import { REGISTRATION_ROLES, serverPolicy, updateServerPolicy } from "@/services/server-settings";
+import { authContext, SessionSchema, toUser, UserSchema } from "@/plugins/auth/index";
+import { USER_ROLES } from "@/db/schema";
 import { PageStore } from "@/stores/page-store";
 import {
   chapterDetail,
@@ -56,6 +70,11 @@ const Title = t.String({ minLength: 1, maxLength: 200 });
 const Tags = t.Array(t.String({ maxLength: 40 }), { maxItems: 30 });
 
 /** Progress of a chapter batch run (in memory; a restart cancels it). */
+const ServerPolicySchema = t.Object({
+  registration_enabled: t.Boolean(),
+  default_role: t.UnionEnum([...REGISTRATION_ROLES]),
+});
+
 const ChapterRunSchema = t.Object({
   chapterId: t.Integer(),
   running: t.Boolean(),
@@ -69,6 +88,8 @@ const ChapterRunSchema = t.Object({
 });
 
 export const managePlugin = new Elysia({ prefix: "/manage/api" })
+  // For `principal`: the guard in plugins/auth/guard.ts is what enforces the roles, this is how the handlers see who it is
+  .use(authContext)
 
   // ── Series ─────────────────────────────────────────────────────────────────
 
@@ -92,8 +113,8 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         title: Title,
         synopsis: t.Optional(t.Nullable(t.String({ maxLength: 4000 }))),
         author: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
-        status: t.Optional(t.UnionEnum([...SERIES_STATUSES])),
-        reading_direction: t.Optional(t.UnionEnum([...READING_DIRECTIONS])),
+        status: optionalEnum(SERIES_STATUSES),
+        reading_direction: optionalEnum(READING_DIRECTIONS),
         tags: t.Optional(Tags),
       }),
       response: { 200: SeriesDetail, 404: ErrBody },
@@ -123,8 +144,8 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         title: t.Optional(Title),
         synopsis: t.Optional(t.Nullable(t.String({ maxLength: 4000 }))),
         author: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
-        status: t.Optional(t.UnionEnum([...SERIES_STATUSES])),
-        reading_direction: t.Optional(t.UnionEnum([...READING_DIRECTIONS])),
+        status: optionalEnum(SERIES_STATUSES),
+        reading_direction: optionalEnum(READING_DIRECTIONS),
         /** Replaces the series' whole tag set. */
         tags: t.Optional(Tags),
       }),
@@ -469,6 +490,147 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       params: t.Object({ id: IdParam }),
       response: { 200: t.Composite([ChapterDetail, t.Object({ published: t.Integer() })]), 404: ErrBody },
     },
+  )
+
+  // ── Server policy (admin) ──────────────────────────────────────────────────
+
+  .get(
+    "/settings",
+    async () => {
+      const policy = await serverPolicy();
+      return { registration_enabled: policy.registrationEnabled, default_role: policy.defaultRole };
+    },
+    { response: { 200: ServerPolicySchema } },
+  )
+
+  .put(
+    "/settings",
+    async ({ body }) => {
+      const policy = await updateServerPolicy({
+        ...(body.registration_enabled !== undefined ? { registrationEnabled: body.registration_enabled } : {}),
+        ...(body.default_role !== undefined ? { defaultRole: body.default_role } : {}),
+      });
+      return { registration_enabled: policy.registrationEnabled, default_role: policy.defaultRole };
+    },
+    {
+      body: t.Object({
+        registration_enabled: t.Optional(t.Boolean()),
+        /** What a self-registered account starts as; an admin can still promote it afterwards. Never admin. */
+        default_role: optionalEnum(REGISTRATION_ROLES),
+      }),
+      response: { 200: ServerPolicySchema },
+    },
+  )
+
+  // ── Sessions (admin) ───────────────────────────────────────────────────────
+
+  .get(
+    "/sessions",
+    async ({ cookie }) => {
+      const token = cookie[SESSION_COOKIE]?.value;
+      const currentHash = typeof token === "string" && token ? hashSecret(token) : null;
+      return (await SessionStore.listAll()).map(({ session, username }) => ({
+        id: session.tokenHash,
+        username,
+        current: session.tokenHash === currentHash,
+        user_agent: session.userAgent,
+        last_seen_at: session.lastSeenAt,
+        created_at: session.createdAt,
+        expires_at: session.expiresAt,
+      }));
+    },
+    { response: { 200: t.Array(t.Composite([SessionSchema, t.Object({ username: t.String() })])) } },
+  )
+
+  .delete(
+    "/sessions/:id",
+    async ({ params, status }) => {
+      if (!(await SessionStore.find(params.id))) return status(404, { error: "no such session" });
+      await SessionStore.delete(params.id);
+      log.info({ session: params.id.slice(0, 8) }, "Session signed out by an admin");
+      return { signed_out: true };
+    },
+    {
+      params: t.Object({ id: t.String({ maxLength: 128 }) }),
+      response: { 200: t.Object({ signed_out: t.Boolean() }), 404: ErrBody },
+    },
+  )
+
+  // ── Accounts (admin; the guard's table is what enforces that) ──────────────
+
+  .get("/users", async () => (await UserStore.list()).map(toUser), { response: { 200: t.Array(UserSchema) } })
+
+  .post(
+    "/users",
+    async ({ body, status }) => {
+      if (await UserStore.findByUsername(body.username)) return status(409, { error: "that username is taken" });
+      const user = await UserStore.insertIfFree({
+        username: body.username,
+        displayName: body.display_name ?? null,
+        passwordHash: await hashPassword(body.password),
+        role: body.role,
+      });
+      // Taken between the check above and here
+      if (!user) return status(409, { error: "that username is taken" });
+      log.info({ userId: user.id, role: user.role }, "Account created");
+      return toUser(user);
+    },
+    {
+      body: t.Object({
+        username: t.String({ minLength: 2, maxLength: 40, pattern: "^[A-Za-z0-9._-]+$" }),
+        password: t.String({ minLength: 8, maxLength: 200 }),
+        role: t.UnionEnum([...USER_ROLES]),
+        display_name: t.Optional(t.Nullable(t.String({ maxLength: 80 }))),
+      }),
+      response: { 200: UserSchema, 409: ErrBody },
+    },
+  )
+
+  .put(
+    "/users/:id",
+    async ({ params, body, principal, status }) => {
+      const user = await UserStore.findById(params.id);
+      if (!user) return status(404, { error: "user not found" });
+      if (body.disabled === true && principal?.user.id === params.id) return status(409, { error: "you can't suspend yourself" });
+
+      // The last admin keeps the keys: counted and applied together, so two demotions can't pass each other
+      const costsAdmin = (body.role !== undefined && body.role !== "admin") || body.disabled === true;
+      const outcome = await UserStore.updateGuardingLastAdmin(params.id, {
+        ...(body.role !== undefined ? { role: body.role } : {}),
+        ...(body.display_name !== undefined ? { displayName: body.display_name } : {}),
+        ...(body.password !== undefined ? { passwordHash: await hashPassword(body.password) } : {}),
+        ...(body.disabled !== undefined ? { disabledAt: body.disabled ? new Date().toISOString() : null } : {}),
+      }, costsAdmin);
+      if (outcome === "missing") return status(404, { error: "user not found" });
+      if (outcome === "last-admin") return status(409, { error: "this is the last admin" });
+      // A new password, a lost role or a suspension all end the sessions that were running under the old terms
+      if (body.password !== undefined || body.role !== undefined || body.disabled === true) await SessionStore.deleteForUser(params.id);
+      const updated = await UserStore.findById(params.id);
+      return updated ? toUser(updated) : status(404, { error: "user not found" });
+    },
+    {
+      params: t.Object({ id: IdParam }),
+      body: t.Object({
+        role: optionalEnum(USER_ROLES),
+        display_name: t.Optional(t.Nullable(t.String({ maxLength: 80 }))),
+        password: t.Optional(t.String({ minLength: 8, maxLength: 200 })),
+        disabled: t.Optional(t.Boolean()),
+      }),
+      response: { 200: UserSchema, 404: ErrBody, 409: ErrBody },
+    },
+  )
+
+  .delete(
+    "/users/:id",
+    async ({ params, principal, status }) => {
+      if (principal?.user.id === params.id) return status(409, { error: "you can't delete your own account" });
+      const outcome = await UserStore.deleteGuardingLastAdmin(params.id);
+      if (outcome === "missing") return status(404, { error: "user not found" });
+      if (outcome === "last-admin") return status(409, { error: "this is the last admin" });
+      log.info({ userId: params.id }, "Account deleted");
+      return { deleted: true };
+    },
+    { params: t.Object({ id: IdParam }), response: { 200: t.Object({ deleted: t.Boolean() }), 404: ErrBody, 409: ErrBody } },
   )
 
   // ── Pages ──────────────────────────────────────────────────────────────────

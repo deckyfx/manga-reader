@@ -1,5 +1,6 @@
 import type { Settings, OcrEngine, ServerTranslation, ClientTranslation, DictMode, TesseractQuality } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
+import { isPlainHttpOverNetwork, loadSettings, saveSettings as persistSettings } from "./settings-store";
 import { errorMessage, serverApi } from "./api";
 
 // ── Elements ──────────────────────────────────────────────────────────────────
@@ -20,6 +21,9 @@ const deeplApiKeyInput           = document.getElementById("deeplApiKey")       
 const deeplTargetLangSel         = document.getElementById("deeplTargetLang")         as HTMLSelectElement;
 
 const serverUrlInput             = document.getElementById("serverUrl")               as HTMLInputElement;
+const serverApiKeyInput          = document.getElementById("serverApiKey")            as HTMLInputElement;
+const allowInsecureInput         = document.getElementById("allowInsecureServer")     as HTMLInputElement;
+const insecureField              = document.getElementById("insecureField")           as HTMLElement;
 const serverTranslationSel       = document.getElementById("serverTranslation")       as HTMLSelectElement;
 const dictModeSelect             = document.getElementById("dictMode")                as HTMLSelectElement;
 const pageCleanSfxInput          = document.getElementById("pageCleanSfx")            as HTMLInputElement;
@@ -127,7 +131,26 @@ async function checkLangData(): Promise<void> {
 
 // ── Server: URL change resets verification ────────────────────────────────────
 
+/** The choice only makes sense for an address that would actually expose the key. */
+function updateInsecureVisibility(): void {
+  insecureField.style.display = isPlainHttpOverNetwork(serverUrlInput.value.trim()) ? "block" : "none";
+}
+
+allowInsecureInput.addEventListener("change", () => {
+  serverVerified = false;
+  setInlineStatus(testBtnStatus, "", "");
+  updateSaveBtn();
+});
+
+serverApiKeyInput.addEventListener("input", () => {
+  // A new key hasn't been tried yet, so the connection has to be proved again
+  serverVerified = false;
+  setInlineStatus(testBtnStatus, "", "");
+  updateSaveBtn();
+});
+
 serverUrlInput.addEventListener("input", () => {
+  updateInsecureVisibility();
   serverVerified = false;
   setInlineStatus(testBtnStatus, "", "");
   updateSaveBtn();
@@ -153,8 +176,31 @@ async function testConnection(): Promise<void> {
     } else {
       const mark = (ready: boolean | "disabled"): string => (ready === true ? "✓" : ready === "disabled" ? "off" : "✗");
       const models = `OCR ${mark(data.ocr)} · Translate ${mark(data.translate)} · Dictionary ${mark(data.dictionary)} · Text detection ${mark(data.text_seg)} · Inpaint ${mark(data.inpaint)}`;
-      serverVerified = true;
-      setInlineStatus(testBtnStatus, data.status === "starting" ? `⏳ Connected, models still loading — ${models}` : `✅ Connected — ${models}`, "ok");
+      const connected = data.status === "starting" ? "⏳ Connected, models still loading" : "✅ Connected";
+      const key = serverApiKeyInput.value.trim();
+
+      // Decided before anything is sent: testing the key would be the first thing to leak it
+      if (key !== "" && isPlainHttpOverNetwork(url) && !allowInsecureInput.checked) {
+        serverVerified = false;
+        setInlineStatus(
+          testBtnStatus,
+          `${connected} — but this address isn't https and isn't on this machine, so the key would cross the network in clear. Use https, or tick the box below if you trust this network.`,
+          "err",
+        );
+        return;
+      }
+
+      // Health is open to anyone; the key is what OCR will actually be judged by, so try it too
+      const keyCheck = key
+        ? await serverApi(url, key).api.whoami.get({ fetch: { signal: AbortSignal.timeout(5000) } })
+        : null;
+      const keyNote = !key
+        ? "⚠️ no API key — OCR will be refused"
+        : keyCheck?.error
+          ? `❌ the key was refused (${errorMessage(keyCheck.error)})`
+          : `key accepted as ${keyCheck?.data?.username ?? "?"} ✓`;
+      serverVerified = key !== "" && !keyCheck?.error;
+      setInlineStatus(testBtnStatus, `${connected} — ${models} · ${keyNote}`, serverVerified ? "ok" : "err");
     }
   } catch (e) {
     serverVerified = false;
@@ -165,6 +211,8 @@ async function testConnection(): Promise<void> {
     updateSaveBtn();
   }
 }
+
+
 
 // ── Client translation visibility ─────────────────────────────────────────────
 
@@ -208,10 +256,8 @@ dictModeSelect.addEventListener("change", () => {
 
 // ── Load saved settings ───────────────────────────────────────────────────────
 
-chrome.storage.sync
-  .get(Object.keys(DEFAULT_SETTINGS))
-  .then((data) => {
-    const s = { ...DEFAULT_SETTINGS, ...data } as Settings;
+loadSettings()
+  .then((s) => {
 
     tesseractLangInput.value    = s.tesseractLang;
     tesseractQualitySel.value   = s.tesseractQuality;
@@ -222,6 +268,9 @@ chrome.storage.sync
     deeplFields.style.display   = s.clientTranslation === "deepl" ? "block" : "none";
 
     serverUrlInput.value        = s.serverUrl;
+    serverApiKeyInput.value     = s.serverApiKey;
+    allowInsecureInput.checked  = s.allowInsecureServer;
+    updateInsecureVisibility();
     serverTranslationSel.value  = s.serverTranslation;
     dictModeSelect.value        = s.dictMode;
     pageCleanSfxInput.checked   = s.pageCleanSfx;
@@ -287,6 +336,8 @@ async function saveSettings(): Promise<void> {
   const settings: Settings = {
     ocrEngine:         activeEngine,
     serverUrl:         serverUrlInput.value.trim(),
+    serverApiKey:      serverApiKeyInput.value.trim(),
+    allowInsecureServer: allowInsecureInput.checked,
     serverTranslation: serverTranslationSel.value as ServerTranslation,
     dictMode:          dictModeSelect.value as DictMode,
     pageCleanSfx:      pageCleanSfxInput.checked,
@@ -297,7 +348,7 @@ async function saveSettings(): Promise<void> {
     deeplTargetLang,
   };
 
-  await chrome.storage.sync.set(settings);
+  await persistSettings(settings);
   showStatus("✅ Settings saved!", "success");
 }
 

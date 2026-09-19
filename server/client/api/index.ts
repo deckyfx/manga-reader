@@ -22,10 +22,21 @@ function errorText(error: unknown): string {
   return "API error";
 }
 
+/** An API failure that kept its status, so 401 (signed out) can be told from 500 (broken). */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 /** The response body of a successful Eden call; throws with the server's message otherwise. */
 async function unwrap<R extends { data: unknown; error: unknown }>(call: Promise<R>): Promise<NonNullable<R["data"]>> {
   const { data, error } = await call;
-  if (error || data === null || data === undefined) throw new Error(errorText(error));
+  if (error || data === null || data === undefined) {
+    const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 0;
+    throw new ApiError(errorText(error), status);
+  }
   return data as NonNullable<R["data"]>;
 }
 
@@ -36,6 +47,120 @@ export const getHealth = () => unwrap(api.health.get());
 export const getSettings = () => unwrap(api.api.settings.get());
 
 export const patchEngine = (engine: string) => unwrap(api.api.settings.engine.patch({ engine }));
+
+// ── Accounts ──────────────────────────────────────────────────────────────────
+
+export type UserRole = "admin" | "contributor" | "reader";
+/** What a self-registered account may start as; the server refuses admin here. */
+export type RegistrationRole = Exclude<UserRole, "admin">;
+export type SecondFactor = "totp" | "passkey";
+
+/** Who is signed in, what guards the account, and whether the server is still waiting to be set up. */
+export const getMe = () => unwrap(api.auth.api.me.get());
+
+/** Creates the first admin on an empty server; the route closes behind itself. */
+export const setupFirstAdmin = (body: { username: string; password: string; display_name?: string | null }) =>
+  unwrap(api.auth.api.setup.post(body));
+
+/** Creates your own account, when an admin has switched registration on. */
+export const register = (body: { username: string; password: string; display_name?: string | null }) =>
+  unwrap(api.auth.api.register.post(body));
+
+/**
+ * Signs in. An account with a second factor gets no session yet: the answer carries `mfa_required`, the methods it
+ * accepts and a short-lived challenge to finish with.
+ */
+export const login = (body: { username: string; password: string }) => unwrap(api.auth.api.login.post(body));
+
+export const loginWithTotp = (body: { challenge: string; code: string }) => unwrap(api.auth.api.login.totp.post(body));
+
+export const loginWithRecoveryCode = (body: { challenge: string; code: string }) =>
+  unwrap(api.auth.api.login.recovery.post(body));
+
+/** The WebAuthn request for a sign-in waiting on a passkey. */
+export const passkeyLoginOptions = (challenge: string) => unwrap(api.auth.api.login.passkey.options.post({ challenge }));
+
+export const loginWithPasskey = (body: { challenge: string; response: unknown }) =>
+  unwrap(api.auth.api.login.passkey.post(body));
+
+export const logout = () => unwrap(api.auth.api.logout.post());
+
+/** Changes your own password; every other session is signed out. */
+export const changePassword = (body: { current: string; next: string }) => unwrap(api.auth.api.password.post(body));
+
+export const reissueRecoveryCodes = (password: string) => unwrap(api.auth.api.recovery.post({ password }));
+
+// Authenticator apps — several per account
+
+export const listAuthenticators = () => unwrap(api.auth.api.totp.get());
+
+/** Starts enrolling one: answers with the secret and the otpauth:// URI to scan. */
+export const addAuthenticator = (name: string) => unwrap(api.auth.api.totp.post({ name }));
+
+/** Proves the app holds the secret. The first authenticator answers with the recovery codes. */
+export const confirmAuthenticator = (id: number, code: string) =>
+  unwrap(api.auth.api.totp({ id }).confirm.post({ code }));
+
+export const removeAuthenticator = (id: number, password: string) =>
+  unwrap(api.auth.api.totp({ id }).delete({ password }));
+
+// Passkeys — several per account, enrolled from a signed-in session only
+
+export const listPasskeys = () => unwrap(api.auth.api.passkeys.get());
+
+export const passkeyRegistrationOptions = () => unwrap(api.auth.api.passkeys.options.post());
+
+export const savePasskey = (body: { challenge: string; name: string; response: unknown }) =>
+  unwrap(api.auth.api.passkeys.post(body));
+
+export const removePasskey = (id: string, password: string) => unwrap(api.auth.api.passkeys({ id }).delete({ password }));
+
+// API keys, for the extension and the desktop app
+
+export const listApiKeys = () => unwrap(api.auth.api.keys.get());
+
+/** The only time the key itself is readable. */
+export const createApiKey = (name: string) => unwrap(api.auth.api.keys.post({ name }));
+
+export const revokeApiKey = (id: number) => unwrap(api.auth.api.keys({ id }).delete());
+
+// ── Server policy and accounts (admin) ───────────────────────────────────────
+
+export const getServerPolicy = () => unwrap(api.manage.api.settings.get());
+
+export const updateServerPolicy = (body: { registration_enabled?: boolean; default_role?: RegistrationRole }) =>
+  unwrap(api.manage.api.settings.put(body));
+
+export const listUsers = () => unwrap(api.manage.api.users.get());
+
+export const createUser = (body: { username: string; password: string; role: UserRole; display_name?: string | null }) =>
+  unwrap(api.manage.api.users.post(body));
+
+export const updateUser = (id: number, body: { role?: UserRole; display_name?: string | null; password?: string; disabled?: boolean }) =>
+  unwrap(api.manage.api.users({ id }).put(body));
+
+export const deleteUser = (id: number) => unwrap(api.manage.api.users({ id }).delete());
+
+// Sessions
+
+/** Where this account is signed in; the current one is marked rather than offered for sign-out. */
+export const listMySessions = () => unwrap(api.auth.api.sessions.get());
+
+export const endMySession = (id: string) => unwrap(api.auth.api.sessions({ id }).delete());
+
+export const listAllSessions = () => unwrap(api.manage.api.sessions.get());
+
+export const endAnySession = (id: string) => unwrap(api.manage.api.sessions({ id }).delete());
+
+export type Me = Awaited<ReturnType<typeof getMe>>;
+export type SessionSummary = Awaited<ReturnType<typeof listMySessions>>[number];
+export type AdminSession = Awaited<ReturnType<typeof listAllSessions>>[number];
+export type AccountSummary = Awaited<ReturnType<typeof listUsers>>[number];
+export type Account = NonNullable<Me["user"]>;
+export type Authenticator = Awaited<ReturnType<typeof listAuthenticators>>[number];
+export type Passkey = Awaited<ReturnType<typeof listPasskeys>>[number];
+export type ApiKeySummary = Awaited<ReturnType<typeof listApiKeys>>[number];
+export type ServerPolicy = Awaited<ReturnType<typeof getServerPolicy>>;
 
 // ── Studio ────────────────────────────────────────────────────────────────────
 

@@ -1,0 +1,1 @@
+ALTER TABLE `totp_devices` ADD `last_step` integer;

@@ -30,7 +30,7 @@ import { rename, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { Page, PageStageRow } from "@/db/schema";
 import { childLogger } from "@/lib/logger";
-import { ErrBody } from "@/lib/schemas";
+import { ErrBody, optionalEnum } from "@/lib/schemas";
 import { runExclusiveResult, withPageLock } from "@/queue/page-queue";
 import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
@@ -82,12 +82,12 @@ const HexColor = t.String({ pattern: "^#[0-9a-fA-F]{6}$" });
 
 /** Lettering overrides; see TextStyle in @/shared/typeset. */
 const StyleSchema = t.Object({
-  font: t.Optional(t.UnionEnum([...FONT_VARIANTS])),
+  font: optionalEnum(FONT_VARIANTS),
   font_size: t.Optional(t.Integer({ minimum: 6, maximum: 400 })),
   fill: t.Optional(HexColor),
   stroke: t.Optional(HexColor),
   stroke_width: t.Optional(t.Number({ minimum: 0, maximum: 60 })),
-  align: t.Optional(t.UnionEnum([...TEXT_ALIGNS])),
+  align: optionalEnum(TEXT_ALIGNS),
   line_height: t.Optional(t.Number({ minimum: 0.6, maximum: 3 })),
   uppercase: t.Optional(t.Boolean()),
   rotation: t.Optional(t.Number({ minimum: -180, maximum: 180 })),
@@ -271,7 +271,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
     {
       query: t.Object({
         /** Which pages to list: the Inbox (default), the ones inside chapters, or both. */
-        filed: t.Optional(t.UnionEnum(["inbox", "chapter", "all"])),
+        filed: optionalEnum(["inbox", "chapter", "all"] as const),
         chapter_id: t.Optional(t.Integer({ minimum: 1 })),
         q: t.Optional(t.String({ maxLength: 200 })),
       }),

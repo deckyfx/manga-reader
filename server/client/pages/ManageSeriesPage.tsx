@@ -20,7 +20,7 @@ import { useConfirm } from "../components/ConfirmDialog";
 import { SeriesForm } from "../components/SeriesForm";
 
 const STATUS_LABEL: Record<string, string> = { ongoing: "Ongoing", completed: "Completed", hiatus: "Hiatus" };
-const inputClass = "rounded-lg border border-gray-700 bg-gray-950 px-2.5 py-1.5 text-sm text-gray-100 placeholder:text-gray-600 focus:border-indigo-500 focus:outline-none";
+const inputClass = "rounded-lg border border-gray-700 bg-gray-950 px-2.5 py-1.5 text-sm text-gray-100 focus:border-indigo-500 focus:outline-none";
 
 /** One series to manage: its metadata, its volumes and chapters. Pages are managed inside a chapter. */
 export function ManageSeriesPage() {

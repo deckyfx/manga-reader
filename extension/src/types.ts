@@ -12,6 +12,14 @@ export interface Settings {
 
   // Server-mode settings
   serverUrl: string;
+  /** The server refuses OCR, translation and page jobs without one; make it on the server's /user page. */
+  serverApiKey: string;
+  /**
+   * Send the key to a plain-http address that isn't loopback. Off by default, because anyone on that network can
+   * read the key out of the request — on by choice, because a self-hosted server on a home LAN is exactly the case
+   * this extension exists for.
+   */
+  allowInsecureServer: boolean;
   serverTranslation: ServerTranslation;
   dictMode: DictMode;
   /** Page translation also removes sound effects (can soften detailed artwork). */
@@ -30,6 +38,8 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   ocrEngine: "tesseract",
   serverUrl: "",
+  serverApiKey: "",
+  allowInsecureServer: false,
   serverTranslation: "auto",
   dictMode: "jisho",
   pageCleanSfx: false,
