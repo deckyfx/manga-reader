@@ -33,8 +33,15 @@ export interface FileReport {
  */
 export function fileWorkspaceIntoChapter(workspaceId: number, chapterId: number): Promise<FileResult> {
   return withWorkspaceLock(workspaceId, async () => {
-    // Checked inside the lock, where a run can't start: filing under a run would move and publish pages the run is
-    // still translating, and a run publishes nothing itself
+    // Both checks live inside the lock, where nothing else can change the answer. The route checks too, to fail
+    // fast, but two requests arriving together would both get past that.
+    const workspace = await WorkspaceStore.findById(workspaceId);
+    if (!workspace) return { ok: false as const, error: "workspace not found" };
+    if (workspace.chapterId !== null) {
+      // Bound already: its pages belong to that chapter, so filing them elsewhere would move them out from under it
+      return { ok: false as const, error: "this workspace already works on a chapter" };
+    }
+    // Filing under a run would move and publish pages the run is still translating, and a run publishes nothing itself
     if (batchRun(`workspace:${workspaceId}`)?.running) {
       return { ok: false as const, error: "this workspace is being translated — wait for the run to finish" };
     }
