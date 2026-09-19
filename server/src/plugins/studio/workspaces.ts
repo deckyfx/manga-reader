@@ -7,12 +7,15 @@
  * PATCH  /studio/api/workspaces/:id           rename it, or flip its adult flag
  * DELETE /studio/api/workspaces/:id           remove the workspace; its pages stay, loose
  * POST   /studio/api/workspaces/:id/pages     append uploaded images at `start_index` (a retried batch skips pages it already stored)
+ * POST   /studio/api/workspaces/:id/run       translate the pages that need it ("Run all"); progress is polled
+ * GET    /studio/api/workspaces/:id/run       progress of that run, or how many pages one would translate now
  */
 import Elysia, { t } from "elysia";
 import type { Workspace } from "@/db/schema";
 import { ErrBody } from "@/lib/schemas";
 import { authContext } from "@/plugins/auth/index";
 import { PageSummary, toSummary } from "@/plugins/studio/page-summary";
+import { batchRun, pagesNeedingRun, startBatchRun } from "@/services/page-batch";
 import { importIntoWorkspace, type WorkspaceUpload } from "@/services/workspace-import";
 import { WorkspaceStore, type WorkspaceCounts } from "@/stores/workspace-store";
 
@@ -40,7 +43,25 @@ const WorkspaceSummary = t.Object({
 
 const WorkspaceDetail = t.Object({ workspace: WorkspaceSummary, pages: t.Array(PageSummary) });
 
+const WorkspaceRun = t.Object({
+  workspaceId: t.Integer(),
+  running: t.Boolean(),
+  total: t.Integer(),
+  done: t.Integer(),
+  failed: t.Integer(),
+  currentPageId: t.Nullable(t.String()),
+  startedAt: t.String(),
+  finishedAt: t.Nullable(t.String()),
+  error: t.Nullable(t.String()),
+});
+
 const Skipped = t.Object({ name: t.String(), index: t.Integer(), reason: t.String() });
+
+/** One run per workspace at a time. */
+const runKey = (id: number): string => `workspace:${id}`;
+
+/** The workspace's pages a run would translate now. */
+const pagesToRun = async (id: number, force: boolean) => pagesNeedingRun(await WorkspaceStore.pages(id), force);
 
 /** A workspace name: trimmed, and not blank. */
 const Name = t.String({ minLength: 1, maxLength: 200 });
@@ -184,5 +205,39 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         404: ErrBody,
         422: ErrBody,
       },
+    },
+    )
+
+  .post(
+    "/:id/run",
+    async ({ params, body, status }) => {
+      if (!(await WorkspaceStore.findById(params.id))) return status(404, { error: "workspace not found" });
+      // Drafts aren't published by a run: that happens when they are filed, or published on purpose
+      const state = await startBatchRun(runKey(params.id), () => pagesToRun(params.id, body?.force ?? false), {
+        cleanSfx: body?.clean_sfx ?? false,
+        publish: false,
+      });
+      if (!state) return status(409, { error: "this workspace is already being translated" });
+      return status(202, { ...state, workspaceId: params.id });
+    },
+    {
+      params: WorkspaceParams,
+      body: t.Optional(t.Object({ force: t.Optional(t.Boolean()), clean_sfx: t.Optional(t.Boolean()) })),
+      response: { 202: WorkspaceRun, 404: ErrBody, 409: ErrBody },
+    },
+  )
+
+  .get(
+    "/:id/run",
+    async ({ params, status }) => {
+      if (!(await WorkspaceStore.findById(params.id))) return status(404, { error: "workspace not found" });
+      const state = batchRun(runKey(params.id));
+      // No run yet: report what one would do now, so the button can show the count
+      if (state) return { ...state, workspaceId: params.id };
+      return { workspace_id: params.id, pending: (await pagesToRun(params.id, false)).length };
+    },
+    {
+      params: WorkspaceParams,
+      response: { 200: t.Union([WorkspaceRun, t.Object({ workspace_id: t.Integer(), pending: t.Integer() })]), 404: ErrBody },
     },
   );

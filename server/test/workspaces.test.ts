@@ -97,3 +97,35 @@ describe("workspaces", () => {
     expect(await loose()).toContain(pageId);
   });
 });
+
+describe("running a workspace", () => {
+  test("reports what a run would do, refuses an unknown workspace, and runs once at a time", async () => {
+    expect((await call("GET", "/studio/api/workspaces/999999/run", undefined, { cookie })).status).toBe(404);
+    expect((await call("POST", "/studio/api/workspaces/999999/run", {}, { cookie })).status).toBe(404);
+
+    const id = await create({ name: "Run me" });
+    expect((await call("GET", `/studio/api/workspaces/${id}/run`, undefined, { cookie })).body).toEqual({ workspace_id: id, pending: 0 });
+
+    await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(0, ["001.png", "002.png"]), { cookie });
+    // Freshly imported pages have an original and no stages, so both are waiting to be translated
+    expect((await call("GET", `/studio/api/workspaces/${id}/run`, undefined, { cookie })).body).toEqual({ workspace_id: id, pending: 2 });
+
+    // Two starts at once: one takes the run, the other is told it is already going
+    const [a, b] = await Promise.all([
+      call("POST", `/studio/api/workspaces/${id}/run`, {}, { cookie }),
+      call("POST", `/studio/api/workspaces/${id}/run`, {}, { cookie }),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([202, 409]);
+    const started = a.status === 202 ? a.body : b.body;
+    expect(started).toMatchObject({ workspaceId: id, running: true, total: 2 });
+
+    // The models aren't loaded in a test run, so each page is refused and counted; the run still finishes cleanly
+    let state = started;
+    for (let i = 0; i < 50 && state.running; i++) {
+      await Bun.sleep(20);
+      state = (await call("GET", `/studio/api/workspaces/${id}/run`, undefined, { cookie })).body;
+    }
+    expect(state).toMatchObject({ running: false, total: 2, done: 0, failed: 2 });
+    expect(state.error).toContain("not ready");
+  });
+});
