@@ -852,7 +852,8 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
       }, reopenDelay(failures));
     };
 
-    await openJobStream(0);
+    // A token that can't be fetched the first time goes through the same bounded retries as a dropped stream
+    await openJobStream(0).catch(() => reopenJob(1));
 
   } catch (e) {
     // Only the translation still on screen reports; an older one failing late would hide the newer one's panel

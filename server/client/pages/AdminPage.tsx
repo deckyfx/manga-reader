@@ -227,8 +227,8 @@ function UsersSection({ myId }: { myId: number }) {
           onSubmit={(e) => {
             e.preventDefault();
             if (resetting.value.length >= 8) {
-              updateM.mutate({ id: resetting.id, password: resetting.value });
-              setResetting(null);
+              // Closed only once it worked: a failure keeps the form, and what was typed, for another go
+              updateM.mutate({ id: resetting.id, password: resetting.value }, { onSuccess: () => setResetting(null) });
             }
           }}
         >
