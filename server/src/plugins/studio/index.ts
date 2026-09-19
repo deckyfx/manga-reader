@@ -38,6 +38,7 @@ import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
 import { historyFile, listHistory, restoreResult } from "@/services/page-history";
 import { pageLocation, pageLocations } from "@/services/page-location";
+import { publishBlocker, publishDraft } from "@/services/draft-publish";
 import { publishPage } from "@/services/page-publish";
 import { decodeBase64Image, runStoredPage, submitPageJob } from "@/services/page-jobs";
 import { MASK_LAYER_FILES, PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
@@ -657,13 +658,12 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
     ({ params, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
-      if (!existsSync(join(pageDir(params.id), "result.png"))) return status(409, { error: "page has no result to publish" });
-      // An edit saved after the last render would otherwise publish an image without it
-      const stages = await PageStore.listStages(params.id);
-      if (stages.some((s) => s.stage === "render" && s.status === "stale")) {
-        return status(409, { error: "the page changed since it was last rendered — re-render before publishing" });
-      }
-      return publishPage(params.id);
+      const blocker = publishBlocker(check.page, await PageStore.listStages(params.id));
+      if (blocker) return status(409, { error: blocker });
+      // A draft of a chapter page publishes over that page instead of itself
+      const outcome = await publishDraft(check.page);
+      if (!outcome.ok) return status(outcome.code, { error: outcome.error });
+      return { revision: outcome.revision, notified: outcome.notified };
     }),
     { params: IdParams, response: { 200: PublishResult, 404: ErrBody, 409: ErrBody } },
   )

@@ -82,9 +82,17 @@ export function publishedFile(pageId: string): string | null {
 
 /** True when result.png holds work that has not been published: newer than the last snapshot, or never published. */
 export function hasUnpublishedEdits(pageId: string): boolean {
-  const result = join(pageDir(pageId), "result.png");
+  return hasUnpublishedEditsAgainst(pageId, pageId);
+}
+
+/**
+ * Whether `resultPageId`'s burnt result is newer than what `publishedPageId` last published. The two differ for a
+ * draft of a chapter page: its work is unpublished until it has been copied over that page and published there.
+ */
+export function hasUnpublishedEditsAgainst(resultPageId: string, publishedPageId: string): boolean {
+  const result = join(pageDir(resultPageId), "result.png");
   if (!existsSync(result)) return false;
-  const published = publishedFile(pageId);
+  const published = publishedFile(publishedPageId);
   if (!published) return true;
   try {
     return statSync(result).mtimeMs > statSync(published).mtimeMs;

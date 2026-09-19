@@ -3,6 +3,9 @@
  * docs/PLAN_providers_workspaces.md).
  */
 import { beforeAll, describe, expect, test } from "bun:test";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { pageDir } from "@/stores/page-store";
 import { call, png, signedIn } from "./harness";
 
 let cookie = "";
@@ -156,5 +159,72 @@ describe("filing a workspace into a chapter", () => {
     const id = await create({ name: "Nowhere" });
     expect((await call("POST", `/studio/api/workspaces/${id}/file`, { chapter_id: 999999 }, { cookie })).status).toBe(404);
     expect((await call("POST", "/studio/api/workspaces/999999/file", { chapter_id: 1 }, { cookie })).status).toBe(404);
+  });
+});
+
+describe("sending a chapter to the Studio", () => {
+  /** A series with one chapter holding `count` imported pages. */
+  async function chapterWithPages(count: number): Promise<{ chapterId: number; pageIds: string[] }> {
+    const series = await call<{ series: { id: number } }>("POST", "/manage/api/series", { title: `Sent ${crypto.randomUUID()}` }, { cookie });
+    const detail = await call<{ unsorted: { id: number }[] }>("POST", "/manage/api/chapters", { series_id: series.body.series.id, title: "Chapter 1" }, { cookie });
+    const chapterId = detail.body.unsorted[0]!.id;
+    const form = new FormData();
+    for (let i = 0; i < count; i++) form.append("files", new File([await png(`#${(i + 3).toString(16).repeat(6)}`)], `p${i}.png`));
+    await call("POST", `/manage/api/chapters/${chapterId}/pages`, form, { cookie });
+    const inChapter = await call<{ id: string }[]>("GET", `/studio/api/pages?filed=chapter&chapter_id=${chapterId}`, undefined, { cookie });
+    return { chapterId, pageIds: inChapter.body.map((p) => p.id) };
+  }
+
+  test("copies each page as a draft, and sending again only picks up what is missing", async () => {
+    const { chapterId, pageIds } = await chapterWithPages(2);
+
+    const sent = await call("POST", `/manage/api/chapters/${chapterId}/to-studio`, undefined, { cookie });
+    expect(sent.status).toBe(200);
+    expect(sent.body).toMatchObject({ copied: 2, existing: 0, skipped: [] });
+
+    const detail = await call("GET", `/studio/api/workspaces/${sent.body.workspace_id}`, undefined, { cookie });
+    expect(detail.body.workspace.chapter_id).toBe(chapterId);
+    // The drafts are loose copies pointing back at the chapter's pages, which readers still get
+    expect(detail.body.pages.map((p: { origin_page_id: string }) => p.origin_page_id).sort()).toEqual([...pageIds].sort());
+    expect(detail.body.pages.every((p: { chapter_id: number | null }) => p.chapter_id === null)).toBe(true);
+
+    const again = await call("POST", `/manage/api/chapters/${chapterId}/to-studio`, undefined, { cookie });
+    expect(again.body).toMatchObject({ workspace_id: sent.body.workspace_id, copied: 0, existing: 2 });
+  });
+
+  test("publishing a draft publishes its chapter page instead", async () => {
+    const { chapterId, pageIds } = await chapterWithPages(1);
+    const originId = pageIds[0]!;
+    const sent = await call("POST", `/manage/api/chapters/${chapterId}/to-studio`, undefined, { cookie });
+    const detail = await call("GET", `/studio/api/workspaces/${sent.body.workspace_id}`, undefined, { cookie });
+    const draftId: string = detail.body.pages[0].id;
+
+    // Nothing has been rendered, so there is nothing readers could be given yet
+    expect((await call("POST", `/studio/api/pages/${draftId}/publish`, undefined, { cookie })).status).toBe(409);
+
+    // Stand in for a burn: the draft now holds a result the chapter page doesn't have
+    await mkdir(pageDir(draftId), { recursive: true });
+    await Bun.write(join(pageDir(draftId), "result.png"), await png("#112233"));
+
+    const published = await call("POST", `/studio/api/pages/${draftId}/publish`, undefined, { cookie });
+    expect(published.status).toBe(200);
+    expect(published.body.revision).toBe(1);
+
+    // The chapter page is the one published, and the draft stays in the workspace to edit again
+    const origin = await call("GET", `/studio/api/pages/${originId}`, undefined, { cookie });
+    expect(origin.body.page).toMatchObject({ revision: 1, published: true, has_result: true });
+    const after = await call("GET", `/studio/api/workspaces/${sent.body.workspace_id}`, undefined, { cookie });
+    expect(after.body.pages.map((p: { id: string }) => p.id)).toEqual([draftId]);
+    // Measured against its origin, the draft has nothing unpublished left
+    expect(after.body.pages[0]).toMatchObject({ published: true, has_edits: false });
+  });
+
+  test("publish all reports what it published", async () => {
+    const { chapterId } = await chapterWithPages(1);
+    const sent = await call("POST", `/manage/api/chapters/${chapterId}/to-studio`, undefined, { cookie });
+    const id = sent.body.workspace_id;
+    // No results anywhere: nothing to publish, and nothing refused either
+    expect((await call("POST", `/studio/api/workspaces/${id}/publish`, undefined, { cookie })).body).toMatchObject({ published: 0, skipped: [] });
+    expect((await call("POST", "/studio/api/workspaces/999999/publish", undefined, { cookie })).status).toBe(404);
   });
 });

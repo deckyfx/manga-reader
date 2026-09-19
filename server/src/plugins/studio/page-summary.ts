@@ -5,7 +5,7 @@ import { t } from "elysia";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@/db/schema";
-import { hasUnpublishedEdits, publishedFile } from "@/services/page-history";
+import { hasUnpublishedEdits, hasUnpublishedEditsAgainst, publishedFile } from "@/services/page-history";
 import { pageDir } from "@/stores/page-store";
 
 export const PageLocationSchema = t.Object({
@@ -59,8 +59,9 @@ export function toSummary(page: Page) {
     created_at: page.createdAt,
     updated_at: page.updatedAt,
     has_result: existsSync(join(pageDir(page.id), "result.png")),
-    published: publishedFile(page.id) !== null,
-    has_edits: hasUnpublishedEdits(page.id),
+    // A draft of a chapter page is measured against that page: it is what readers actually get
+    published: publishedFile(page.originPageId ?? page.id) !== null,
+    has_edits: page.originPageId === null ? hasUnpublishedEdits(page.id) : hasUnpublishedEditsAgainst(page.id, page.originPageId),
     chapter_id: page.chapterId,
     name: page.name,
     workspace_id: page.workspaceId,

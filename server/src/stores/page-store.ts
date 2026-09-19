@@ -96,9 +96,19 @@ export class PageStore {
     return row;
   }
 
-  /** A page appended to a Studio workspace at `sortOrder` (its import position); never reuses an existing page. */
-  static async createInWorkspace(imageHash: string, source: string, workspaceId: number, sortOrder: number, name: string | null): Promise<Page> {
-    const [row] = await db.insert(pages).values({ id: randomUUIDv7(), imageHash, source, workspaceId, sortOrder, name }).returning();
+  /**
+   * A page appended to a Studio workspace at `sortOrder` (its import position); never reuses an existing page.
+   * `originPageId` marks it as a draft copy of a chapter page, which it replaces when it is published.
+   */
+  static async createInWorkspace(
+    imageHash: string,
+    source: string,
+    workspaceId: number,
+    sortOrder: number,
+    name: string | null,
+    originPageId: string | null = null,
+  ): Promise<Page> {
+    const [row] = await db.insert(pages).values({ id: randomUUIDv7(), imageHash, source, workspaceId, sortOrder, name, originPageId }).returning();
     if (!row) throw new Error("failed to create page");
     return row;
   }

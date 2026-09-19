@@ -11,6 +11,22 @@ import type { Page } from "@/db/schema";
 
 const log = childLogger("page-copy");
 
+/**
+ * Copies a chapter page into a workspace as a draft: loose (no chapter), pointing back at the page it will replace
+ * when it is published. The chapter keeps serving the original until then.
+ */
+export async function copyPageAsDraft(source: Page, workspaceId: number, sortOrder: number): Promise<Page> {
+  const draft = await PageStore.createInWorkspace(source.imageHash, source.source, workspaceId, sortOrder, source.name, source.id);
+  try {
+    return await fillCopy(source, draft, null);
+  } catch (err) {
+    await PageStore.deletePage(draft.id).catch((cleanup: unknown) => log.error({ err: cleanup, pageId: draft.id }, "Couldn't remove a failed draft"));
+    await rm(pageDir(draft.id), { recursive: true, force: true })
+      .catch((cleanup: unknown) => log.error({ err: cleanup, pageId: draft.id }, "Couldn't remove a failed draft's folder"));
+    throw err;
+  }
+}
+
 /** Copies a page into a chapter, appended at the end of its reading order. */
 export async function copyPageIntoChapter(source: Page, chapterId: number, name?: string | null): Promise<Page> {
   const sortOrder = (await PageStore.maxSortOrder(chapterId)) + 1;
@@ -27,7 +43,7 @@ export async function copyPageIntoChapter(source: Page, chapterId: number, name?
 }
 
 /** Copies the source page's images, stages and blocks onto the freshly created row. */
-async function fillCopy(source: Page, copy: Page, chapterId: number): Promise<Page> {
+async function fillCopy(source: Page, copy: Page, chapterId: number | null): Promise<Page> {
   await PageStore.update(copy.id, {
     width: source.width,
     height: source.height,
@@ -35,9 +51,20 @@ async function fillCopy(source: Page, copy: Page, chapterId: number): Promise<Pa
     cleanSfx: source.cleanSfx,
   });
 
-  // Every image the page holds, but not its history: the copy has published nothing yet
-  const from = pageDir(source.id);
-  const to = pageDir(copy.id);
+  await copyPageImages(source.id, copy.id);
+
+  await PageStore.copyStagesAndBlocks(source.id, copy.id);
+  log.info({ from: source.id, to: copy.id, chapterId }, chapterId === null ? "Copied a page into the Studio as a draft" : "Copied a page into a chapter");
+  return (await PageStore.findById(copy.id)) ?? copy;
+}
+
+/**
+ * Copies a page's images onto another page, leaving the target's publish history alone — that lives in its own
+ * folder, and it is what a chapter is rolled back to.
+ */
+export async function copyPageImages(fromId: string, toId: string): Promise<void> {
+  const from = pageDir(fromId);
+  const to = pageDir(toId);
   let files: string[] = [];
   try {
     files = await readdir(from);
@@ -51,8 +78,4 @@ async function fillCopy(source: Page, copy: Page, chapterId: number): Promise<Pa
     if (!file.endsWith(".png")) continue;
     await cp(join(from, file), join(to, file), { recursive: false, force: true });
   }
-
-  await PageStore.copyStagesAndBlocks(source.id, copy.id);
-  log.info({ from: source.id, to: copy.id, chapterId }, "Copied a page into a chapter");
-  return (await PageStore.findById(copy.id)) ?? copy;
 }

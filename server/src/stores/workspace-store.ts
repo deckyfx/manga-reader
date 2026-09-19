@@ -2,7 +2,7 @@
  * Studio workspaces: folders of pages being worked on together (an imported chapter, a batch of uploads, or a chapter
  * sent to the Studio as drafts). A page sits in at most one; deleting a workspace leaves its pages loose.
  */
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db/index";
 import { pages, pageStages, workspaces, type NewWorkspace, type Page, type Workspace } from "@/db/schema";
 
@@ -37,6 +37,20 @@ export class WorkspaceStore {
       .from(workspaces)
       .where(filter.sourceUrl !== undefined ? eq(workspaces.sourceUrl, filter.sourceUrl) : undefined)
       .orderBy(desc(workspaces.updatedAt), desc(workspaces.id));
+  }
+
+  /** The workspace working on this chapter (the newest, if somehow several), for "send again". */
+  static async findByChapter(chapterId: number): Promise<Workspace | undefined> {
+    return db.query.workspaces.findFirst({ where: eq(workspaces.chapterId, chapterId), orderBy: desc(workspaces.id) });
+  }
+
+  /** The chapter pages this workspace already holds drafts of, so sending again only copies what is missing. */
+  static async draftOrigins(id: number): Promise<Set<string>> {
+    const rows = await db
+      .select({ originPageId: pages.originPageId })
+      .from(pages)
+      .where(and(eq(pages.workspaceId, id), isNotNull(pages.originPageId)));
+    return new Set(rows.flatMap((row) => (row.originPageId === null ? [] : [row.originPageId])));
   }
 
   static async create(data: Pick<NewWorkspace, "name" | "createdBy" | "sourceUrl" | "sourceProvider" | "adult" | "chapterId">): Promise<Workspace> {

@@ -8,6 +8,7 @@
  * DELETE /studio/api/workspaces/:id           remove the workspace; its pages stay, loose
  * POST   /studio/api/workspaces/:id/pages     append uploaded images at `start_index` (a retried batch skips pages it already stored)
  * POST   /studio/api/workspaces/:id/file      move its pages into a chapter, publishing the translated ones
+ * POST   /studio/api/workspaces/:id/publish   publish every page holding work readers can't see yet
  * POST   /studio/api/workspaces/:id/run       translate the pages that need it ("Run all"); progress is polled
  * GET    /studio/api/workspaces/:id/run       progress of that run, or how many pages one would translate now
  */
@@ -16,10 +17,13 @@ import type { Workspace } from "@/db/schema";
 import { ErrBody } from "@/lib/schemas";
 import { authContext } from "@/plugins/auth/index";
 import { PageSummary, toSummary } from "@/plugins/studio/page-summary";
+import { publishBlocker, publishDraft } from "@/services/draft-publish";
 import { batchRun, pagesNeedingRun, startBatchRun } from "@/services/page-batch";
 import { fileWorkspaceIntoChapter } from "@/services/workspace-file";
 import { importIntoWorkspace, type WorkspaceUpload } from "@/services/workspace-import";
+import { withPageLock } from "@/queue/page-queue";
 import { ChapterStore } from "@/stores/library-store";
+import { PageStore } from "@/stores/page-store";
 import { WorkspaceStore, type WorkspaceCounts } from "@/stores/workspace-store";
 
 const WorkspaceParams = t.Object({ id: t.Integer({ minimum: 1 }) });
@@ -261,6 +265,41 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
       response: {
         200: t.Composite([WorkspaceDetail, t.Object({
           filed: t.Integer(),
+          published: t.Integer(),
+          skipped: t.Array(t.Object({ pageId: t.String(), reason: t.String() })),
+        })]),
+        404: ErrBody,
+      },
+    },
+    )
+
+  .post(
+    "/:id/publish",
+    async ({ params, status }) => {
+      if (!(await WorkspaceStore.findById(params.id))) return status(404, { error: "workspace not found" });
+      const pages = await WorkspaceStore.pages(params.id);
+      let published = 0;
+      const skipped: { pageId: string; reason: string }[] = [];
+      for (const page of pages) {
+        // Nothing new to show readers: leave it alone rather than bumping a revision for the same image
+        const summary = toSummary(page);
+        if (!summary.has_edits) continue;
+        const outcome = await withPageLock(page.id, async () => {
+          const blocker = publishBlocker(page, await PageStore.listStages(page.id));
+          if (blocker) return { ok: false as const, code: 409 as const, error: blocker };
+          return publishDraft(page);
+        });
+        if (outcome.ok) published++;
+        else skipped.push({ pageId: page.id, reason: outcome.error });
+      }
+      const detail = await workspaceDetail(params.id);
+      if (!detail) return status(404, { error: "workspace not found" });
+      return { ...detail, published, skipped };
+    },
+    {
+      params: WorkspaceParams,
+      response: {
+        200: t.Composite([WorkspaceDetail, t.Object({
           published: t.Integer(),
           skipped: t.Array(t.Object({ pageId: t.String(), reason: t.String() })),
         })]),
