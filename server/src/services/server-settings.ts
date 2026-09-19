@@ -43,13 +43,15 @@ export async function serverPolicy(): Promise<ServerPolicy> {
 }
 
 export async function updateServerPolicy(changes: Partial<ServerPolicy>): Promise<ServerPolicy> {
-  if (changes.registrationEnabled !== undefined) {
-    await ServerSettingStore.set("registration_enabled", String(changes.registrationEnabled));
+  const entries: Record<string, string> = {};
+  if (changes.registrationEnabled !== undefined) entries.registration_enabled = String(changes.registrationEnabled);
+  if (changes.defaultRole !== undefined) entries.default_role = changes.defaultRole;
+  try {
+    // One transaction, so a failure can't leave half a policy behind to be read after the next reload
+    await ServerSettingStore.setMany(entries);
+  } finally {
+    cache = null;
   }
-  if (changes.defaultRole !== undefined) {
-    await ServerSettingStore.set("default_role", changes.defaultRole);
-  }
-  cache = null;
   const policy = await serverPolicy();
   log.info({ ...policy }, "Server policy changed");
   return policy;

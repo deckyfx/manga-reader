@@ -26,6 +26,18 @@ export class ServerSettingStore {
       .onConflictDoUpdate({ target: serverSettings.key, set: { value, updatedAt: sql`(datetime('now'))` } });
   }
 
+  /** Writes several settings in one transaction: all of them land, or none do. */
+  static async setMany(entries: Record<string, string>): Promise<void> {
+    db.transaction((tx) => {
+      for (const [key, value] of Object.entries(entries)) {
+        tx.insert(serverSettings)
+          .values({ key, value })
+          .onConflictDoUpdate({ target: serverSettings.key, set: { value, updatedAt: sql`(datetime('now'))` } })
+          .run();
+      }
+    });
+  }
+
   static async get(key: string): Promise<string | undefined> {
     const row = await db.select().from(serverSettings).where(eq(serverSettings.key, key)).get();
     return row?.value;
