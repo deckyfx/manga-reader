@@ -94,7 +94,8 @@ export class UserStore {
     return db.transaction((tx) => {
       const user = tx.select().from(users).where(eq(users.id, id)).get();
       if (!user) return "missing";
-      if (costsAdmin && user.role === "admin") {
+      // Only an admin who can still sign in counts: a suspended one leaving changes nobody's access
+      if (costsAdmin && user.role === "admin" && user.disabledAt === null) {
         const row = tx
           .select({ count: sql<number>`count(*)` })
           .from(users)
@@ -112,7 +113,7 @@ export class UserStore {
     return db.transaction((tx) => {
       const user = tx.select().from(users).where(eq(users.id, id)).get();
       if (!user) return "missing";
-      if (user.role === "admin") {
+      if (user.role === "admin" && user.disabledAt === null) {
         const row = tx
           .select({ count: sql<number>`count(*)` })
           .from(users)
