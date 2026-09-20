@@ -1,9 +1,10 @@
 import { Navigate } from "react-router";
-import { Loader2, MonitorSmartphone, ShieldAlert, UserPlus, Users } from "lucide-react";
+import { Loader2, MonitorSmartphone, ScanText, ShieldAlert, UserPlus, Users } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { LoadFailure } from "../components/LoadFailure";
 import { SectionedPage, type PageSection } from "../components/SectionedPage";
 import { PolicySection } from "./admin/PolicySection";
+import { ScansSection } from "./admin/ScansSection";
 import { SessionsSection } from "./admin/SessionsSection";
 import { UsersSection } from "./admin/UsersSection";
 
@@ -46,6 +47,14 @@ export function AdminPage() {
       icon: <MonitorSmartphone size={16} />,
       description: "Every browser signed in to this server right now.",
       render: () => <SessionsSection />,
+    },
+    {
+      id: "scans",
+      label: "Scans",
+      icon: <ScanText size={16} />,
+      title: "Scan log",
+      description: "Every region scanned through this server: who ran it, and what came back.",
+      render: () => <ScansSection />,
     },
   ];
 

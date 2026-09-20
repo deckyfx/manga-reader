@@ -23,6 +23,31 @@ export const translateLogs = sqliteTable("translate_logs", {
   processingTimeMs: integer("processing_time_ms"),
 });
 
+/**
+ * Every region scan the extension and the desktop app send here: who ran it and what came back. It's an activity
+ * log, not a cache — `ocr_logs` above keeps the result keyed by image, this keeps the act keyed by time. Neither the
+ * page address nor the crop is stored: what somebody was reading is theirs, and a crop is a picture of it.
+ */
+export const regionScans = sqliteTable("region_scans", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** Who scanned. Null once the account is gone; the row stays, so what the server did is still on record. */
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  /** Which key it came through, when it wasn't a browser. Null for a signed-in session. */
+  apiKeyId: integer("api_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
+  /** What the account was called at the time, so a deleted account still reads as somebody. */
+  username: text("username").notNull(),
+  sourceText: text("source_text").notNull(),
+  translatedText: text("translated_text"),
+  /** none | local | deepl, as resolved for this request. */
+  translateEngine: text("translate_engine").notNull().default("none"),
+  elapsedMs: integer("elapsed_ms").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  // The daily sweep reads by age; one account's listing pages by id, which is the order the list shows
+  scanCreatedIdx: index("region_scans_created_idx").on(table.createdAt),
+  scanUserIdx: index("region_scans_user_id_idx").on(table.userId, table.id),
+}));
+
 // ── Manga library ────────────────────────────────────────────────────────────
 
 // ── Library: series → volume (optional) → chapter → page ────────────────────
@@ -424,3 +449,6 @@ export type ServerSetting = typeof serverSettings.$inferSelect;
 
 export type Workspace = typeof workspaces.$inferSelect;
 export type NewWorkspace = typeof workspaces.$inferInsert;
+
+export type RegionScan = typeof regionScans.$inferSelect;
+export type NewRegionScan = typeof regionScans.$inferInsert;

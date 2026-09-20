@@ -41,6 +41,19 @@ async function migrateDb(): Promise<void> {
   setInterval(() => {
     purgeExpired().catch((err: unknown) => bootLog.error({ err }, "Purging expired sessions failed"));
   }, 15 * 60_000).unref();
+
+  // The scan log keeps only what the admin's retention allows, swept now and once a day after that
+  const { ScanStore } = await import("@/stores/scan-store");
+  const { serverPolicy } = await import("@/services/server-settings");
+  const sweepScans = async (): Promise<void> => {
+    const { scanLogDays } = await serverPolicy();
+    const removed = await ScanStore.purgeOlderThan(scanLogDays);
+    if (removed > 0) bootLog.info(`Removed ${removed} region scan(s) older than ${scanLogDays} days`);
+  };
+  await sweepScans();
+  setInterval(() => {
+    sweepScans().catch((err: unknown) => bootLog.error({ err }, "Sweeping the scan log failed"));
+  }, 24 * 60 * 60_000).unref();
   if ((await UserStore.count()) === 0) {
     bootLog.warn("No accounts yet — open /setup in a browser to create the first admin; the API stays closed until then");
   }

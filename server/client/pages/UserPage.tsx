@@ -1,11 +1,12 @@
 import { Navigate } from "react-router";
-import { KeyRound, Loader2, MonitorSmartphone, Shield, TerminalSquare, UserRound } from "lucide-react";
+import { KeyRound, Loader2, MonitorSmartphone, ScanText, Shield, TerminalSquare, UserRound } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { LoadFailure } from "../components/LoadFailure";
 import { SectionedPage, type PageSection } from "../components/SectionedPage";
 import { ApiKeySection } from "./user/ApiKeySection";
 import { PasskeySection } from "./user/PasskeySection";
 import { ProfileSection } from "./user/ProfileSection";
+import { ScansSection } from "./user/ScansSection";
 import { SecuritySection } from "./user/SecuritySection";
 import { SessionSection } from "./user/SessionSection";
 
@@ -48,6 +49,13 @@ export function UserPage() {
         icon: <TerminalSquare size={16} />,
         description: "What the browser extension and the desktop app sign in with. OCR refuses to run without one.",
         render: () => <ApiKeySection canUse />,
+      }, {
+        id: "scans",
+        label: "Scans",
+        icon: <ScanText size={16} />,
+        title: "Your scans",
+        description: "Every region you've scanned through this server, and what came back.",
+        render: () => <ScansSection userId={account.id} />,
       }] satisfies PageSection[]
       : []),
     {
