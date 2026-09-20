@@ -436,7 +436,11 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       params: t.Object({ id: IdParam }),
       body: t.Object({ urls: t.Array(t.String({ maxLength: 4096 }), { maxItems: MAX_URLS_PER_IMPORT }) }),
       response: {
-        200: t.Composite([ChapterDetail, t.Object({ imported: t.Integer(), skipped: t.Array(t.Object({ name: t.String(), reason: t.String() })) })]),
+        200: t.Composite([ChapterDetail, t.Object({
+          imported: t.Integer(),
+          /** `url` is the address that failed, so an offer to retry knows exactly which ones to send again. */
+          skipped: t.Array(t.Object({ url: t.Nullable(t.String()), name: t.String(), reason: t.String() })),
+        })]),
         404: ErrBody,
         422: ErrBody,
       },

@@ -5,17 +5,6 @@ import { Modal } from "./Modal";
 
 const MAX_URLS = 50;
 
-/** The name the server files an address under, so a failure in its report can be matched back to its address. */
-function nameFromUrl(raw: string): string {
-  try {
-    const url = new URL(raw);
-    const last = url.pathname.split("/").filter(Boolean).pop();
-    return last ? decodeURIComponent(last) : url.hostname;
-  } catch {
-    return raw.slice(0, 80);
-  }
-}
-
 /**
  * One address per line: blanks ignored, anything that isn't http(s) rejected, and an address given twice kept once.
  * A list pasted out of a reader often repeats one, and each repeat would otherwise become its own page.
@@ -56,11 +45,18 @@ export function AddPageUrlsDialog({
   title,
   onClose,
   onImport,
+  resendable = false,
 }: {
   title: string;
   onClose: () => void;
-  /** Runs the import; answers with what was filed and what wasn't. */
-  onImport: (urls: string[]) => Promise<{ imported: number; skipped: { name: string; reason: string }[] }>;
+  /** Runs the import; answers with what was filed and what wasn't, and which address each failure was. */
+  onImport: (urls: string[]) => Promise<{ imported: number; skipped: { url: string | null; name: string; reason: string }[] }>;
+  /**
+   * Whether sending the same list again is harmless. A workspace holds each page at a position, so a second attempt
+   * fills the gaps and leaves the rest alone; a chapter appends whatever it is given, so resending would file every
+   * address that worked a second time.
+   */
+  resendable?: boolean;
 }) {
   const [text, setText] = useState("");
   /** The list a result came back for, so the same one can't be sent twice. */
@@ -81,8 +77,13 @@ export function AddPageUrlsDialog({
    * given, so a partial import followed by a retry duplicates the pages that succeeded. Editing the list — or
    * pressing "Retry the failures", which cuts it down to those — is what makes the button live again.
    */
-  const alreadySent = imported !== null && text === imported;
-  const retryable = report?.skipped.filter((entry) => urls.some((url) => nameFromUrl(url) === entry.name)) ?? [];
+  const alreadySent = !resendable && imported !== null && text === imported;
+  /**
+   * The addresses that failed, as addresses rather than as names. A name is derived from the path, so two addresses
+   * can share one and an extensionless address is filed under a name that doesn't look like it — matching on names
+   * would offer to resend an address that worked.
+   */
+  const failedUrls = report?.skipped.map((entry) => entry.url).filter((url): url is string => url !== null) ?? [];
 
   return (
     <Modal
@@ -155,17 +156,19 @@ export function AddPageUrlsDialog({
                     <li key={`${entry.name}-${i}`}>{entry.name}: {entry.reason}</li>
                   ))}
                 </ul>
-                {retryable.length > 0 && (
+                {failedUrls.length > 0 && !resendable && (
                   <button
                     type="button"
-                    onClick={() => setText(urls.filter((url) => retryable.some((entry) => entry.name === nameFromUrl(url))).join("\n"))}
+                    onClick={() => setText(failedUrls.join("\n"))}
                     className="mt-1 rounded-lg bg-gray-800 px-2.5 py-1 text-xs text-gray-200 hover:bg-gray-700"
                   >
-                    Retry the {retryable.length} that failed
+                    Retry the {failedUrls.length} that failed
                   </button>
                 )}
                 <p className="text-gray-500">
-                  The ones that worked are filed already — edit the list before sending it again, or they'd be filed twice.
+                  {resendable
+                    ? "Sending the same list again fills the gaps: the pages already here keep their places."
+                    : "The ones that worked are filed already — edit the list before sending it again, or they'd be filed twice."}
                 </p>
               </>
             )}

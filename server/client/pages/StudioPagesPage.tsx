@@ -245,6 +245,8 @@ export function StudioPagesPage() {
       {importingUrls && (
         <AddPageUrlsDialog
           title="Download pages into a new workspace"
+          // A workspace keeps each page at its position, so resending the same list fills the gaps a failure left
+          resendable
           onClose={() => {
             setImportingUrls(false);
             void qc.invalidateQueries({ queryKey: ["workspaces"] });
@@ -262,7 +264,7 @@ export function StudioPagesPage() {
             void qc.invalidateQueries({ queryKey: ["workspaces"] });
             return {
               imported: detail.imported,
-              skipped: detail.skipped.map((entry) => ({ name: entry.name, reason: entry.reason })),
+              skipped: detail.skipped.map((entry) => ({ url: entry.url, name: entry.name, reason: entry.reason })),
             };
           }}
         />

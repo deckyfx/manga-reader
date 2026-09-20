@@ -67,6 +67,9 @@ const WorkspaceRun = t.Object({
 
 const Skipped = t.Object({ name: t.String(), index: t.Integer(), reason: t.String() });
 
+/** The same, from an address import: it also says which address failed. */
+const SkippedUrl = t.Object({ url: t.Nullable(t.String()), name: t.String(), index: t.Integer(), reason: t.String() });
+
 /** One run per workspace at a time. */
 const runKey = (id: number): string => `workspace:${id}`;
 
@@ -245,7 +248,7 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         start_index: t.Integer({ minimum: 0, maximum: 100_000 }),
       }),
       response: {
-        200: t.Composite([WorkspaceDetail, t.Object({ imported: t.Integer(), existing: t.Array(t.Integer()), skipped: t.Array(Skipped) })]),
+        200: t.Composite([WorkspaceDetail, t.Object({ imported: t.Integer(), existing: t.Array(t.Integer()), skipped: t.Array(SkippedUrl) })]),
         404: ErrBody,
         422: ErrBody,
       },

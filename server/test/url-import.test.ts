@@ -89,6 +89,22 @@ describe("into a chapter", () => {
     expect(report.pages.map((page) => page.name)).toEqual(["image", "download"]);
   });
 
+  test("a failure names the address it came from, not just the page name", async () => {
+    const { cookie } = await signedIn("contributor");
+    const chapterId = await aChapter(cookie);
+
+    // Two different addresses whose paths end the same way: matching failures by name would confuse them, and
+    // offering to retry would resend the one that worked
+    const report = await importUrlsIntoChapter(
+      chapterId,
+      [`${origin}/first/page.png`, `${origin}/second/missing.png`],
+      async (url) => (url.includes("missing") ? Promise.reject(new Error("gone")) : download(url)),
+    );
+    expect(report.pages).toHaveLength(1);
+    expect(report.skipped).toHaveLength(1);
+    expect(report.skipped[0].url).toBe(`${origin}/second/missing.png`);
+  });
+
   test("one address failing is a skipped entry, not a failed import", async () => {
     const { cookie } = await signedIn("contributor");
     const chapterId = await aChapter(cookie);

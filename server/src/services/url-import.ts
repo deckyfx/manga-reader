@@ -22,6 +22,23 @@ export const MAX_URLS_PER_IMPORT = 50;
 export type Download = (url: string) => Promise<Buffer>;
 
 /**
+ * What came back from importing a list of addresses. A skipped entry carries the address it came from, not just the
+ * name it would have been filed under: names are derived from the path, so two addresses can share one, and an
+ * extensionless address is filed under a name that doesn't look like it. Anything offering to retry the failures has
+ * to know exactly which addresses failed.
+ */
+export interface UrlImportReport {
+  pages: { id: string; name: string }[];
+  skipped: { url: string | null; name: string; reason: string }[];
+}
+
+export interface UrlWorkspaceImportReport {
+  pages: { id: string; name: string; index: number }[];
+  existing: number[];
+  skipped: { url: string | null; name: string; index: number; reason: string }[];
+}
+
+/**
  * Trims, drops blanks, and keeps the first of any address given twice, in the order given.
  *
  * A list pasted from a reader often repeats an address — a page shown twice, a preview alongside the full image —
@@ -72,8 +89,8 @@ export async function importUrlsIntoChapter(
   chapterId: number,
   urls: readonly string[],
   download: Download = fetchImage,
-): Promise<ImportReport> {
-  const report: ImportReport = { pages: [], skipped: [] };
+): Promise<UrlImportReport> {
+  const report: UrlImportReport = { pages: [], skipped: [] };
 
   for (const url of urls.slice(0, MAX_URLS_PER_IMPORT)) {
     const name = importNameFor(url);
@@ -83,16 +100,16 @@ export async function importUrlsIntoChapter(
       // would be most of a gigabyte. `importIntoChapter` appends, so filing one at a time keeps the order given
       const part = await importIntoChapter(chapterId, [source]);
       report.pages.push(...part.pages);
-      report.skipped.push(...part.skipped);
+      report.skipped.push(...part.skipped.map((entry) => ({ ...entry, url })));
     } catch (err) {
       const reason = err instanceof Error ? err.message : "could not be downloaded";
       log.warn({ err, url }, "A page address could not be downloaded");
-      report.skipped.push({ name, reason });
+      report.skipped.push({ url, name: nameFromUrl(url), reason });
     }
   }
 
   for (const url of urls.slice(MAX_URLS_PER_IMPORT)) {
-    report.skipped.push({ name: nameFromUrl(url), reason: `more than ${MAX_URLS_PER_IMPORT} addresses in one import` });
+    report.skipped.push({ url, name: nameFromUrl(url), reason: `more than ${MAX_URLS_PER_IMPORT} addresses in one import` });
   }
   return report;
 }
@@ -108,8 +125,8 @@ export async function importUrlsIntoWorkspace(
   startIndex: number,
   urls: readonly string[],
   download: Download = fetchImage,
-): Promise<WorkspaceImportReport> {
-  const report: WorkspaceImportReport = { pages: [], existing: [], skipped: [] };
+): Promise<UrlWorkspaceImportReport> {
+  const report: UrlWorkspaceImportReport = { pages: [], existing: [], skipped: [] };
 
   for (const [offset, url] of urls.slice(0, MAX_URLS_PER_IMPORT).entries()) {
     const index = startIndex + offset;
@@ -122,16 +139,17 @@ export async function importUrlsIntoWorkspace(
       const part = await importIntoWorkspace(workspaceId, index, [upload]);
       report.pages.push(...part.pages);
       report.existing.push(...part.existing);
-      report.skipped.push(...part.skipped);
+      report.skipped.push(...part.skipped.map((entry) => ({ ...entry, url })));
     } catch (err) {
       const reason = err instanceof Error ? err.message : "could not be downloaded";
       log.warn({ err, url }, "A page address could not be downloaded");
-      report.skipped.push({ name, index, reason });
+      report.skipped.push({ url, name: nameFromUrl(url), index, reason });
     }
   }
 
   for (const [offset, url] of urls.slice(MAX_URLS_PER_IMPORT).entries()) {
     report.skipped.push({
+      url,
       name: nameFromUrl(url),
       index: startIndex + MAX_URLS_PER_IMPORT + offset,
       reason: `more than ${MAX_URLS_PER_IMPORT} addresses in one import`,
