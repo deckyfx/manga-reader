@@ -50,7 +50,8 @@ import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore } from "@/store
 import { SessionStore, UserStore } from "@/stores/user-store";
 import { hashSecret, SESSION_COOKIE } from "@/services/auth";
 import { hashPassword } from "@/services/auth";
-import { REGISTRATION_ROLES, serverPolicy, updateServerPolicy } from "@/services/server-settings";
+import { MAX_SCAN_LOG_DAYS, REGISTRATION_ROLES, serverPolicy, updateServerPolicy } from "@/services/server-settings";
+import { ScanStore } from "@/stores/scan-store";
 import { authContext, SessionSchema, toUser, UserSchema } from "@/plugins/auth/index";
 import { USER_ROLES } from "@/db/schema";
 import { PageStore } from "@/stores/page-store";
@@ -75,6 +76,21 @@ const Tags = t.Array(t.String({ maxLength: 40 }), { maxItems: 30 });
 const ServerPolicySchema = t.Object({
   registration_enabled: t.Boolean(),
   default_role: t.UnionEnum([...REGISTRATION_ROLES]),
+  scan_log_days: t.Integer({ minimum: 0, maximum: MAX_SCAN_LOG_DAYS }),
+});
+
+/** One region scan, as the activity log shows it. */
+const ScanSchema = t.Object({
+  id: t.Integer(),
+  user_id: t.Nullable(t.Integer()),
+  username: t.String(),
+  /** Whether it came through an API key (the extension, the desktop app) rather than a browser. */
+  via_key: t.Boolean(),
+  source_text: t.String(),
+  translated_text: t.Nullable(t.String()),
+  translate_engine: t.String(),
+  elapsed_ms: t.Integer(),
+  created_at: t.String(),
 });
 
 const ChapterRunSchema = t.Object({
@@ -530,7 +546,7 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     "/settings",
     async () => {
       const policy = await serverPolicy();
-      return { registration_enabled: policy.registrationEnabled, default_role: policy.defaultRole };
+      return { registration_enabled: policy.registrationEnabled, default_role: policy.defaultRole, scan_log_days: policy.scanLogDays };
     },
     { response: { 200: ServerPolicySchema } },
   )
@@ -541,14 +557,17 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       const policy = await updateServerPolicy({
         ...(body.registration_enabled !== undefined ? { registrationEnabled: body.registration_enabled } : {}),
         ...(body.default_role !== undefined ? { defaultRole: body.default_role } : {}),
+        ...(body.scan_log_days !== undefined ? { scanLogDays: body.scan_log_days } : {}),
       });
-      return { registration_enabled: policy.registrationEnabled, default_role: policy.defaultRole };
+      return { registration_enabled: policy.registrationEnabled, default_role: policy.defaultRole, scan_log_days: policy.scanLogDays };
     },
     {
       body: t.Object({
         registration_enabled: t.Optional(t.Boolean()),
         /** What a self-registered account starts as; an admin can still promote it afterwards. Never admin. */
         default_role: optionalEnum(REGISTRATION_ROLES),
+        /** How many days of scan history to keep; 0 keeps them for ever. */
+        scan_log_days: t.Optional(t.Integer({ minimum: 0, maximum: MAX_SCAN_LOG_DAYS })),
       }),
       response: { 200: ServerPolicySchema },
     },
@@ -727,4 +746,44 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       return updated ? toPage(updated) : status(404, { error: "page not found" });
     },
     { params: t.Object({ id: PageIdParam }), response: { 200: ReadPageSchema, 404: ErrBody } },
+  )
+
+  // ── Region scans (your own; everyone's for an admin) ───────────────────────
+
+  .get(
+    "/scans",
+    async ({ query, principal, status }) => {
+      if (!principal) return status(401, { error: "sign in to read the scan log" });
+      const admin = principal.user.role === "admin";
+      // Anyone else is pinned to their own scans, whatever they ask for: the filter is the permission
+      const userId = admin ? query.user : principal.user.id;
+      const rows = await ScanStore.list({
+        ...(userId !== undefined ? { userId } : {}),
+        ...(query.q !== undefined ? { search: query.q } : {}),
+        ...(query.before_id !== undefined ? { beforeId: query.before_id } : {}),
+        ...(query.limit !== undefined ? { limit: query.limit } : {}),
+      });
+      return rows.map((scan) => ({
+        id: scan.id,
+        user_id: scan.userId,
+        username: scan.username,
+        via_key: scan.apiKeyId !== null,
+        source_text: scan.sourceText,
+        translated_text: scan.translatedText,
+        translate_engine: scan.translateEngine,
+        elapsed_ms: scan.elapsedMs,
+        created_at: scan.createdAt,
+      }));
+    },
+    {
+      query: t.Object({
+        /** Admins only; anyone else always reads their own. */
+        user: t.Optional(t.Integer({ minimum: 1 })),
+        q: t.Optional(t.String({ maxLength: 200 })),
+        /** Id of the last row of the previous page; the next page carries on below it. */
+        before_id: t.Optional(t.Integer({ minimum: 1 })),
+        limit: t.Optional(t.Integer({ minimum: 1, maximum: 200 })),
+      }),
+      response: { 200: t.Array(ScanSchema), 401: ErrBody },
+    },
   );

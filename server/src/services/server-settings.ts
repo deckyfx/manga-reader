@@ -23,9 +23,22 @@ export interface ServerPolicy {
   registrationEnabled: boolean;
   /** What a self-registered account starts as; never an admin. */
   defaultRole: RegistrationRole;
+  /** How long a region scan stays in the activity log. 0 keeps them for ever. */
+  scanLogDays: number;
 }
 
-const DEFAULTS: ServerPolicy = { registrationEnabled: false, defaultRole: "reader" };
+/** A year is plenty for an activity log, and it keeps a typo from turning the sweep into a no-op for ever. */
+export const MAX_SCAN_LOG_DAYS = 365;
+
+const DEFAULTS: ServerPolicy = { registrationEnabled: false, defaultRole: "reader", scanLogDays: 30 };
+
+/** A stored day count that isn't a whole number in range is read as the default, not obeyed. */
+function readScanLogDays(raw: string | undefined): number {
+  if (raw === undefined) return DEFAULTS.scanLogDays;
+  const days = Number(raw);
+  if (!Number.isInteger(days) || days < 0 || days > MAX_SCAN_LOG_DAYS) return DEFAULTS.scanLogDays;
+  return days;
+}
 
 /** Read often (every sign-in screen asks), written rarely: cached until something changes it. */
 let cache: ServerPolicy | null = null;
@@ -38,6 +51,7 @@ export async function serverPolicy(): Promise<ServerPolicy> {
     registrationEnabled: stored.get("registration_enabled") === "true",
     // A row saying "admin" — from an older build, or an edited database — is read as the default rather than obeyed
     defaultRole: (REGISTRATION_ROLES as readonly string[]).includes(role ?? "") ? (role as RegistrationRole) : DEFAULTS.defaultRole,
+    scanLogDays: readScanLogDays(stored.get("scan_log_days")),
   };
   return cache;
 }
@@ -46,6 +60,7 @@ export async function updateServerPolicy(changes: Partial<ServerPolicy>): Promis
   const entries: Record<string, string> = {};
   if (changes.registrationEnabled !== undefined) entries.registration_enabled = String(changes.registrationEnabled);
   if (changes.defaultRole !== undefined) entries.default_role = changes.defaultRole;
+  if (changes.scanLogDays !== undefined) entries.scan_log_days = String(changes.scanLogDays);
   try {
     // One transaction, so a failure can't leave half a policy behind to be read after the next reload
     await ServerSettingStore.setMany(entries);

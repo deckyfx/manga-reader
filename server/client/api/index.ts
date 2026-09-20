@@ -128,8 +128,21 @@ export const revokeApiKey = (id: number) => unwrap(api.auth.api.keys({ id }).del
 
 export const getServerPolicy = () => unwrap(api.manage.api.settings.get());
 
-export const updateServerPolicy = (body: { registration_enabled?: boolean; default_role?: RegistrationRole }) =>
+export const updateServerPolicy = (body: { registration_enabled?: boolean; default_role?: RegistrationRole; scan_log_days?: number }) =>
   unwrap(api.manage.api.settings.put(body));
+
+// ── Region scans (your own; everyone's for an admin) ─────────────────────────
+
+/** A page of scans, newest first. `beforeId` is the id of the last row already shown. */
+export const listScans = (query: { user?: number; q?: string; beforeId?: number; limit?: number } = {}) =>
+  unwrap(api.manage.api.scans.get({
+    query: {
+      ...(query.user !== undefined ? { user: query.user } : {}),
+      ...(query.q ? { q: query.q } : {}),
+      ...(query.beforeId !== undefined ? { before_id: query.beforeId } : {}),
+      ...(query.limit !== undefined ? { limit: query.limit } : {}),
+    },
+  }));
 
 export const listUsers = () => unwrap(api.manage.api.users.get());
 
@@ -158,6 +171,7 @@ export type AdminSession = Awaited<ReturnType<typeof listAllSessions>>[number];
 export type AccountSummary = Awaited<ReturnType<typeof listUsers>>[number];
 export type Account = NonNullable<Me["user"]>;
 export type Authenticator = Awaited<ReturnType<typeof listAuthenticators>>[number];
+export type RegionScan = Awaited<ReturnType<typeof listScans>>[number];
 export type Passkey = Awaited<ReturnType<typeof listPasskeys>>[number];
 export type ApiKeySummary = Awaited<ReturnType<typeof listApiKeys>>[number];
 export type ServerPolicy = Awaited<ReturnType<typeof getServerPolicy>>;

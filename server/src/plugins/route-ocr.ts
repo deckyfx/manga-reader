@@ -2,18 +2,23 @@ import Elysia, { t } from "elysia";
 import { bootState } from "@/boot-state";
 import { inferenceQueue } from "@/queue/inference-queue";
 import { OcrStore } from "@/stores/ocr-store";
+import { ScanStore } from "@/stores/scan-store";
 import { JobStore } from "@/stores/job-store";
 import { ErrBody } from "@/lib/schemas";
 import { join } from "path";
 import { env } from "@/env";
 import { runtimeSettings } from "@/stores/settings-store";
 import { PAGE_JOBS_DIR } from "@/stores/page-store";
+import { authContext } from "@/plugins/auth/index";
 
 export const routeOcr = new Elysia()
+  // For `principal`: the guard in plugins/auth/guard.ts is what enforces the role, this is how the handler sees who
+  // ran the scan, so the activity log can say so
+  .use(authContext)
   // ── POST /ocr ─────────────────────────────────────────────────────────────
   .post(
     "/ocr",
-    async ({ body, status: error }) => {
+    async ({ body, principal, status: error }) => {
       if (!bootState.ocrReady)
         return error(503, { error: "OCR model not ready" });
 
@@ -78,6 +83,18 @@ export const routeOcr = new Elysia()
         modelRepo: env.OCR_MODEL_REPO,
         processingTimeMs: ocrResult.processingTimeMs,
       }).catch(() => {});
+      // The activity log: who scanned, and what came back. Like the log above, a failure here never fails the scan
+      if (principal) {
+        ScanStore.insert({
+          userId: principal.user.id,
+          ...(principal.apiKeyId !== undefined ? { apiKeyId: principal.apiKeyId } : {}),
+          username: principal.user.username,
+          sourceText: ocrResult.text,
+          translatedText: translation,
+          translateEngine: resolvedTranslateEngine,
+          elapsedMs: ocrResult.processingTimeMs,
+        }).catch(() => {});
+      }
 
       return {
         text: ocrResult.text,

@@ -68,9 +68,10 @@ export function App() {
             <Route path="manage" element={<ManagePage />} />
             <Route path="manage/series/:id" element={<ManageSeriesPage />} />
             <Route path="manage/chapters/:id" element={<ManageChapterPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-            <Route path="user" element={<UserPage />} />
-            <Route path="admin" element={<AdminPage />} />
+            {/* Each of these pages has a menu of sections, one URL each; no section redirects to the first */}
+            <Route path="settings/:section?" element={<SettingsPage />} />
+            <Route path="user/:section?" element={<UserPage />} />
+            <Route path="admin/:section?" element={<AdminPage />} />
           </Route>
         </Routes>
         </AuthProviderWithRouter>
