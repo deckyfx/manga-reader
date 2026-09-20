@@ -35,14 +35,17 @@ function RetentionControl() {
   const stored = policyQ.data?.scan_log_days;
   const value = days ?? (stored === undefined ? "" : String(stored));
   const parsed = Number(value);
-  const valid = Number.isInteger(parsed) && parsed >= 0 && parsed <= MAX_DAYS;
+  // An empty field is not zero: `Number("")` is 0, and 0 here means "keep them for ever", which is the opposite of
+  // what somebody clearing the box means. Nor can anything be saved before the stored value has arrived to compare
+  const valid = value.trim() !== "" && Number.isInteger(parsed) && parsed >= 0 && parsed <= MAX_DAYS;
+  const changed = valid && stored !== undefined && parsed !== stored;
 
   return (
     <form
       className="flex flex-wrap items-end gap-2 rounded-lg border border-gray-800 bg-gray-950 p-3"
       onSubmit={(e) => {
         e.preventDefault();
-        if (valid && parsed !== stored) saveM.mutate(parsed);
+        if (changed) saveM.mutate(parsed);
       }}
     >
       <label className="space-y-1">
@@ -59,7 +62,7 @@ function RetentionControl() {
       </label>
       <button
         type="submit"
-        disabled={!valid || parsed === stored || saveM.isPending}
+        disabled={!changed || saveM.isPending}
         className="rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-700 disabled:opacity-50"
       >
         {saveM.isPending ? <Loader2 size={14} className="animate-spin" /> : "Save"}
