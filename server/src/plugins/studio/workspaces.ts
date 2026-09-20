@@ -308,8 +308,8 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         let published = 0;
         const skipped: { pageId: string; reason: string }[] = [];
         for (const page of pages) {
-          // Nothing new to show readers: leave it alone rather than bumping a revision for the same image
-          if (!toSummary(page).has_edits) continue;
+          // Every page is decided under its own lock: an edit finishing between this listing and the lock would
+          // otherwise be skipped, and publishing all of them is exactly what was asked for
           const outcome = await withPageLock(page.id, async () => {
             // Re-read inside the lock: an edit landing since the list was taken changes both of these answers
             const current = await PageStore.findById(page.id);
@@ -323,12 +323,13 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
           // Something that changed under us is not worth reporting as a failure; a real blocker is
           else if (outcome.error !== "nothing new to publish") skipped.push({ pageId: page.id, reason: outcome.error });
         }
-        return { published, skipped };
+        // Read inside the lock as well: a close queued behind this run would otherwise turn a finished publish
+        // into a 404
+        const detail = await workspaceDetail(params.id);
+        return detail ? { ...detail, published, skipped } : null;
       });
       if (!result) return status(404, { error: "workspace not found" });
-      const detail = await workspaceDetail(params.id);
-      if (!detail) return status(404, { error: "workspace not found" });
-      return { ...detail, ...result };
+      return result;
     },
     {
       params: WorkspaceParams,
