@@ -194,10 +194,17 @@ published, and then that copy's result replaces the chapter page.
 | Download images | background worker `fetch` (host permission covers CORS) | CDNs are cross-origin; the worker isn't bound by the page's CSP |
 | Upload to the server | background worker, typed Eden client (`extension/src/api.ts`) | Existing API key + server URL; the same "don't send the key over plain http" and "no redirects" rules apply |
 
-- **Referer (unconfirmed):** some CDNs check it, and a worker `fetch` can't set it. The intended approach is a
-  `declarativeNetRequest` **session rule** setting `Referer: <chapter URL>` for requests from the extension to the
-  image hosts, and removes it afterwards. It's a new `declarativeNetRequest` permission; no new host permissions are
-  needed (`<all_urls>` is already granted).
+- **Referer — settled for rawkuma (2026-09-20):** its CDN (`kuma.kyut.dev`) doesn't check it. Tested by the other
+  session against a real chapter image: no Referer, no user agent, a wrong Referer and the right one all returned the
+  same 200 and the same 318,148 bytes. So the downloader sends no spoofed headers and needs **no**
+  `declarativeNetRequest` permission; a plain worker `fetch` under the existing `<all_urls>` grant is enough. Add the
+  rule only when a provider turns out to need it, and re-test for exhentai's H@H nodes (P5), which are a different
+  animal.
+  If one ever does: `fetch()` can't set `Referer` (a forbidden header name — silently dropped), so the only MV3 route
+  is a `declarativeNetRequest` session rule with `modifyHeaders`, using `declarativeNetRequestWithHostAccess` (the
+  narrower permission, since `<all_urls>` is already granted). **Still unconfirmed:** whether such a rule matches the
+  extension's *own* fetches rather than only page-initiated ones — isolate that with one rule and one fetch before
+  building on it.
 - **Worker lifetime:** MV3 workers sleep when idle. The import is a queue persisted in `chrome.storage.session`
   (chapter, address list, per-page status, workspace id), so a woken worker resumes where it stopped. A long gallery
   runs in an **offscreen document** if the spike shows the worker gets cut off mid-download.
@@ -337,6 +344,7 @@ Decided 2026-09-19:
 To settle in the P4 spike (on rawkuma first):
 - Does Chrome send the site's cookies on the worker's cross-site image fetches? It only matters for CDNs that need
   them; rawkuma's don't.
-- Does the `declarativeNetRequest` Referer rule apply to the extension's own fetches? (P4 spike: until this is answered, the
-  Referer rule above is a plan, not a dependency to build on.)
+- Does the `declarativeNetRequest` Referer rule apply to the extension's own fetches? Still open, but no longer
+  blocking: rawkuma needs no Referer at all (see §6.2), so P4 is built without the rule. The question returns with
+  exhentai in P5.
 - Does the worker survive a 100-page import, or does it need the offscreen document?
