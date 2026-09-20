@@ -255,10 +255,12 @@ export function StudioPagesPage() {
             importWorkspace.current = null;
             if (opened !== null) navigate(`/studio/w/${opened}`);
           }}
-          onImport={async (urls) => {
-            // A workspace first, so a part-finished download still leaves the pages somewhere they can be worked on
-            const workspaceId = importWorkspace.current
-              ?? (await createWorkspace({ name: workspaceName(urls) })).id;
+          onImport={async (urls, { resend }) => {
+            // The same list goes back into the same workspace, where the pages already there hold their positions and
+            // only the gaps fill. An edited list gets its own workspace: positions come from the order given, so
+            // pouring a different order into the same places would shuffle what is already stored
+            const reuse = resend ? importWorkspace.current : null;
+            const workspaceId = reuse ?? (await createWorkspace({ name: workspaceName(urls) })).id;
             importWorkspace.current = workspaceId;
             const detail = await importWorkspacePageUrls(workspaceId, urls, 0);
             void qc.invalidateQueries({ queryKey: ["workspaces"] });

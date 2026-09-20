@@ -49,8 +49,16 @@ export function AddPageUrlsDialog({
 }: {
   title: string;
   onClose: () => void;
-  /** Runs the import; answers with what was filed and what wasn't, and which address each failure was. */
-  onImport: (urls: string[]) => Promise<{ imported: number; skipped: { url: string | null; name: string; reason: string }[] }>;
+  /**
+   * Runs the import; answers with what was filed and what wasn't, and which address each failure was.
+   *
+   * `resend` says this is the same list as the attempt before, which is what makes reusing a workspace safe: pages
+   * hold positions by their place in the list, so an edited list must not be poured into the same positions.
+   */
+  onImport: (
+    urls: string[],
+    context: { resend: boolean },
+  ) => Promise<{ imported: number; skipped: { url: string | null; name: string; reason: string }[] }>;
   /**
    * Whether sending the same list again is harmless. A workspace holds each page at a position, so a second attempt
    * fills the gaps and leaves the rest alone; a chapter appends whatever it is given, so resending would file every
@@ -65,7 +73,7 @@ export function AddPageUrlsDialog({
   const tooMany = urls.length > MAX_URLS;
 
   const importM = useMutation({
-    mutationFn: () => onImport(urls),
+    mutationFn: () => onImport(urls, { resend: sameList }),
     onSuccess: (report) => {
       setImported(text);
       if (report.skipped.length === 0) onClose();
@@ -77,7 +85,11 @@ export function AddPageUrlsDialog({
    * given, so a partial import followed by a retry duplicates the pages that succeeded. Editing the list — or
    * pressing "Retry the failures", which cuts it down to those — is what makes the button live again.
    */
-  const alreadySent = !resendable && imported !== null && text === imported;
+  /** The same list as the attempt that produced the report on screen. */
+  const sameList = imported !== null && text === imported;
+  const alreadySent = !resendable && sameList;
+  /** An edited list can't reuse the workspace, because positions come from the order given; it starts a fresh one. */
+  const editedSinceImport = resendable && imported !== null && !sameList;
   /**
    * The addresses that failed, as addresses rather than as names. A name is derived from the path, so two addresses
    * can share one and an extensionless address is filed under a name that doesn't look like it — matching on names
@@ -138,6 +150,12 @@ export function AddPageUrlsDialog({
             Ignored {rejected.length} line{rejected.length === 1 ? "" : "s"} that {rejected.length === 1 ? "isn't" : "aren't"} a
             web address: {rejected.slice(0, 3).map((line) => line.slice(0, 40)).join(", ")}
             {rejected.length > 3 ? "…" : ""}
+          </p>
+        )}
+        {editedSinceImport && (
+          <p className="text-xs text-amber-400">
+            The list has changed, so this goes into a new workspace — pages take their places from the order given, and
+            pouring a different order into the same places would shuffle what is already there.
           </p>
         )}
         {importM.isPending && (
