@@ -26,6 +26,8 @@
  * POST   /manage/api/pages/:id/publish          publish one page, so readers get its current result
  * GET    /manage/api/publish-backfill           how many pages were burnt before the publish gate (admin)
  * POST   /manage/api/publish-backfill           publish those, so the reader never falls back to a burn (admin)
+ * PUT    /manage/api/reviews/:target/:id        rate a series or chapter, with optional words (any account)
+ * DELETE /manage/api/reviews/:target/:id/:reviewId  remove your own review; an admin may remove anyone's
  * GET    /manage/api/scans                      region scans: your own, or everyone's for an admin
  * GET    /manage/api/settings                   server policy: registration, default role (admin)
  * PUT    /manage/api/settings                   change it (admin)
@@ -57,10 +59,11 @@ import { SessionStore, UserStore } from "@/stores/user-store";
 import { hashSecret, SESSION_COOKIE } from "@/services/auth";
 import { hashPassword } from "@/services/auth";
 import { MAX_SCAN_LOG_DAYS, REGISTRATION_ROLES, serverPolicy, updateServerPolicy } from "@/services/server-settings";
+import { ReviewStore } from "@/stores/review-store";
 import { ScanStore } from "@/stores/scan-store";
 import { backfillPublishes, pagesNeedingPublish } from "@/services/publish-backfill";
 import { authContext, SessionSchema, toUser, UserSchema } from "@/plugins/auth/index";
-import { USER_ROLES } from "@/db/schema";
+import { REVIEW_TARGETS, USER_ROLES } from "@/db/schema";
 import { PageStore } from "@/stores/page-store";
 import {
   chapterDetail,
@@ -68,6 +71,8 @@ import {
   coverList,
   CoverSchema,
   IdParam,
+  reviewPage,
+  ReviewPage,
   PageIdParam,
   ReadPageSchema,
   READING_DIRECTIONS,
@@ -241,10 +246,14 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     async ({ params, status }) => {
       const series = await SeriesStore.findById(params.id);
       if (!series) return status(404, { error: "series not found" });
-      // The cover files are read before the rows go: deleting the series cascades them away
+      // The cover files and chapter ids are read before the rows go: deleting the series cascades them away
       const covers = await CoverStore.paths(params.id);
+      const chapterIds = (await ChapterStore.listBySeries(params.id)).map((chapter) => chapter.id);
       // Volumes and chapters go with it; the pages keep their images and return to the Inbox
       await SeriesStore.delete(params.id);
+      // Reviews point at a series or a chapter by id, with no foreign key to follow, so they are cleared by hand
+      await ReviewStore.forgetTarget("series", params.id);
+      for (const chapterId of chapterIds) await ReviewStore.forgetTarget("chapter", chapterId);
       for (const cover of covers) await deleteCover(cover);
       return { deleted: true };
     },
@@ -379,6 +388,8 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       if (!chapter) return status(404, { error: "chapter not found" });
       // The pages keep their images and return to the Inbox
       await ChapterStore.delete(params.id);
+      // Nothing cascades a review away: it points at a chapter by id, with no foreign key to follow
+      await ReviewStore.forgetTarget("chapter", params.id);
       return (await seriesDetail(chapter.seriesId)) ?? status(404, { error: "series not found" });
     },
     { params: t.Object({ id: IdParam }), response: { 200: SeriesDetail, 404: ErrBody } },
@@ -778,6 +789,52 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       return updated ? toPage(updated) : status(404, { error: "page not found" });
     },
     { params: t.Object({ id: PageIdParam }), response: { 200: ReadPageSchema, 404: ErrBody } },
+  )
+
+  // ── Reviews (any signed-in account, in a browser) ──────────────────────────
+
+  .put(
+    "/reviews/:target/:id",
+    async ({ params, body, principal, status }) => {
+      if (!principal) return status(401, { error: "sign in to review" });
+      const target = params.target;
+      const exists = target === "series"
+        ? await SeriesStore.findById(params.id)
+        : await ChapterStore.findById(params.id);
+      if (!exists) return status(404, { error: `${target} not found` });
+      await ReviewStore.put({
+        target,
+        targetId: params.id,
+        userId: principal.user.id,
+        rating: body.rating,
+        body: body.body?.trim() || null,
+      });
+      return reviewPage(target, params.id, principal.user.id);
+    },
+    {
+      params: t.Object({ target: t.UnionEnum([...REVIEW_TARGETS]), id: IdParam }),
+      body: t.Object({
+        rating: t.Integer({ minimum: 1, maximum: 5 }),
+        body: t.Optional(t.Nullable(t.String({ maxLength: 4000 }))),
+      }),
+      response: { 200: ReviewPage, 401: ErrBody, 404: ErrBody },
+    },
+  )
+
+  .delete(
+    "/reviews/:target/:id/:reviewId",
+    async ({ params, principal, status }) => {
+      if (!principal) return status(401, { error: "sign in to remove a review" });
+      // Yours to remove; an admin may remove anyone's, which is what passing no user id means
+      const admin = principal.user.role === "admin";
+      const removed = await ReviewStore.remove(params.reviewId, admin ? undefined : principal.user.id);
+      if (!removed) return status(404, { error: "no such review of yours" });
+      return reviewPage(params.target, params.id, principal.user.id);
+    },
+    {
+      params: t.Object({ target: t.UnionEnum([...REVIEW_TARGETS]), id: IdParam, reviewId: IdParam }),
+      response: { 200: ReviewPage, 401: ErrBody, 404: ErrBody },
+    },
   )
 
   // ── Publish backfill (admin) ───────────────────────────────────────────────

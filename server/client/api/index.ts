@@ -131,6 +131,22 @@ export const getServerPolicy = () => unwrap(api.manage.api.settings.get());
 export const updateServerPolicy = (body: { registration_enabled?: boolean; default_role?: RegistrationRole; scan_log_days?: number }) =>
   unwrap(api.manage.api.settings.put(body));
 
+// ── Reviews: any signed-in account may rate a series or a chapter ────────────
+
+export const listSeriesReviews = (id: number) => unwrap(api.read.api.series({ id }).reviews.get());
+
+export const listChapterReviews = (id: number) => unwrap(api.read.api.chapters({ id }).reviews.get());
+
+/** Writes the reader's review, replacing their earlier one if they had written one. */
+export const putReview = (target: "series" | "chapter", id: number, body: { rating: number; body?: string | null }) =>
+  unwrap(api.manage.api.reviews({ target })({ id }).put(body));
+
+export const removeReview = (target: "series" | "chapter", id: number, reviewId: number) =>
+  unwrap(api.manage.api.reviews({ target })({ id })({ reviewId }).delete());
+
+export type ReviewPage = Awaited<ReturnType<typeof listSeriesReviews>>;
+export type Review = ReviewPage["reviews"][number];
+
 // ── Publish backfill (admin) ─────────────────────────────────────────────────
 
 /** How many chapter pages hold a burn that was never published. */

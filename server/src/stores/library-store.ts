@@ -4,6 +4,7 @@
  */
 import { and, asc, desc, eq, inArray, isNull, like, notInArray, sql } from "drizzle-orm";
 import { db } from "@/db/index";
+import { NO_RATING, ReviewStore, type RatingSummary } from "@/stores/review-store";
 import { chapters, pages, series, seriesCovers, seriesTags, volumes, type Chapter, type NewChapter, type NewSeries, type NewVolume, type Series, type Volume } from "@/db/schema";
 
 export const SERIES_STATUSES = ["ongoing", "completed", "hiatus"] as const;
@@ -33,6 +34,8 @@ export interface SeriesWithCounts {
   firstPageId: string | null;
   /** File name of the cover to show: the pinned one, else the newest. Null when the series has no cover art. */
   coverArt: string | null;
+  /** What readers make of it: the mean rating and how many gave one. */
+  rating: RatingSummary;
 }
 
 /** Tags normalised the way they're stored and compared: trimmed, lower case, no empties or duplicates. */
@@ -98,12 +101,13 @@ export class SeriesStore {
       .orderBy(filter.sort === "recent" ? desc(series.updatedAt) : asc(series.title));
 
     const ids = rows.map((row) => row.id);
-    const [tags, chapterCounts, volumeCounts, covers, art] = await Promise.all([
+    const [tags, chapterCounts, volumeCounts, covers, art, ratings] = await Promise.all([
       SeriesStore.tagsFor(ids),
       SeriesStore.countChapters(ids),
       SeriesStore.countVolumes(ids),
       SeriesStore.coverPages(ids),
       SeriesStore.coverArt(rows),
+      ReviewStore.summaries("series", ids),
     ]);
 
     const list = rows.map((row) => ({
@@ -113,6 +117,7 @@ export class SeriesStore {
       volumes: volumeCounts.get(row.id) ?? 0,
       firstPageId: covers.get(row.id) ?? null,
       coverArt: art.get(row.id) ?? null,
+      rating: ratings.get(row.id) ?? NO_RATING,
     }));
     return filter.hasChapters ? list.filter((entry) => entry.chapters > 0) : list;
   }
@@ -183,12 +188,13 @@ export class SeriesStore {
   static async withCounts(id: number): Promise<SeriesWithCounts | null> {
     const row = await SeriesStore.findById(id);
     if (!row) return null;
-    const [tags, chapterCounts, volumeCounts, covers, art] = await Promise.all([
+    const [tags, chapterCounts, volumeCounts, covers, art, ratings] = await Promise.all([
       SeriesStore.tagsFor([id]),
       SeriesStore.countChapters([id]),
       SeriesStore.countVolumes([id]),
       SeriesStore.coverPages([id]),
       SeriesStore.coverArt([row]),
+      ReviewStore.summaries("series", [id]),
     ]);
     return {
       series: row,
@@ -197,6 +203,7 @@ export class SeriesStore {
       volumes: volumeCounts.get(id) ?? 0,
       firstPageId: covers.get(id) ?? null,
       coverArt: art.get(id) ?? null,
+      rating: ratings.get(id) ?? NO_RATING,
     };
   }
 

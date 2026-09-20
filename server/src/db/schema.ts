@@ -133,6 +133,34 @@ export const chapters = sqliteTable("chapters", {
   chapterSeriesIdx: index("chapters_series_sort_idx").on(table.seriesId, table.sortOrder),
 }));
 
+/**
+ * What readers think of a series or one of its chapters: a rating, and optionally a few words. One per account per
+ * thing, so an average is an average of people rather than of opinions typed twice.
+ *
+ * `target` says which table `targetId` points into. A foreign key can't span two tables, so the routes check the
+ * series or chapter exists before writing, and deleting one clears its reviews (see `ReviewStore.forgetTarget`).
+ */
+export const REVIEW_TARGETS = ["series", "chapter"] as const;
+export type ReviewTarget = (typeof REVIEW_TARGETS)[number];
+
+export const reviews = sqliteTable("reviews", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** series | chapter */
+  target: text("target").notNull(),
+  targetId: integer("target_id").notNull(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** 1–5, as whole stars. */
+  rating: integer("rating").notNull(),
+  body: text("body"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  // One review per account per thing: a second one edits the first rather than stacking up
+  reviewOnceIdx: uniqueIndex("reviews_target_user_idx").on(table.target, table.targetId, table.userId),
+  // Listing a thing's reviews, newest first, and averaging them
+  reviewTargetIdx: index("reviews_target_idx").on(table.target, table.targetId, table.id),
+}));
+
 // ── Studio page-translation pipeline ────────────────────────────────────────
 
 export const pageTranslationJobs = sqliteTable("page_translation_jobs", {
@@ -440,6 +468,9 @@ export type NewTranslateLog = typeof translateLogs.$inferInsert;
 
 export type Series = typeof series.$inferSelect;
 export type NewSeries = typeof series.$inferInsert;
+export type Review = typeof reviews.$inferSelect;
+export type NewReview = typeof reviews.$inferInsert;
+
 export type SeriesCover = typeof seriesCovers.$inferSelect;
 export type NewSeriesCover = typeof seriesCovers.$inferInsert;
 export type SeriesTag = typeof seriesTags.$inferSelect;

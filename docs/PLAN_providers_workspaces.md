@@ -30,8 +30,8 @@ Cloudflare. The server doesn't scrape, doesn't hold site accounts and doesn't ne
 | P1 | Add pages by URL (Studio and chapter, many at once) | S | After P4, same session |
 | P2 | Region scan log | S–M | **Done** — PR #26 |
 | P6a | Publish backfill | S | Done, branch `feat/publish-backfill` |
-| P6b | Several cover arts | M | This PR |
-| P6c | Reviews and ratings | M | After covers |
+| P6b | Several cover arts | M | Done, branch `feat/series-covers` |
+| P6c | Reviews and ratings | M | This PR |
 
 Two sessions are working through this in parallel: one on P4 → P1 → P5 (the extension side), one on P6 (the library
 side). Migrations are not reserved ahead — generate at push time, and whoever merges second rebases and re-runs
@@ -318,9 +318,13 @@ opens the new series in the web UI to review.
   every library looks exactly as it did. `cover_id` has no foreign key — SQLite can't add one by ALTER TABLE — so
   `CoverStore` clears the pin when that cover goes, and resolution falls back to the newest if it ever dangles.
   `series.cover_path` stays behind, unread, rather than being dropped in the same change.
-- **Reviews and ratings**: `series_reviews` / `chapter_reviews {userId, targetId, rating 1–5, body?, createdAt,
-  updatedAt}`, unique on (user, target). An average and count are shown on the series page. Any signed-in user can
-  review; admins can remove reviews.
+- **Reviews and ratings** (done): one `reviews {target, targetId, userId, rating 1–5, body?, …}` table rather than two,
+  unique on (target, target id, user). The average and count ride along on the series payload, so the library cards
+  and the series header show them without another request.
+  Decided unattended on 2026-09-20, in the user's absence: any signed-in account may review, may rewrite or remove its
+  own, and an admin may remove anybody's. An API key may not review — a key runs OCR, it doesn't hold opinions.
+  Reviews point at their subject by id with no foreign key (a key can't span two tables), so deleting a series or a
+  chapter clears them by hand; deleting an account cascades them away.
 - **Publish backfill** (done): finds chapter pages with a burn but no published snapshot and publishes them, so the
   reader's fallback to `result.png` could be deleted. It runs **both** at boot and from `/admin/maintenance` — the boot
   pass is what makes deleting the fallback safe in the same change, since a library whose admin hadn't pressed the
