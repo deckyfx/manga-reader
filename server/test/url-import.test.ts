@@ -79,6 +79,16 @@ describe("into a chapter", () => {
     expect(pages[0].source).toBe(`${origin}/1.png`);
   });
 
+  test("an address with no file extension is still an image", async () => {
+    const { cookie } = await signedIn("contributor");
+    const chapterId = await aChapter(cookie);
+
+    // `/image` and `/download?id=5` are ordinary image endpoints; the import gates on the name, so they need one
+    const report = await importUrlsIntoChapter(chapterId, [`${origin}/image`, `${origin}/download?id=5`], download);
+    expect(report.skipped).toEqual([]);
+    expect(report.pages.map((page) => page.name)).toEqual(["image", "download"]);
+  });
+
   test("one address failing is a skipped entry, not a failed import", async () => {
     const { cookie } = await signedIn("contributor");
     const chapterId = await aChapter(cookie);

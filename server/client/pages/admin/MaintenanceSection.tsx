@@ -41,11 +41,11 @@ function PublishBackfillCard() {
       ) : pending === 0 ? (
         <p className="flex items-center gap-2 text-sm text-gray-400">
           <CheckCircle2 size={15} className="text-emerald-400" />
-          Nothing to do — every page in a chapter has been published.
+          No page is waiting to be published.
         </p>
       ) : (
         <p className="text-sm text-gray-300">
-          {pending} page{pending === 1 ? "" : "s"} hold a result nobody has published.
+          {pending} page{pending === 1 ? "" : "s"} hold a finished result nobody has published.
         </p>
       )}
 

@@ -44,17 +44,18 @@ export async function backfillRanAt(): Promise<string | null> {
 }
 
 /**
- * Runs the pass once per server, on the first start after this upgrade. The stamp is written whatever the outcome:
- * pages that failed are reported in the admin area, where somebody can run it again deliberately, and that is a
- * better answer than a pass that quietly republishes held-back work every morning.
+ * Runs the pass once per server, on the first start after this upgrade — not once per boot, because afterwards an
+ * unpublished render means somebody hasn't published it yet, and republishing it behind them is what the publish
+ * gate exists to prevent.
  */
 export async function backfillOnce(): Promise<BackfillReport | null> {
   if ((await backfillRanAt()) !== null) return null;
-  try {
-    return await backfillPublishes();
-  } finally {
-    await ServerSettingStore.set(RAN_AT_KEY, new Date().toISOString());
-  }
+  // Stamped only once the pass has actually been through the library. A pass that threw — a database that wasn't
+  // ready, a folder that wasn't readable — has not happened, and stamping it would leave every legacy page
+  // unpublished with nothing to say so. Per-page failures are different: those are reported, and the pass did run
+  const report = await backfillPublishes();
+  await ServerSettingStore.set(RAN_AT_KEY, new Date().toISOString());
+  return report;
 }
 
 /**

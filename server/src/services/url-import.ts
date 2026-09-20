@@ -6,7 +6,7 @@
  * fails is a skipped entry in the report, like an unreadable file, rather than a failed request.
  */
 import { childLogger } from "@/lib/logger";
-import { importIntoChapter, type ImportReport, type ImportSource } from "@/services/chapter-import";
+import { IMAGE_EXTENSIONS, importIntoChapter, type ImportReport, type ImportSource } from "@/services/chapter-import";
 import { fetchImage } from "@/services/image-fetch";
 import { importIntoWorkspace, type WorkspaceImportReport, type WorkspaceUpload } from "@/services/workspace-import";
 
@@ -39,6 +39,19 @@ export function tidyUrls(urls: readonly string[]): string[] {
   return tidy;
 }
 
+/**
+ * The name an imported page is filed under, always ending in an image extension.
+ *
+ * `importIntoChapter` gates on the name's extension, because an upload's name is all it has to go on before it
+ * opens the bytes — but plenty of image addresses have no extension at all (`/image`, `/download?id=5`). Without
+ * this they'd be filed as "not an image or archive" despite being perfectly good downloads. The extension is
+ * dropped again when the page is named, so nothing shows it.
+ */
+export function importNameFor(url: string): string {
+  const name = nameFromUrl(url);
+  return IMAGE_EXTENSIONS.test(name) ? name : `${name}.png`;
+}
+
 /** A readable page name from an address: its file name, else its last path segment, else the host. */
 export function nameFromUrl(raw: string): string {
   try {
@@ -63,7 +76,7 @@ export async function importUrlsIntoChapter(
   const report: ImportReport = { pages: [], skipped: [] };
 
   for (const url of urls.slice(0, MAX_URLS_PER_IMPORT)) {
-    const name = nameFromUrl(url);
+    const name = importNameFor(url);
     try {
       const source: ImportSource = { name, bytes: new Uint8Array(await download(url)), source: url };
       // Stored before the next download starts, so fifty pages never sit in memory at once — at 15 MB each that
@@ -100,7 +113,7 @@ export async function importUrlsIntoWorkspace(
 
   for (const [offset, url] of urls.slice(0, MAX_URLS_PER_IMPORT).entries()) {
     const index = startIndex + offset;
-    const name = nameFromUrl(url);
+    const name = importNameFor(url);
     try {
       const upload: WorkspaceUpload = { name, bytes: new Uint8Array(await download(url)), source: url };
       // Stored at its own position before the next download starts: nothing accumulates in memory, and an address
