@@ -177,11 +177,18 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
   .delete(
     "/:id",
     async ({ params, status }) => {
-      // The pages aren't touched: the foreign key leaves them loose in the Studio
-      if (!(await WorkspaceStore.delete(params.id))) return status(404, { error: "workspace not found" });
+      // Under the lock, where a run can neither be going nor start: closing a workspace mid-run would leave the run
+      // translating pages that no longer belong to anything
+      const outcome = await withWorkspaceLock(params.id, async () => {
+        if (batchRun(runKey(params.id))?.running) return "running" as const;
+        // The pages aren't touched: the foreign key leaves them loose in the Studio
+        return (await WorkspaceStore.delete(params.id)) ? "deleted" as const : "missing" as const;
+      });
+      if (outcome === "running") return status(409, { error: "this workspace is being translated — wait for the run to finish" });
+      if (outcome === "missing") return status(404, { error: "workspace not found" });
       return { deleted: params.id };
     },
-    { params: WorkspaceParams, response: { 200: t.Object({ deleted: t.Integer() }), 404: ErrBody } },
+    { params: WorkspaceParams, response: { 200: t.Object({ deleted: t.Integer() }), 404: ErrBody, 409: ErrBody } },
   )
 
   .post(
@@ -221,14 +228,18 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
   .post(
     "/:id/run",
     async ({ params, body, status }) => {
-      if (!(await WorkspaceStore.findById(params.id))) return status(404, { error: "workspace not found" });
-      // Drafts aren't published by a run: that happens when they are filed, or published on purpose
-      // Registered under the workspace's lock, so filing (which holds it) and a run can't start on top of each other
-      const state = await withWorkspaceLock(params.id, () =>
-        startBatchRun(runKey(params.id), () => pagesToRun(params.id, body?.force ?? false), {
+      // Everything decided under the workspace's lock: filing and closing hold it too, so a run can't start on top
+      // of either, nor for a workspace that has just gone. Drafts aren't published by a run — that happens when they
+      // are filed, or published on purpose.
+      const started = await withWorkspaceLock(params.id, async () => {
+        if (!(await WorkspaceStore.findById(params.id))) return "missing" as const;
+        return startBatchRun(runKey(params.id), () => pagesToRun(params.id, body?.force ?? false), {
           cleanSfx: body?.clean_sfx ?? false,
           publish: false,
-        }));
+        });
+      });
+      if (started === "missing") return status(404, { error: "workspace not found" });
+      const state = started;
       if (!state) return status(409, { error: "this workspace is already being translated" });
       return status(202, { ...state, workspaceId: params.id });
     },
@@ -298,12 +309,17 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         const summary = toSummary(page);
         if (!summary.has_edits) continue;
         const outcome = await withPageLock(page.id, async () => {
-          const blocker = publishBlocker(page, await PageStore.listStages(page.id));
+          // Re-read inside the lock: an edit landing since the list was taken changes both of these answers
+          const current = await PageStore.findById(page.id);
+          if (!current) return { ok: false as const, code: 404 as const, error: "the page is gone" };
+          if (!toSummary(current).has_edits) return { ok: false as const, code: 409 as const, error: "nothing new to publish" };
+          const blocker = publishBlocker(current, await PageStore.listStages(current.id));
           if (blocker) return { ok: false as const, code: 409 as const, error: blocker };
-          return publishDraft(page);
+          return publishDraft(current);
         });
         if (outcome.ok) published++;
-        else skipped.push({ pageId: page.id, reason: outcome.error });
+        // Something that changed under us is not worth reporting as a failure; a real blocker is
+        else if (outcome.error !== "nothing new to publish") skipped.push({ pageId: page.id, reason: outcome.error });
       }
       const detail = await workspaceDetail(params.id);
       if (!detail) return status(404, { error: "workspace not found" });
