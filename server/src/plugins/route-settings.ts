@@ -13,6 +13,12 @@ const SettingsSchema = t.Object({
   preferred_translation_engine: t.String(),
   inpaint_engine: t.String(),
   deepl_configured: t.Boolean(),
+  /**
+   * What this build can do, so a client can tell a missing feature from a broken one. The extension reads this
+   * before a chapter import: an older server has no `workspaces`, and the popup says to update it rather than
+   * failing halfway through uploading.
+   */
+  capabilities: t.Object({ workspaces: t.Boolean() }),
 });
 
 function currentSettings() {
@@ -55,6 +61,7 @@ function currentSettings() {
     preferred_translation_engine: runtimeSettings.preferredTranslationEngine,
     inpaint_engine: runtimeSettings.inpaintEngine,
     deepl_configured: !!env.DEEPL_API_KEY,
+    capabilities: { workspaces: true },
   };
 }
 

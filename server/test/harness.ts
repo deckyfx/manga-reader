@@ -10,13 +10,14 @@ import { authPlugin } from "@/plugins/auth/index";
 import { managePlugin } from "@/plugins/manage/index";
 import { readPlugin } from "@/plugins/read/index";
 import { studioPlugin } from "@/plugins/studio/index";
+import { routeSettings } from "@/plugins/route-settings";
 import { routeTools } from "@/plugins/route-tools";
 import { SESSION_COOKIE } from "@/services/auth";
 import { UserStore } from "@/stores/user-store";
 import { hashPassword } from "@/services/auth";
 import type { UserRole } from "@/db/schema";
 
-export const app = new Elysia().use(authGuard).use(authPlugin).use(readPlugin).use(managePlugin).use(studioPlugin).use(routeTools);
+export const app = new Elysia().use(authGuard).use(authPlugin).use(readPlugin).use(managePlugin).use(studioPlugin).use(routeSettings).use(routeTools);
 
 export interface As {
   cookie?: string;
