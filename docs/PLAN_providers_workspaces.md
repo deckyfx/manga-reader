@@ -24,10 +24,10 @@ Cloudflare. The server doesn't scrape, doesn't hold site accounts and doesn't ne
 | # | Phase | Size | State |
 |---|---|---|---|
 | P3 | Workspaces (+ Send chapter to Studio, File into chapter) | M | **Done** — PR #25 |
-| P4 | **Extension: import a chapter as a workspace** (generic extractor + rawkuma) | M–L | In progress, branch `feat/extension-chapter-import` |
-| P5 | exhentai extractor + adult flag | S–M | Next after P4, same session |
+| P4 | **Extension: import a chapter as a workspace** (generic extractor + rawkuma) | M–L | **Done** — PR #27 |
+| P5 | exhentai extractor + adult flag | S–M | In progress, branch `feat/exhentai-adult` |
 | P0 | Settings areas: sub-menus, full width | S | **Done** — PR #26 |
-| P1 | Add pages by URL (Studio and chapter, many at once) | S | **Done** — branch `feat/add-by-url` |
+| P1 | Add pages by URL (Studio and chapter, many at once) | S | **Done** — this PR |
 | P2 | Region scan log | S–M | **Done** — PR #26 |
 | P6a | Publish backfill | S | **Done** — this PR |
 | P6b | Several cover arts | M | **Done** — this PR |
