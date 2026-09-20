@@ -73,9 +73,22 @@ export async function copyPageImages(fromId: string, toId: string): Promise<void
     // belongs to the caller's cleanup
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
-  if (files.some((file) => file.endsWith(".png"))) await mkdir(to, { recursive: true });
-  for (const file of files) {
-    if (!file.endsWith(".png")) continue;
+  const pngs = files.filter((file) => file.endsWith(".png"));
+  if (pngs.length > 0) await mkdir(to, { recursive: true });
+  for (const file of pngs) {
     await cp(join(from, file), join(to, file), { recursive: false, force: true });
+  }
+
+  // Images the source no longer has (a mask the draft cleared, say) must not survive on the target, or a later run
+  // would build on state that was deliberately removed. The history folder isn't touched: it isn't an image here.
+  let existing: string[] = [];
+  try {
+    existing = await readdir(to);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+  const kept = new Set(pngs);
+  for (const file of existing) {
+    if (file.endsWith(".png") && !kept.has(file)) await rm(join(to, file), { force: true });
   }
 }

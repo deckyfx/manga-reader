@@ -593,7 +593,11 @@ export function StudioPageEditor() {
             setDiscarding(false);
             if (deleted) {
               qc.removeQueries({ queryKey: ["studio-page", id] });
-              navigate(page.location ? `/manage/chapters/${page.location.chapter_id}` : "/studio");
+              navigate(workspaceId !== null
+                ? `/studio/w/${workspaceId}`
+                : page.location
+                  ? `/manage/chapters/${page.location.chapter_id}`
+                  : "/studio");
             } else {
               void qc.invalidateQueries({ queryKey: ["studio-page", id] });
             }

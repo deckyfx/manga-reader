@@ -92,7 +92,9 @@ export async function startBatchRun(
     for (const page of pages) {
       state.currentPageId = page.id;
       try {
-        const result = await runStoredPage(page.id, { source: page.source, cleanSfx: options.cleanSfx, force: true });
+        // Admission under the page's lock (the run itself queues behind it), so it can't land mid-publish
+        const result = await withPageLock(page.id, () =>
+          runStoredPage(page.id, { source: page.source, cleanSfx: options.cleanSfx, force: true }));
         if (!result.ok) {
           state.failed++;
           state.error = result.error;

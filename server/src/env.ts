@@ -96,13 +96,13 @@ class EnvConfig {
   // ── Model directories ────────────────────────────────────────────────────
 
   get OCR_MODELS_DIR(): string {
-    return Bun.env.OCR_MODELS_DIR ?? (this.OCR_ENGINE === "baberu" ? "./data/models/baberu" : "./data/models/ocr");
+    return Bun.env.OCR_MODELS_DIR ?? `${this.DATA_DIR}/models/${this.OCR_ENGINE === "baberu" ? "baberu" : "ocr"}`;
   }
-  get TRANSLATE_MODELS_DIR(): string { return Bun.env.TRANSLATE_MODELS_DIR ?? "./data/models/translate"; }
-  get INPAINT_MODELS_DIR(): string { return Bun.env.INPAINT_MODELS_DIR ?? "./data/models/inpaint"; }
-  get BUBBLE_MODELS_DIR(): string { return Bun.env.BUBBLE_MODELS_DIR ?? "./data/models/bubble"; }
-  get TEXT_SEG_MODELS_DIR(): string { return Bun.env.TEXT_SEG_MODELS_DIR ?? "./data/models/textseg"; }
-  get DICT_DIR(): string { return Bun.env.DICT_DIR ?? "./data/models/jdict"; }
+  get TRANSLATE_MODELS_DIR(): string { return Bun.env.TRANSLATE_MODELS_DIR ?? `${this.DATA_DIR}/models/translate`; }
+  get INPAINT_MODELS_DIR(): string { return Bun.env.INPAINT_MODELS_DIR ?? `${this.DATA_DIR}/models/inpaint`; }
+  get BUBBLE_MODELS_DIR(): string { return Bun.env.BUBBLE_MODELS_DIR ?? `${this.DATA_DIR}/models/bubble`; }
+  get TEXT_SEG_MODELS_DIR(): string { return Bun.env.TEXT_SEG_MODELS_DIR ?? `${this.DATA_DIR}/models/textseg`; }
+  get DICT_DIR(): string { return Bun.env.DICT_DIR ?? `${this.DATA_DIR}/models/jdict`; }
   /** Official jitendex.org download link — always redirects to the newest build. */
   get JITENDEX_ZIP_URL(): string {
     return Bun.env.JITENDEX_ZIP_URL
@@ -110,7 +110,7 @@ class EnvConfig {
   }
   get DICT_MODEL_ENABLED(): boolean { return Bun.env.DICT_MODEL_ENABLED !== "false"; }
   /** kuromoji IPADIC tokenizer dictionary (used by /analyze). */
-  get KUROMOJI_DICT_DIR(): string { return Bun.env.KUROMOJI_DICT_DIR ?? "./data/models/kuromoji"; }
+  get KUROMOJI_DICT_DIR(): string { return Bun.env.KUROMOJI_DICT_DIR ?? `${this.DATA_DIR}/models/kuromoji`; }
   /** Base URL serving the kuromoji *.dat.gz files; pinned to the installed @patdx/kuromoji version. */
   get KUROMOJI_DICT_URL(): string {
     return Bun.env.KUROMOJI_DICT_URL || "https://cdn.jsdelivr.net/npm/@patdx/kuromoji@1.0.4/dict";

@@ -635,14 +635,22 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
   .post(
     "/pages/:id/rerun",
     async ({ params, body, status }) => {
-      const check = await editablePage(params.id);
-      if ("code" in check) return status(check.code, { error: check.error });
-      // Runs the whole pipeline from the stored original: for imported pages, and after a detection change
-      const result = await runStoredPage(params.id, {
-        source: check.page.source,
-        cleanSfx: body?.clean_sfx ?? check.page.cleanSfx,
-        force: true,
+      // Admission under the page's lock: it marks the page queued, and a publish holding the lock must finish
+      // deciding on the page it read before that happens. The run itself queues behind, outside this lock.
+      const check = await withPageLock(params.id, async () => {
+        const editable = await editablePage(params.id);
+        if ("code" in editable) return editable;
+        return {
+          ...editable,
+          result: await runStoredPage(params.id, {
+            source: editable.page.source,
+            cleanSfx: body?.clean_sfx ?? editable.page.cleanSfx,
+            force: true,
+          }),
+        };
       });
+      if ("code" in check) return status(check.code, { error: check.error });
+      const { result } = check;
       if (!result.ok) return status(result.code === 404 ? 404 : result.code === 400 ? 422 : result.code, { error: result.error });
       return status(202, { job_id: result.job_id });
     },

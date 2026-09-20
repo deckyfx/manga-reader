@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, Check, FolderInput, ImageUp, Loader2, Pencil, Play, Send, Trash2 } from "lucide-react";
@@ -40,6 +40,16 @@ export function StudioWorkspacePage() {
     enabled: Number.isInteger(id),
     refetchInterval: (query) => ("running" in (query.state.data ?? {}) && (query.state.data as { running: boolean }).running ? RUN_POLL_MS : false),
   });
+
+  // Polling stops the moment a run reports itself finished, so the page data it changed is reloaded once, here
+  const seenFinish = useRef<string | null>(null);
+  const finishedAt = runQ.data && "finishedAt" in runQ.data ? runQ.data.finishedAt : null;
+  useEffect(() => {
+    if (finishedAt === null || seenFinish.current === finishedAt) return;
+    seenFinish.current = finishedAt;
+    void qc.invalidateQueries({ queryKey: ["workspace", id] });
+    void qc.invalidateQueries({ queryKey: ["workspaces"] });
+  }, [finishedAt, id, qc]);
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["workspace", id] });

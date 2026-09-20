@@ -304,6 +304,9 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
       // origin a draft publishes over), so closing the workspace can't detach pages halfway through publishing them
       const result = await withWorkspaceLock(params.id, async () => {
         if (!(await WorkspaceStore.findById(params.id))) return null;
+        // A run works outside this lock once it has started, and replaces results as it goes: publishing now would
+        // hand readers a page the run is about to redo
+        if (batchRun(runKey(params.id))?.running) return "running" as const;
         const pages = await WorkspaceStore.pages(params.id);
         let published = 0;
         const skipped: { pageId: string; reason: string }[] = [];
@@ -329,6 +332,7 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         return detail ? { ...detail, published, skipped } : null;
       });
       if (!result) return status(404, { error: "workspace not found" });
+      if (result === "running") return status(409, { error: "this workspace is being translated — wait for the run to finish" });
       return result;
     },
     {
@@ -339,6 +343,7 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
           skipped: t.Array(t.Object({ pageId: t.String(), reason: t.String() })),
         })]),
         404: ErrBody,
+        409: ErrBody,
       },
     },
   );

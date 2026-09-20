@@ -121,8 +121,10 @@ export class PageStore {
   static async listFiltered(options: { filed?: "inbox" | "chapter" | "all"; chapterId?: number; search?: string; limit?: number } = {}): Promise<Page[]> {
     const filters = [];
     if (options.chapterId !== undefined) filters.push(eq(pages.chapterId, options.chapterId));
-    // Pages in a workspace are listed with it, not among the loose ones
+    // Pages in a workspace are listed with it, not among the loose ones. A chapter-scoped query still returns them:
+    // asking for a chapter's pages means all of them, wherever they are being worked on.
     else if (options.filed === "inbox") filters.push(isNull(pages.chapterId), isNull(pages.workspaceId));
+    else if (options.filed === "all") filters.push(isNull(pages.workspaceId));
     else if (options.filed === "chapter") filters.push(isNotNull(pages.chapterId));
     const search = options.search?.trim();
     if (search) {

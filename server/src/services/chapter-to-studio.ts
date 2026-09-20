@@ -66,9 +66,17 @@ export async function sendChapterToStudio(chapter: Chapter, createdBy: number | 
         continue;
       }
       try {
-        // Under the source's lock, so a copy is never taken while that page is being edited
-        await withPageLock(page.id, () => copyPageAsDraft(page, workspace.id, ++order));
-        report.copied++;
+        // Under the source's lock, so a copy is never taken while that page is being edited — and re-read there,
+        // since a run finishing since the listing changes its size, status and images
+        const copied = await withPageLock(page.id, async () => {
+          const current = await PageStore.findById(page.id);
+          if (!current || current.chapterId !== chapter.id) return false;
+          if (current.status === "queued" || current.status === "running") return false;
+          await copyPageAsDraft(current, workspace.id, ++order);
+          return true;
+        });
+        if (copied) report.copied++;
+        else report.skipped.push({ pageId: page.id, reason: "changed while it was being copied" });
       } catch (err) {
         log.warn({ err, pageId: page.id, chapterId: chapter.id }, "Couldn't copy a chapter page into the Studio");
         report.skipped.push({ pageId: page.id, reason: "could not be copied" });
