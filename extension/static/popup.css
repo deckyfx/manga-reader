@@ -9,7 +9,7 @@ body {
   color: #cdd6f4;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 13px;
-  width: 240px;
+  width: 320px;
 }
 
 .menu {
@@ -74,4 +74,119 @@ body {
 .desc {
   font-size: 11px;
   color: #6c7086;
+}
+
+/* ── Chapter import ───────────────────────────────────────────────────────── */
+
+.import-panel {
+  border-top: 1px solid #313244;
+  padding-top: 10px;
+}
+
+.muted {
+  color: #6c7086;
+  padding: 2px;
+}
+
+.error {
+  color: #f38ba8;
+  padding: 2px;
+  overflow-wrap: anywhere;
+}
+
+.import-found {
+  color: #cdd6f4;
+  padding: 0 2px 2px;
+}
+
+.import-name {
+  color: #cdd6f4;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  padding: 0 2px;
+}
+
+.import-input {
+  width: 100%;
+  padding: 6px 8px;
+  background: #181825;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  color: #cdd6f4;
+  font: inherit;
+}
+
+.import-input:focus {
+  outline: none;
+  border-color: #89b4fa;
+}
+
+/* Kept short so a long chapter doesn't turn the popup into a scroll of its own */
+.import-list {
+  max-height: 148px;
+  overflow-y: auto;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.import-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.import-row-index {
+  color: #6c7086;
+  min-width: 18px;
+  text-align: right;
+}
+
+.import-row-url {
+  color: #a6adc8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #a6adc8;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.import-go {
+  justify-content: center;
+  background: #45475a;
+}
+
+.import-go[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: #89b4fa;
+  cursor: pointer;
+  font: inherit;
+  padding: 2px;
+  text-align: left;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+a.menu-btn {
+  text-decoration: none;
+  justify-content: center;
 }
