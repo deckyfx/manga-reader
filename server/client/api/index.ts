@@ -245,6 +245,10 @@ export const deleteWorkspace = (id: number) => unwrap(api.studio.api.workspaces(
  * Appends images at `startIndex` (0-based). A batch sent again skips the positions it already stored, so a retry
  * after a dropped connection can't duplicate pages.
  */
+/** The same into a Studio workspace: each address keeps its position, so a retried list fills gaps. */
+export const importWorkspacePageUrls = (id: number, urls: string[], startIndex: number) =>
+  unwrap(api.studio.api.workspaces({ id }).pages.urls.post({ urls, start_index: startIndex }));
+
 export const uploadWorkspacePages = (id: number, files: File[], startIndex: number, sources?: string[]) =>
   unwrap(api.studio.api.workspaces({ id }).pages.post({ files, start_index: startIndex, ...(sources ? { sources } : {}) }));
 
@@ -447,6 +451,10 @@ export const deleteChapter = (id: number) => unwrap(api.manage.api.chapters({ id
 
 /** Files images or ZIP / CBZ archives into a chapter. */
 export const importChapterPages = (id: number, files: File[]) => unwrap(api.manage.api.chapters({ id }).pages.post({ files }));
+
+/** Downloads image addresses into a chapter, in the order given. */
+export const importChapterPageUrls = (id: number, urls: string[]) =>
+  unwrap(api.manage.api.chapters({ id }).pages.urls.post({ urls }));
 
 export const reorderChapterPages = (id: number, ids: string[]) => unwrap(api.manage.api.chapters({ id }).pages.reorder.put({ ids }));
 

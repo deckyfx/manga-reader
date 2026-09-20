@@ -25,6 +25,8 @@ const ARCHIVE_EXTENSIONS = /\.(zip|cbz)$/i;
 export interface ImportSource {
   name: string;
   bytes: Uint8Array;
+  /** Where it came from, when that is known: an address for a downloaded page, nothing for an upload. */
+  source?: string;
 }
 
 export interface ImportedPage {
@@ -174,7 +176,7 @@ export async function importIntoChapter(chapterId: number, sources: readonly Imp
       continue;
     }
     const name = baseName(image.name);
-    const page = await storePageImage(image, (imageHash) => PageStore.createInChapter(imageHash, "import", chapterId, ++order, name));
+    const page = await storePageImage(image, (imageHash) => PageStore.createInChapter(imageHash, image.source ?? "import", chapterId, ++order, name));
     if (page) pages.push({ id: page.id, name });
     else skipped.push({ name: image.name, reason: "image could not be stored" });
   }

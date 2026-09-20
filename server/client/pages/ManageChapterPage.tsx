@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, Download, Inbox, Layers, Loader2, Play, RefreshCw, Send, SquarePen, Upload, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Download, Inbox, Layers, Loader2, Play, RefreshCw, Send, SquarePen, Upload, X, Link2 } from "lucide-react";
 import {
   chapterExportUrl,
   copyPageIntoChapter,
   getChapter,
   getChapterRun,
   importChapterPages,
+  importChapterPageUrls,
   listInbox,
   publishChapterEdits,
   sendChapterToStudio,
@@ -19,6 +20,7 @@ import {
   unfilePage,
   type ReadPage,
 } from "../api";
+import { AddPageUrlsDialog } from "../components/AddPageUrlsDialog";
 import { useConfirm } from "../components/ConfirmDialog";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
@@ -65,6 +67,7 @@ export function ManageChapterPage() {
   const [skipped, setSkipped] = useState<{ name: string; reason: string }[]>([]);
   const [dragId, setDragId] = useState<string | null>(null);
   const [showInbox, setShowInbox] = useState(false);
+  const [addingUrls, setAddingUrls] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const importM = useMutation({
@@ -278,6 +281,14 @@ export function ManageChapterPage() {
           {importM.isPending ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
           Add pages
         </button>
+        <button
+          onClick={() => setAddingUrls(true)}
+          disabled={importM.isPending}
+          className="flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-700 disabled:opacity-50"
+        >
+          <Link2 size={14} />
+          From addresses
+        </button>
         <span>or drop images, ZIP or CBZ files here — they're appended in file-name order</span>
         <button onClick={() => setShowInbox((open) => !open)} className="ml-auto flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-gray-300 hover:bg-gray-800">
           <Inbox size={14} />
@@ -387,6 +398,21 @@ export function ManageChapterPage() {
           </div>
         )}
       </div>
+
+      {addingUrls && (
+        <AddPageUrlsDialog
+          title="Add pages from addresses"
+          onClose={() => setAddingUrls(false)}
+          onImport={async (urls) => {
+            const detail = await importChapterPageUrls(chapterId, urls);
+            setSkipped(detail.skipped);
+            qc.setQueryData(["chapter", chapterId], detail);
+            void qc.invalidateQueries({ queryKey: ["chapter-run", chapterId] });
+            void qc.invalidateQueries({ queryKey: ["series"], refetchType: "none" });
+            return { imported: detail.imported, skipped: detail.skipped };
+          }}
+        />
+      )}
     </div>
   );
 }

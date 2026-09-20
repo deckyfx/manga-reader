@@ -27,7 +27,7 @@ Cloudflare. The server doesn't scrape, doesn't hold site accounts and doesn't ne
 | P4 | **Extension: import a chapter as a workspace** (generic extractor + rawkuma) | M–L | In progress, branch `feat/extension-chapter-import` |
 | P5 | exhentai extractor + adult flag | S–M | Next after P4, same session |
 | P0 | Settings areas: sub-menus, full width | S | **Done** — PR #26 |
-| P1 | Add pages by URL (Studio and chapter, many at once) | S | After P4, same session |
+| P1 | Add pages by URL (Studio and chapter, many at once) | S | **Done** — branch `feat/add-by-url` |
 | P2 | Region scan log | S–M | **Done** — PR #26 |
 | P6a | Publish backfill | S | **Done** — this PR |
 | P6b | Several cover arts | M | **Done** — this PR |
@@ -61,17 +61,18 @@ pane. Each section gets its own URL, so it can be linked, refreshed, and back/fo
 
 ## 3. P1: add pages by URL
 
-- **Studio** New page dialog: the URL tab takes a textarea, one URL per line (max ~50). Each line becomes its own
-  `POST /studio/api/pages {url}`, so the endpoint stays unchanged. With more than one URL the pages can go into a new
-  workspace (P3); until then they go to the Inbox.
-- **Chapter**: `POST /manage/api/chapters/:id/pages/urls {urls: string[]}`. It downloads through `fetchImage` one at a
-  time (polite, bounded), then feeds the bytes into `importIntoChapter` as `ImportSource {name: <url basename>, bytes}`.
-  It returns the same report shape as the file import (`imported`, `skipped[] {name, reason}`).
+- **Studio** (done): a "From addresses" button on the pages list takes a list, makes a workspace and downloads into it
+  through `POST /studio/api/workspaces/:id/pages/urls`. That reuses P3's positions, so a retried list fills gaps
+  instead of adding pages twice — better than one page job per line, which is why the New page dialog was left alone
+  for the single-URL case (it follows one job live).
+- **Chapter** (done): `POST /manage/api/chapters/:id/pages/urls {urls}`, downloading one at a time through
+  `fetchImage` and feeding the bytes into `importIntoChapter`. Same report shape as the file import.
 - The "Add pages" panel on `ManageChapterPage` gets a "From URLs" tab next to the file upload.
 - `pages.source` records the URL (already a free-text field).
 - Limits: reuse `MAX_IMAGE_BYTES` and `MAX_PAGES_PER_IMPORT`. Per-URL errors are skipped entries, not a failed request.
-- Tests: in-process with `app.handle()` and a local `Bun.serve` image host. That needs the resolver injection
-  `fetchImage` already has, because localhost is blocked on purpose.
+- Tests: a local `Bun.serve` image host, reached through an injected `Download` rather than `fetchImage`'s resolver —
+  the SSRF guard refuses a loopback address whatever the resolver says, which is the guard working. A route-level test
+  goes through the real `fetchImage` to prove a private address is still refused.
 
 ## 4. P2: region scan log
 

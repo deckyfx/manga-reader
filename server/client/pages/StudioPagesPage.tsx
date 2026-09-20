@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, FolderInput, FolderPlus, Layers, Loader2, Plus, Search, Trash2, X } from "lucide-react";
-import { createWorkspace, listPages, listWorkspaces, pageFileUrl, type PageScope, type StudioPageSummary } from "../api";
+import { BookOpen, FolderInput, FolderPlus, Layers, Loader2, Plus, Search, Trash2, X, Link2 } from "lucide-react";
+import { createWorkspace, importWorkspacePageUrls, listPages, listWorkspaces, pageFileUrl, type PageScope, type StudioPageSummary } from "../api";
 import { ChapterPicker } from "../components/ChapterPicker";
 import { DiscardPageDialog } from "../components/DiscardPageDialog";
 import { Modal } from "../components/Modal";
+import { AddPageUrlsDialog } from "../components/AddPageUrlsDialog";
 import { NewPageDialog } from "../components/NewPageDialog";
 import { StudioPageCard, pageLabel } from "../components/StudioPageCard";
 import { useToast } from "../components/Toast";
@@ -16,6 +17,18 @@ const SCOPES: { value: PageScope; label: string; hint: string }[] = [
   { value: "chapter", label: "In chapters", hint: "Pages that belong to a chapter — editing one changes what people read once you publish" },
   { value: "all", label: "All", hint: "Every page" },
 ];
+
+/** A name for a workspace made from pasted addresses: the folder they share, else the day. */
+function workspaceName(urls: string[]): string {
+  try {
+    const segments = new URL(urls[0]).pathname.split("/").filter(Boolean);
+    const folder = segments.at(-2);
+    if (folder) return decodeURIComponent(folder).slice(0, 80);
+  } catch {
+    // Not an address we can read a folder out of; the date will do
+  }
+  return `Imported ${new Date().toLocaleDateString()}`;
+}
 
 function readScope(): PageScope {
   try {
@@ -36,6 +49,7 @@ export function StudioPagesPage() {
   const [discarding, setDiscarding] = useState<StudioPageSummary | null>(null);
   const [scope, setScopeState] = useState<PageScope>(readScope);
   const [newWorkspace, setNewWorkspace] = useState<string | null>(null);
+  const [importingUrls, setImportingUrls] = useState(false);
   const toast = useToast();
 
   const setScope = (next: PageScope) => {
@@ -105,6 +119,13 @@ export function StudioPagesPage() {
           className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-800"
         >
           <FolderPlus size={14} /> New workspace
+        </button>
+        <button
+          onClick={() => setImportingUrls(true)}
+          className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-800"
+          title="Paste a list of image addresses; they are downloaded into a new workspace"
+        >
+          <Link2 size={14} /> From addresses
         </button>
         <button
           onClick={() => setCreating(true)}
@@ -217,6 +238,27 @@ export function StudioPagesPage() {
           })}
         </div>
       </div>
+
+      {importingUrls && (
+        <AddPageUrlsDialog
+          title="Download pages into a new workspace"
+          onClose={() => {
+            setImportingUrls(false);
+            void qc.invalidateQueries({ queryKey: ["workspaces"] });
+          }}
+          onImport={async (urls) => {
+            // A workspace first, so a part-finished download still leaves the pages somewhere they can be worked on
+            const workspace = await createWorkspace({ name: workspaceName(urls) });
+            const detail = await importWorkspacePageUrls(workspace.id, urls, 0);
+            void qc.invalidateQueries({ queryKey: ["workspaces"] });
+            if (detail.imported > 0) navigate(`/studio/w/${workspace.id}`);
+            return {
+              imported: detail.imported,
+              skipped: detail.skipped.map((entry) => ({ name: entry.name, reason: entry.reason })),
+            };
+          }}
+        />
+      )}
 
       {creating && (
         <NewPageDialog

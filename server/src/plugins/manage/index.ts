@@ -16,6 +16,7 @@
  * PUT    /manage/api/chapters/:id               rename / renumber / reorder / move between volumes
  * DELETE /manage/api/chapters/:id               delete it (its pages → Inbox)
  * POST   /manage/api/chapters/:id/pages         file images or ZIP / CBZ archives into a chapter (multipart)
+ * POST   /manage/api/chapters/:id/pages/urls    download image addresses into a chapter, in the order given
  * POST   /manage/api/chapters/:id/pages/:pageId copy an Inbox draft into the chapter (or move it, keep_draft=false)
  * PUT    /manage/api/chapters/:id/pages/reorder set the chapter's reading order
  * GET    /manage/api/chapters/:id/export        the chapter as a ZIP of published images
@@ -47,6 +48,7 @@ import { ErrBody, optionalEnum } from "@/lib/schemas";
 import { chapterRun, pagesToRun, startChapterRun } from "@/services/chapter-batch";
 import { exportChapter } from "@/services/chapter-export";
 import { importIntoChapter, type ImportSource } from "@/services/chapter-import";
+import { importUrlsIntoChapter, MAX_URLS_PER_IMPORT } from "@/services/url-import";
 import { sendChapterToStudio } from "@/services/chapter-to-studio";
 import { hasUnpublishedEdits } from "@/services/page-history";
 import { publishPage } from "@/services/page-publish";
@@ -415,6 +417,28 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       response: {
         200: t.Composite([ChapterDetail, t.Object({ imported: t.Integer(), skipped: t.Array(t.Object({ name: t.String(), reason: t.String() })) })]),
         404: ErrBody,
+      },
+    },
+  )
+
+  .post(
+    "/chapters/:id/pages/urls",
+    async ({ params, body, status }) => {
+      if (!(await ChapterStore.findById(params.id))) return status(404, { error: "chapter not found" });
+      const urls = body.urls.map((url) => url.trim()).filter(Boolean);
+      if (urls.length === 0) return status(422, { error: "give at least one image address" });
+      const report = await importUrlsIntoChapter(params.id, urls);
+      const detail = await chapterDetail(params.id);
+      if (!detail) return status(404, { error: "chapter not found" });
+      return { ...detail, imported: report.pages.length, skipped: report.skipped };
+    },
+    {
+      params: t.Object({ id: IdParam }),
+      body: t.Object({ urls: t.Array(t.String({ maxLength: 4096 }), { maxItems: MAX_URLS_PER_IMPORT }) }),
+      response: {
+        200: t.Composite([ChapterDetail, t.Object({ imported: t.Integer(), skipped: t.Array(t.Object({ name: t.String(), reason: t.String() })) })]),
+        404: ErrBody,
+        422: ErrBody,
       },
     },
   )
