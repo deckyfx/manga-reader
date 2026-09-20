@@ -4,8 +4,10 @@
  *
  * POST   /manage/api/series                     create a series (title, synopsis, author, status, direction, tags)
  * PUT    /manage/api/series/:id                 edit it; `tags` replaces the whole set
- * PUT    /manage/api/series/:id/cover           upload a cover image (multipart)
- * DELETE /manage/api/series/:id/cover           drop the cover, falling back to the first page
+ * POST   /manage/api/series/:id/covers          add a cover image (multipart); the newest is what shows
+ * PUT    /manage/api/series/:id/covers/:coverId/pin  show this one instead of the newest
+ * DELETE /manage/api/series/:id/covers/pin      stop pinning, so the newest shows again
+ * DELETE /manage/api/series/:id/covers/:coverId  remove one cover
  * DELETE /manage/api/series/:id                 delete a series with its volumes and chapters (pages → Inbox)
  * POST   /manage/api/volumes                    add a volume to a series
  * PUT    /manage/api/volumes/:id                rename / renumber / reorder it
@@ -48,6 +50,7 @@ import { hasUnpublishedEdits } from "@/services/page-history";
 import { publishPage } from "@/services/page-publish";
 import { withPageLock } from "@/queue/page-queue";
 import { CoverTooLargeError, deleteCover, saveCover } from "@/services/library-covers";
+import { CoverStore } from "@/stores/cover-store";
 import { copyPageIntoChapter } from "@/services/page-copy";
 import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore } from "@/stores/library-store";
 import { SessionStore, UserStore } from "@/stores/user-store";
@@ -62,6 +65,8 @@ import { PageStore } from "@/stores/page-store";
 import {
   chapterDetail,
   ChapterDetail,
+  coverList,
+  CoverSchema,
   IdParam,
   PageIdParam,
   ReadPageSchema,
@@ -175,11 +180,10 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     },
   )
 
-  .put(
-    "/series/:id/cover",
+  .post(
+    "/series/:id/covers",
     async ({ params, body, status }) => {
-      const series = await SeriesStore.findById(params.id);
-      if (!series) return status(404, { error: "series not found" });
+      if (!(await SeriesStore.findById(params.id))) return status(404, { error: "series not found" });
       let name: string;
       try {
         name = await saveCover(params.id, new Uint8Array(await body.cover.arrayBuffer()));
@@ -188,26 +192,48 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         log.warn({ err, seriesId: params.id }, "Cover could not be stored");
         return status(422, { error: "cover image could not be read" });
       }
-      await SeriesStore.update(params.id, { coverPath: name });
-      return (await seriesDetail(params.id)) ?? status(404, { error: "series not found" });
+      // Newest is what a series shows unless one is pinned, so an upload becomes the cover without being told to
+      await CoverStore.add({ seriesId: params.id, path: name, label: body.label?.trim() || null });
+      return coverList(params.id);
     },
     {
       params: t.Object({ id: IdParam }),
-      body: t.Object({ cover: t.File() }),
-      response: { 200: SeriesDetail, 404: ErrBody, 422: ErrBody },
+      body: t.Object({ cover: t.File(), label: t.Optional(t.String({ maxLength: 80 })) }),
+      response: { 200: t.Array(CoverSchema), 404: ErrBody, 422: ErrBody },
     },
   )
 
-  .delete(
-    "/series/:id/cover",
+  .put(
+    "/series/:id/covers/:coverId/pin",
     async ({ params, status }) => {
-      const series = await SeriesStore.findById(params.id);
-      if (!series) return status(404, { error: "series not found" });
-      await deleteCover(series.coverPath);
-      await SeriesStore.update(params.id, { coverPath: null });
-      return (await seriesDetail(params.id)) ?? status(404, { error: "series not found" });
+      if (!(await SeriesStore.findById(params.id))) return status(404, { error: "series not found" });
+      if (!(await CoverStore.pin(params.id, params.coverId))) return status(404, { error: "no such cover" });
+      return coverList(params.id);
     },
-    { params: t.Object({ id: IdParam }), response: { 200: SeriesDetail, 404: ErrBody } },
+    { params: t.Object({ id: IdParam, coverId: IdParam }), response: { 200: t.Array(CoverSchema), 404: ErrBody } },
+  )
+
+  .delete(
+    "/series/:id/covers/pin",
+    async ({ params, status }) => {
+      if (!(await SeriesStore.findById(params.id))) return status(404, { error: "series not found" });
+      // Unpinned means "show the newest", which is the default a series starts with
+      await CoverStore.pin(params.id, null);
+      return coverList(params.id);
+    },
+    { params: t.Object({ id: IdParam }), response: { 200: t.Array(CoverSchema), 404: ErrBody } },
+  )
+
+  .delete(
+    "/series/:id/covers/:coverId",
+    async ({ params, status }) => {
+      if (!(await SeriesStore.findById(params.id))) return status(404, { error: "series not found" });
+      const removed = await CoverStore.remove(params.id, params.coverId);
+      if (removed === null) return status(404, { error: "no such cover" });
+      await deleteCover(removed);
+      return coverList(params.id);
+    },
+    { params: t.Object({ id: IdParam, coverId: IdParam }), response: { 200: t.Array(CoverSchema), 404: ErrBody } },
   )
 
   .delete(
@@ -215,9 +241,11 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     async ({ params, status }) => {
       const series = await SeriesStore.findById(params.id);
       if (!series) return status(404, { error: "series not found" });
+      // The cover files are read before the rows go: deleting the series cascades them away
+      const covers = await CoverStore.paths(params.id);
       // Volumes and chapters go with it; the pages keep their images and return to the Inbox
       await SeriesStore.delete(params.id);
-      await deleteCover(series.coverPath);
+      for (const cover of covers) await deleteCover(cover);
       return { deleted: true };
     },
     { params: t.Object({ id: IdParam }), response: { 200: t.Object({ deleted: t.Boolean() }), 404: ErrBody } },

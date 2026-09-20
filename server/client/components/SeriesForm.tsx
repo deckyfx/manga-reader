@@ -2,11 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, Loader2, Upload, X } from "lucide-react";
 import {
+  addSeriesCover,
   createSeries,
-  removeSeriesCover,
   seriesCoverUrl,
   updateSeries,
-  uploadSeriesCover,
   type ReadingDirection,
   type SeriesDetail,
   type SeriesStatus,
@@ -42,7 +41,6 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
   const [tags, setTags] = useState<string[]>(series?.tags ?? []);
   const [tagDraft, setTagDraft] = useState("");
   const [cover, setCover] = useState<File | null>(null);
-  const [coverCleared, setCoverCleared] = useState(false);
   const coverRef = useRef<HTMLInputElement>(null);
 
   const addTags = (raw: string) => {
@@ -74,8 +72,9 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
       const existingId = series?.id ?? createdId.current;
       let detail = existingId !== null && existingId !== undefined ? await updateSeries(existingId, body) : await createSeries(body);
       createdId.current = detail.series.id;
-      if (coverCleared && !cover) detail = await removeSeriesCover(detail.series.id);
-      if (cover) detail = await uploadSeriesCover(detail.series.id, cover);
+      // A series holds several covers now: this adds one, and the newest is what shows. Removing and choosing
+      // between them is the gallery's job, on the series page
+      if (cover) await addSeriesCover(detail.series.id, cover);
       return detail;
     },
     onSuccess: onSaved,
@@ -92,8 +91,8 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
     if (picked) URL.revokeObjectURL(picked);
   }, [picked]);
 
-  // What the cover box shows: a freshly picked file, the stored cover, or nothing
-  const preview = picked ?? (!coverCleared && series?.has_cover ? seriesCoverUrl(series.id, series.updated_at) : null);
+  // What the cover box shows: a freshly picked file, else the cover this series is showing
+  const preview = picked ?? (series?.has_cover ? seriesCoverUrl(series.id, series.updated_at) : null);
 
   return (
     <Modal
@@ -125,9 +124,7 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
             type="file"
             accept="image/*"
             onChange={(e) => {
-              const file = e.target.files?.[0] ?? null;
-              setCover(file);
-              if (file) setCoverCleared(false);
+              setCover(e.target.files?.[0] ?? null);
               e.target.value = "";
             }}
             className="hidden"
@@ -139,17 +136,14 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-gray-800 px-2 py-1.5 text-xs text-gray-200 hover:bg-gray-700"
             >
               <Upload size={12} />
-              Cover
+              Add cover
             </button>
-            {preview && (
+            {cover && (
               <button
                 type="button"
-                onClick={() => {
-                  setCover(null);
-                  setCoverCleared(true);
-                }}
-                title="Remove the cover (the first page is used instead)"
-                aria-label="Remove the cover"
+                onClick={() => setCover(null)}
+                title="Don't add this image"
+                aria-label="Drop the picked image"
                 className="rounded-lg bg-gray-800 px-2 py-1.5 text-gray-400 hover:bg-gray-700 hover:text-red-300"
               >
                 <X size={12} />

@@ -29,8 +29,8 @@ Cloudflare. The server doesn't scrape, doesn't hold site accounts and doesn't ne
 | P0 | Settings areas: sub-menus, full width | S | **Done** — PR #26 |
 | P1 | Add pages by URL (Studio and chapter, many at once) | S | After P4, same session |
 | P2 | Region scan log | S–M | **Done** — PR #26 |
-| P6a | Publish backfill | S | This PR |
-| P6b | Several cover arts | M | Next |
+| P6a | Publish backfill | S | Done, branch `feat/publish-backfill` |
+| P6b | Several cover arts | M | This PR |
 | P6c | Reviews and ratings | M | After covers |
 
 Two sessions are working through this in parallel: one on P4 → P1 → P5 (the extension side), one on P6 (the library
@@ -313,8 +313,11 @@ opens the new series in the web UI to review.
 
 ## 8. P6: library backlog
 
-- **Several cover arts**: `series_covers {id, seriesId, path, label, sortOrder, createdAt}`. The default is the latest
-  unless one is pinned (`series.coverId`, nullable). Migrate the existing `coverPath` into the table.
+- **Several cover arts** (done): `series_covers {id, seriesId, path, label, createdAt}`, newest first. The newest shows
+  unless one is pinned (`series.coverId`). Migration 0015 copies each `series.cover_path` into a row and pins it, so
+  every library looks exactly as it did. `cover_id` has no foreign key — SQLite can't add one by ALTER TABLE — so
+  `CoverStore` clears the pin when that cover goes, and resolution falls back to the newest if it ever dangles.
+  `series.cover_path` stays behind, unread, rather than being dropped in the same change.
 - **Reviews and ratings**: `series_reviews` / `chapter_reviews {userId, targetId, rating 1–5, body?, createdAt,
   updatedAt}`, unique on (user, target). An average and count are shown on the series page. Any signed-in user can
   review; admins can remove reviews.

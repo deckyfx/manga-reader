@@ -5,7 +5,9 @@
  * GET /read/api/series             the library, filtered by title, tags and status; sorted by title or recency
  * GET /read/api/series/tags        every tag in use, with how many series carry it
  * GET /read/api/series/:id         one series with its volumes, their chapters, and any unsorted chapters
- * GET /read/api/series/:id/cover   the series cover (uploaded, else its first page)
+ * GET /read/api/series/:id/cover   the series cover (pinned, else newest, else its first page)
+ * GET /read/api/series/:id/covers  every cover of the series
+ * GET /read/api/series/:id/covers/:coverId  one of them
  * GET /read/api/chapters/:id       one chapter with its pages, in reading order
  * GET /read/api/pages/:id/image    a page image: the published result, else the original
  */
@@ -14,6 +16,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { ErrBody } from "@/lib/schemas";
 import { coverFilePath } from "@/services/library-covers";
+import { CoverStore } from "@/stores/cover-store";
 import { hasUnpublishedEdits, publishedFile } from "@/services/page-history";
 import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore, type SeriesWithCounts } from "@/stores/library-store";
 import { pageDir, PageStore } from "@/stores/page-store";
@@ -38,6 +41,17 @@ export const SeriesSchema = t.Object({
   has_cover: t.Boolean(),
   created_at: t.String(),
   updated_at: t.String(),
+});
+
+/** One piece of a series' cover art. */
+export const CoverSchema = t.Object({
+  id: t.Integer(),
+  label: t.Nullable(t.String()),
+  /** The one being shown right now: the pinned cover, or the newest when nothing is pinned. */
+  current: t.Boolean(),
+  /** Whether somebody chose this one, as opposed to it simply being the newest. */
+  pinned: t.Boolean(),
+  created_at: t.String(),
 });
 
 export const VolumeSchema = t.Object({
@@ -140,10 +154,14 @@ export const toChapter = (chapter: Chapter, pages: number) => ({
   updated_at: chapter.updatedAt,
 });
 
-/** The file the cover route would serve: the uploaded cover, else the series' first page, else nothing. */
+/**
+ * The file the cover route would serve: the series' cover art — the pinned one, else the newest — and failing that
+ * the first page of its first chapter. A cover row whose file has gone falls through to the page, so a half-deleted
+ * cover leaves a series looking bare rather than broken.
+ */
 export function coverFile(entry: SeriesWithCounts): string | null {
-  const uploaded = entry.series.coverPath ? coverFilePath(entry.series.coverPath) : null;
-  if (uploaded && existsSync(uploaded)) return uploaded;
+  const art = entry.coverArt ? coverFilePath(entry.coverArt) : null;
+  if (art && existsSync(art)) return art;
   return entry.firstPageId ? pageImagePath(entry.firstPageId) : null;
 }
 
@@ -161,6 +179,22 @@ export const toSeries = (entry: SeriesWithCounts) => ({
   created_at: entry.series.createdAt,
   updated_at: entry.series.updatedAt,
 });
+
+/**
+ * Every cover of a series, newest first, as both areas return them. `current` is the one a reader is being shown,
+ * which is the pinned cover when there is one and the newest otherwise — so the gallery and the cover route can
+ * never disagree about which is on display.
+ */
+export async function coverList(seriesId: number) {
+  const [entry, covers] = await Promise.all([SeriesStore.withCounts(seriesId), CoverStore.list(seriesId)]);
+  return covers.map((cover) => ({
+    id: cover.id,
+    label: cover.label,
+    current: cover.path === entry?.coverArt,
+    pinned: entry?.series.coverId === cover.id,
+    created_at: cover.createdAt,
+  }));
+}
 
 /** One series with its tags, counts and cover state, as both areas return it. */
 export async function seriesSummary(id: number): Promise<ReturnType<typeof toSeries> | null> {
@@ -265,6 +299,27 @@ export const readPlugin = new Elysia({ prefix: "/read/api" })
       return new Response(Bun.file(file), { headers: { "content-type": "image/png", "cache-control": "no-cache" } });
     },
     { params: t.Object({ id: IdParam }) },
+  )
+
+  .get(
+    "/series/:id/covers",
+    async ({ params, status }) => {
+      if (!(await SeriesStore.findById(params.id))) return status(404, { error: "series not found" });
+      return coverList(params.id);
+    },
+    { params: t.Object({ id: IdParam }), response: { 200: t.Array(CoverSchema), 404: ErrBody } },
+  )
+
+  .get(
+    "/series/:id/covers/:coverId",
+    async ({ params, status }) => {
+      const cover = await CoverStore.find(params.id, params.coverId);
+      if (!cover) return status(404, { error: "no such cover" });
+      const file = coverFilePath(cover.path);
+      if (!existsSync(file)) return status(404, { error: "that cover's image is missing" });
+      return new Response(Bun.file(file), { headers: { "content-type": "image/png", "cache-control": "no-cache" } });
+    },
+    { params: t.Object({ id: IdParam, coverId: IdParam }) },
   )
 
   .get(

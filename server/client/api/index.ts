@@ -391,9 +391,25 @@ export const updateSeries = (id: number, body: {
   tags?: string[];
 }) => unwrap(api.manage.api.series({ id }).put(body));
 
-export const uploadSeriesCover = (id: number, cover: File) => unwrap(api.manage.api.series({ id }).cover.put({ cover }));
+// ── Cover art: a series may hold several; the pinned one shows, else the newest ──
 
-export const removeSeriesCover = (id: number) => unwrap(api.manage.api.series({ id }).cover.delete());
+export const listSeriesCovers = (id: number) => unwrap(api.read.api.series({ id }).covers.get());
+
+export const addSeriesCover = (id: number, cover: File, label?: string) =>
+  unwrap(api.manage.api.series({ id }).covers.post({ cover, ...(label ? { label } : {}) }));
+
+/** Shows this cover instead of the newest. */
+export const pinSeriesCover = (id: number, coverId: number) =>
+  unwrap(api.manage.api.series({ id }).covers({ coverId }).pin.put());
+
+/** Back to showing the newest. */
+export const unpinSeriesCover = (id: number) => unwrap(api.manage.api.series({ id }).covers.pin.delete());
+
+export const removeSeriesCover = (id: number, coverId: number) =>
+  unwrap(api.manage.api.series({ id }).covers({ coverId }).delete());
+
+/** One particular cover's image, rather than whichever the series currently shows. */
+export const coverArtUrl = (id: number, coverId: number) => `/read/api/series/${id}/covers/${coverId}`;
 
 export const deleteSeries = (id: number) => unwrap(api.manage.api.series({ id }).delete());
 

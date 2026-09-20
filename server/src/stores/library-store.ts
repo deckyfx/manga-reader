@@ -4,7 +4,7 @@
  */
 import { and, asc, desc, eq, inArray, isNull, like, notInArray, sql } from "drizzle-orm";
 import { db } from "@/db/index";
-import { chapters, pages, series, seriesTags, volumes, type Chapter, type NewChapter, type NewSeries, type NewVolume, type Series, type Volume } from "@/db/schema";
+import { chapters, pages, series, seriesCovers, seriesTags, volumes, type Chapter, type NewChapter, type NewSeries, type NewVolume, type Series, type Volume } from "@/db/schema";
 
 export const SERIES_STATUSES = ["ongoing", "completed", "hiatus"] as const;
 export type SeriesStatus = (typeof SERIES_STATUSES)[number];
@@ -31,6 +31,8 @@ export interface SeriesWithCounts {
   volumes: number;
   /** First page of its first chapter, for the cover fallback. */
   firstPageId: string | null;
+  /** File name of the cover to show: the pinned one, else the newest. Null when the series has no cover art. */
+  coverArt: string | null;
 }
 
 /** Tags normalised the way they're stored and compared: trimmed, lower case, no empties or duplicates. */
@@ -96,11 +98,12 @@ export class SeriesStore {
       .orderBy(filter.sort === "recent" ? desc(series.updatedAt) : asc(series.title));
 
     const ids = rows.map((row) => row.id);
-    const [tags, chapterCounts, volumeCounts, covers] = await Promise.all([
+    const [tags, chapterCounts, volumeCounts, covers, art] = await Promise.all([
       SeriesStore.tagsFor(ids),
       SeriesStore.countChapters(ids),
       SeriesStore.countVolumes(ids),
       SeriesStore.coverPages(ids),
+      SeriesStore.coverArt(rows),
     ]);
 
     const list = rows.map((row) => ({
@@ -109,6 +112,7 @@ export class SeriesStore {
       chapters: chapterCounts.get(row.id) ?? 0,
       volumes: volumeCounts.get(row.id) ?? 0,
       firstPageId: covers.get(row.id) ?? null,
+      coverArt: art.get(row.id) ?? null,
     }));
     return filter.hasChapters ? list.filter((entry) => entry.chapters > 0) : list;
   }
@@ -133,6 +137,34 @@ export class SeriesStore {
     return new Map(rows.map((row) => [row.seriesId, Number(row.count)]));
   }
 
+  /**
+   * The cover art file of each series: the one it pinned, else its newest. A pin left pointing at a cover that no
+   * longer exists falls back to the newest, so a series never loses its cover over a stale id.
+   */
+  private static async coverArt(rows: { id: number; coverId: number | null }[]): Promise<Map<number, string>> {
+    if (rows.length === 0) return new Map();
+    const covers = await db
+      .select({ id: seriesCovers.id, seriesId: seriesCovers.seriesId, path: seriesCovers.path })
+      .from(seriesCovers)
+      .where(inArray(seriesCovers.seriesId, rows.map((row) => row.id)))
+      .orderBy(desc(seriesCovers.id));
+
+    const newest = new Map<number, string>();
+    const byId = new Map<number, { seriesId: number; path: string }>();
+    for (const cover of covers) {
+      if (!newest.has(cover.seriesId)) newest.set(cover.seriesId, cover.path);
+      byId.set(cover.id, { seriesId: cover.seriesId, path: cover.path });
+    }
+
+    const chosen = new Map<number, string>();
+    for (const row of rows) {
+      const pinned = row.coverId === null ? undefined : byId.get(row.coverId);
+      const path = pinned?.seriesId === row.id ? pinned.path : newest.get(row.id);
+      if (path !== undefined) chosen.set(row.id, path);
+    }
+    return chosen;
+  }
+
   /** First page of each series' first chapter, used when no cover was uploaded. */
   private static async coverPages(ids: number[]): Promise<Map<number, string>> {
     if (ids.length === 0) return new Map();
@@ -151,11 +183,12 @@ export class SeriesStore {
   static async withCounts(id: number): Promise<SeriesWithCounts | null> {
     const row = await SeriesStore.findById(id);
     if (!row) return null;
-    const [tags, chapterCounts, volumeCounts, covers] = await Promise.all([
+    const [tags, chapterCounts, volumeCounts, covers, art] = await Promise.all([
       SeriesStore.tagsFor([id]),
       SeriesStore.countChapters([id]),
       SeriesStore.countVolumes([id]),
       SeriesStore.coverPages([id]),
+      SeriesStore.coverArt([row]),
     ]);
     return {
       series: row,
@@ -163,6 +196,7 @@ export class SeriesStore {
       chapters: chapterCounts.get(id) ?? 0,
       volumes: volumeCounts.get(id) ?? 0,
       firstPageId: covers.get(id) ?? null,
+      coverArt: art.get(id) ?? null,
     };
   }
 
