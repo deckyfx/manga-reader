@@ -4,6 +4,7 @@ import { BookOpen, Loader2, Upload, X } from "lucide-react";
 import {
   addSeriesCover,
   createSeries,
+  getSeries,
   seriesCoverUrl,
   updateSeries,
   type ReadingDirection,
@@ -74,7 +75,11 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
       createdId.current = detail.series.id;
       // A series holds several covers now: this adds one, and the newest is what shows. Removing and choosing
       // between them is the gallery's job, on the series page
-      if (cover) await addSeriesCover(detail.series.id, cover);
+      if (cover) {
+        await addSeriesCover(detail.series.id, cover);
+        // Read back, so what the caller is handed says the series has a cover — it does now
+        detail = await getSeries(detail.series.id);
+      }
       return detail;
     },
     onSuccess: onSaved,

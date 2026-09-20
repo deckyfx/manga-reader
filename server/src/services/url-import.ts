@@ -60,27 +60,28 @@ export async function importUrlsIntoChapter(
   urls: readonly string[],
   download: Download = fetchImage,
 ): Promise<ImportReport> {
-  const sources: ImportSource[] = [];
-  const failed: { name: string; reason: string }[] = [];
+  const report: ImportReport = { pages: [], skipped: [] };
 
   for (const url of urls.slice(0, MAX_URLS_PER_IMPORT)) {
     const name = nameFromUrl(url);
     try {
-      sources.push({ name, bytes: new Uint8Array(await download(url)), source: url });
+      const source: ImportSource = { name, bytes: new Uint8Array(await download(url)), source: url };
+      // Stored before the next download starts, so fifty pages never sit in memory at once — at 15 MB each that
+      // would be most of a gigabyte. `importIntoChapter` appends, so filing one at a time keeps the order given
+      const part = await importIntoChapter(chapterId, [source]);
+      report.pages.push(...part.pages);
+      report.skipped.push(...part.skipped);
     } catch (err) {
       const reason = err instanceof Error ? err.message : "could not be downloaded";
       log.warn({ err, url }, "A page address could not be downloaded");
-      failed.push({ name, reason });
+      report.skipped.push({ name, reason });
     }
   }
 
   for (const url of urls.slice(MAX_URLS_PER_IMPORT)) {
-    failed.push({ name: nameFromUrl(url), reason: `more than ${MAX_URLS_PER_IMPORT} addresses in one import` });
+    report.skipped.push({ name: nameFromUrl(url), reason: `more than ${MAX_URLS_PER_IMPORT} addresses in one import` });
   }
-
-  const report = await importIntoChapter(chapterId, sources);
-  // The downloads that never happened are skipped entries too: one report, whatever went wrong
-  return { pages: report.pages, skipped: [...failed, ...report.skipped] };
+  return report;
 }
 
 /**
@@ -96,36 +97,25 @@ export async function importUrlsIntoWorkspace(
   download: Download = fetchImage,
 ): Promise<WorkspaceImportReport> {
   const report: WorkspaceImportReport = { pages: [], existing: [], skipped: [] };
-  /** Downloads waiting to be stored, and where the first of them belongs. */
-  let run: WorkspaceUpload[] = [];
-  let runStart = startIndex;
-
-  const flush = async (): Promise<void> => {
-    if (run.length === 0) return;
-    const part = await importIntoWorkspace(workspaceId, runStart, run);
-    report.pages.push(...part.pages);
-    report.existing.push(...part.existing);
-    report.skipped.push(...part.skipped);
-    run = [];
-  };
 
   for (const [offset, url] of urls.slice(0, MAX_URLS_PER_IMPORT).entries()) {
     const index = startIndex + offset;
     const name = nameFromUrl(url);
     try {
-      const bytes = new Uint8Array(await download(url));
-      if (run.length === 0) runStart = index;
-      run.push({ name, bytes, source: url });
+      const upload: WorkspaceUpload = { name, bytes: new Uint8Array(await download(url)), source: url };
+      // Stored at its own position before the next download starts: nothing accumulates in memory, and an address
+      // that fails leaves its position free rather than shifting the pages after it up by one, so retrying the same
+      // list fills the gap
+      const part = await importIntoWorkspace(workspaceId, index, [upload]);
+      report.pages.push(...part.pages);
+      report.existing.push(...part.existing);
+      report.skipped.push(...part.skipped);
     } catch (err) {
       const reason = err instanceof Error ? err.message : "could not be downloaded";
       log.warn({ err, url }, "A page address could not be downloaded");
-      // What downloaded before this one is stored now, so the failure leaves a gap at its own position rather than
-      // shifting every page after it up by one. Retrying the same list then fills the gap.
-      await flush();
       report.skipped.push({ name, index, reason });
     }
   }
-  await flush();
 
   for (const [offset, url] of urls.slice(MAX_URLS_PER_IMPORT).entries()) {
     report.skipped.push({

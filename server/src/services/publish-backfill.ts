@@ -9,20 +9,68 @@
  * deliberately boring: it never touches a page that has a snapshot, and publishing a page whose burn readers were
  * already being served changes nothing anybody can see.
  */
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { childLogger } from "@/lib/logger";
 import { withPageLock } from "@/queue/page-queue";
 import { publishBlocker } from "@/services/draft-publish";
 import { publishedFile } from "@/services/page-history";
 import { publishPage } from "@/services/page-publish";
-import { PageStore } from "@/stores/page-store";
+import { pageDir, PageStore } from "@/stores/page-store";
+import { ServerSettingStore } from "@/stores/settings-store";
 
 const log = childLogger("publish-backfill");
+
+/**
+ * When the boot pass ran. It is recorded because the pass must happen **once**, on the upgrade that removed the
+ * reader's fallback to a burn — not on every start.
+ *
+ * After that upgrade, "a chapter page with a fresh render and no snapshot" stops meaning "a page from before
+ * publishing existed" and starts meaning "work somebody has deliberately not published yet". Re-running the pass at
+ * each boot would publish that work behind their back, which is the opposite of what the publish gate is for.
+ */
+const RAN_AT_KEY = "publish_backfill_at";
 
 export interface BackfillReport {
   /** Pages that now have a published snapshot they didn't have before. */
   published: string[];
   /** Pages that couldn't be published, with why; the rest of the run carries on. */
   failed: { pageId: string; error: string }[];
+}
+
+/** When the one-time pass ran, or null when it hasn't. */
+export async function backfillRanAt(): Promise<string | null> {
+  return (await ServerSettingStore.get(RAN_AT_KEY)) ?? null;
+}
+
+/**
+ * Runs the pass once per server, on the first start after this upgrade. The stamp is written whatever the outcome:
+ * pages that failed are reported in the admin area, where somebody can run it again deliberately, and that is a
+ * better answer than a pass that quietly republishes held-back work every morning.
+ */
+export async function backfillOnce(): Promise<BackfillReport | null> {
+  if ((await backfillRanAt()) !== null) return null;
+  try {
+    return await backfillPublishes();
+  } finally {
+    await ServerSettingStore.set(RAN_AT_KEY, new Date().toISOString());
+  }
+}
+
+/**
+ * Pages the pass would leave behind: a chapter page holding a burn nobody published, which can't be published as it
+ * stands. Shown in the admin area so a stale render is something an admin can see and re-render, rather than a page
+ * that quietly shows its original to readers.
+ */
+export async function pagesBlockedFromPublish(): Promise<{ pageId: string; reason: string }[]> {
+  const blocked: { pageId: string; reason: string }[] = [];
+  for (const page of await PageStore.listAllInChapters()) {
+    if (publishedFile(page.id) !== null) continue;
+    if (!existsSync(join(pageDir(page.id), "result.png"))) continue;
+    const reason = publishBlocker(page, await PageStore.listStages(page.id));
+    if (reason !== null) blocked.push({ pageId: page.id, reason });
+  }
+  return blocked;
 }
 
 /**

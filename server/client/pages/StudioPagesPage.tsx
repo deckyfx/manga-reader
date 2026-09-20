@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, FolderInput, FolderPlus, Layers, Loader2, Plus, Search, Trash2, X, Link2 } from "lucide-react";
@@ -50,6 +50,9 @@ export function StudioPagesPage() {
   const [scope, setScopeState] = useState<PageScope>(readScope);
   const [newWorkspace, setNewWorkspace] = useState<string | null>(null);
   const [importingUrls, setImportingUrls] = useState(false);
+  // The workspace an address import made, kept across retries: a second attempt fills the gaps in that workspace
+  // rather than leaving a trail of half-filled ones
+  const importWorkspace = useRef<number | null>(null);
   const toast = useToast();
 
   const setScope = (next: PageScope) => {
@@ -245,13 +248,18 @@ export function StudioPagesPage() {
           onClose={() => {
             setImportingUrls(false);
             void qc.invalidateQueries({ queryKey: ["workspaces"] });
+            // Opened at the workspace once the report has been read, rather than mid-import over the top of it
+            const opened = importWorkspace.current;
+            importWorkspace.current = null;
+            if (opened !== null) navigate(`/studio/w/${opened}`);
           }}
           onImport={async (urls) => {
             // A workspace first, so a part-finished download still leaves the pages somewhere they can be worked on
-            const workspace = await createWorkspace({ name: workspaceName(urls) });
-            const detail = await importWorkspacePageUrls(workspace.id, urls, 0);
+            const workspaceId = importWorkspace.current
+              ?? (await createWorkspace({ name: workspaceName(urls) })).id;
+            importWorkspace.current = workspaceId;
+            const detail = await importWorkspacePageUrls(workspaceId, urls, 0);
             void qc.invalidateQueries({ queryKey: ["workspaces"] });
-            if (detail.imported > 0) navigate(`/studio/w/${workspace.id}`);
             return {
               imported: detail.imported,
               skipped: detail.skipped.map((entry) => ({ name: entry.name, reason: entry.reason })),

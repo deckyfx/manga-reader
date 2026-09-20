@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { publishBackfillPending, runPublishBackfill } from "../../api";
 import { Card } from "../../components/Card";
+import { when } from "../../lib/format";
 
 /** Jobs an admin runs by hand, when something in the library needs putting right. */
 export function MaintenanceSection() {
@@ -24,12 +25,14 @@ function PublishBackfillCard() {
   });
 
   const pending = pendingQ.data?.pending;
+  const blocked = pendingQ.data?.blocked ?? [];
+  const ranAt = pendingQ.data?.ran_at ?? null;
   const failed = runM.data?.failed ?? [];
 
   return (
     <Card
       title="Publish pages burnt before the publish gate"
-      description="Readers are only ever served published pages. A page translated before publishing existed may hold a finished result that was never published; this publishes those, exactly as they are."
+      description="Readers are only ever served published pages. The server did this once, on the first start after the upgrade. Running it again publishes every chapter page that holds a finished result nobody has published — including work somebody may be holding back, so press it deliberately."
     >
       {pendingQ.isError ? (
         <p className="text-sm text-red-400">This couldn't be checked: {pendingQ.error.message}</p>
@@ -46,6 +49,25 @@ function PublishBackfillCard() {
         </p>
       )}
 
+      {ranAt && <p className="mt-1 text-xs text-gray-500">The one-time pass ran {when(ranAt)}.</p>}
+
+      {blocked.length > 0 && (
+        <div className="mt-3 rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
+          <p className="text-sm text-amber-200">
+            {blocked.length} page{blocked.length === 1 ? "" : "s"} can't be published as they stand, so readers are served their
+            originals:
+          </p>
+          <ul className="mt-1 space-y-0.5 text-xs text-gray-400">
+            {blocked.map((entry) => (
+              <li key={entry.pageId}>
+                <code className="text-gray-500">{entry.pageId.slice(-8)}</code> — {entry.reason}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-xs text-gray-500">Re-render them in the Studio, then publish from there.</p>
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           onClick={() => runM.mutate()}
@@ -55,7 +77,7 @@ function PublishBackfillCard() {
           {runM.isPending ? <Loader2 size={14} className="animate-spin" /> : "Publish them"}
         </button>
         <p className="text-xs text-gray-500">
-          The server also does this once when it starts, so this button is here for the pages that failed then.
+          Here for the pages that failed the one-time pass, or that have become publishable since.
         </p>
       </div>
 

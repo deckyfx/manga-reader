@@ -10,7 +10,7 @@ import { copyFile, mkdir, utimes } from "node:fs/promises";
 import { join } from "node:path";
 import { pageImagePath } from "@/plugins/read/index";
 import { hasUnpublishedEditsAgainst, publishedFile } from "@/services/page-history";
-import { backfillPublishes, pagesNeedingPublish } from "@/services/publish-backfill";
+import { backfillOnce, backfillPublishes, backfillRanAt, pagesBlockedFromPublish, pagesNeedingPublish } from "@/services/publish-backfill";
 import { pageDir, PageStore } from "@/stores/page-store";
 import { WorkspaceStore } from "@/stores/workspace-store";
 import { call, png, signedIn } from "./harness";
@@ -150,6 +150,53 @@ describe("the backfill", () => {
 
     expect(page.chapterId).toBeNull();
     expect(await pagesNeedingPublish()).not.toContain(page.id);
+  });
+});
+
+describe("the boot pass runs once, not every morning", () => {
+  test("the second start publishes nothing, so work held back stays held back", async () => {
+    const { cookie } = await signedIn("contributor");
+    const { pageIds } = await chapterWithPages(cookie, 1);
+    const [legacy] = pageIds;
+    await burn(legacy);
+
+    // First start after the upgrade: the legacy page is published, and the pass stamps itself as done
+    const first = await backfillOnce();
+    expect(first?.published).toContain(legacy);
+    expect(await backfillRanAt()).not.toBeNull();
+
+    // Afterwards somebody renders a chapter page and deliberately doesn't publish it
+    const { pageIds: later } = await chapterWithPages(cookie, 1);
+    const [heldBack] = later;
+    await burn(heldBack);
+
+    // The next start must leave it alone: an unpublished render now means "not yet", not "from before publishing"
+    expect(await backfillOnce()).toBeNull();
+    expect(publishedFile(heldBack)).toBeNull();
+    expect(pageImagePath(heldBack)).toBe(join(pageDir(heldBack), "original.png"));
+
+    // The admin action still works on demand, because that is somebody deciding rather than a server restarting
+    expect((await backfillPublishes()).published).toContain(heldBack);
+  });
+});
+
+describe("pages the pass can't publish", () => {
+  test("are reported with a reason rather than silently showing their originals", async () => {
+    const { cookie } = await signedIn("contributor");
+    const { pageIds } = await chapterWithPages(cookie, 1);
+    const [pageId] = pageIds;
+    await burn(pageId);
+    await PageStore.setStage(pageId, "render", "stale");
+
+    const blocked = await pagesBlockedFromPublish();
+    const entry = blocked.find((row) => row.pageId === pageId);
+    expect(entry).toBeDefined();
+    expect(entry!.reason).toMatch(/re-render/i);
+
+    const seen = await call<{ blocked: { pageId: string }[] }>(
+      "GET", "/manage/api/publish-backfill", undefined, { cookie: (await signedIn("admin")).cookie },
+    );
+    expect(seen.body.blocked.some((row) => row.pageId === pageId)).toBe(true);
   });
 });
 

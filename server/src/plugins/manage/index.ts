@@ -25,7 +25,7 @@
  * POST   /manage/api/chapters/:id/publish       publish every page of the chapter that has unpublished edits
  * POST   /manage/api/chapters/:id/to-studio     work on it in the Studio: a workspace of draft copies
  * POST   /manage/api/pages/:id/publish          publish one page, so readers get its current result
- * GET    /manage/api/publish-backfill           how many pages were burnt before the publish gate (admin)
+ * GET    /manage/api/publish-backfill           what the one-time publish pass would do, and when it ran (admin)
  * POST   /manage/api/publish-backfill           publish those, so the reader never falls back to a burn (admin)
  * PUT    /manage/api/reviews/:target/:id        rate a series or chapter, with optional words (any account)
  * DELETE /manage/api/reviews/:target/:id/:reviewId  remove your own review; an admin may remove anyone's
@@ -63,7 +63,7 @@ import { hashPassword } from "@/services/auth";
 import { MAX_SCAN_LOG_DAYS, REGISTRATION_ROLES, serverPolicy, updateServerPolicy } from "@/services/server-settings";
 import { ReviewStore } from "@/stores/review-store";
 import { ScanStore } from "@/stores/scan-store";
-import { backfillPublishes, pagesNeedingPublish } from "@/services/publish-backfill";
+import { backfillPublishes, backfillRanAt, pagesBlockedFromPublish, pagesNeedingPublish } from "@/services/publish-backfill";
 import { authContext, SessionSchema, toUser, UserSchema } from "@/plugins/auth/index";
 import { REVIEW_TARGETS, USER_ROLES } from "@/db/schema";
 import { PageStore } from "@/stores/page-store";
@@ -833,6 +833,14 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         rating: body.rating,
         body: body.body?.trim() || null,
       });
+      // A review points at its subject by id, with no foreign key to cascade, so a delete landing between the check
+      // above and the write leaves a row attached to nothing. Asking again is cheaper than a lock, and the window is
+      // the only way it can happen
+      const stillThere = target === "series" ? await SeriesStore.findById(params.id) : await ChapterStore.findById(params.id);
+      if (!stillThere) {
+        await ReviewStore.forgetTarget(target, params.id);
+        return status(404, { error: `${target} not found` });
+      }
       return reviewPage(target, params.id, principal.user.id);
     },
     {
@@ -870,8 +878,21 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
 
   .get(
     "/publish-backfill",
-    async () => ({ pending: (await pagesNeedingPublish()).length }),
-    { response: { 200: t.Object({ pending: t.Integer() }) } },
+    async () => {
+      const [pending, blocked, ranAt] = await Promise.all([pagesNeedingPublish(), pagesBlockedFromPublish(), backfillRanAt()]);
+      return { pending: pending.length, blocked, ran_at: ranAt };
+    },
+    {
+      response: {
+        200: t.Object({
+          pending: t.Integer(),
+          /** Pages holding an unpublished burn that can't be published as they stand, and why. */
+          blocked: t.Array(t.Object({ pageId: t.String(), reason: t.String() })),
+          /** When the one-time pass ran on this server; null before it has. */
+          ran_at: t.Nullable(t.String()),
+        }),
+      },
+    },
   )
 
   .post(
