@@ -20,6 +20,7 @@
  * POST   /manage/api/chapters/:id/run           translate the chapter (skips finished pages unless forced)
  * GET    /manage/api/chapters/:id/run           progress of that run
  * POST   /manage/api/chapters/:id/publish       publish every page of the chapter that has unpublished edits
+ * POST   /manage/api/chapters/:id/to-studio     work on it in the Studio: a workspace of draft copies
  * POST   /manage/api/pages/:id/publish          publish one page, so readers get its current result
  * GET    /manage/api/settings                   server policy: registration, default role (admin)
  * PUT    /manage/api/settings                   change it (admin)
@@ -39,6 +40,7 @@ import { ErrBody, optionalEnum } from "@/lib/schemas";
 import { chapterRun, pagesToRun, startChapterRun } from "@/services/chapter-batch";
 import { exportChapter } from "@/services/chapter-export";
 import { importIntoChapter, type ImportSource } from "@/services/chapter-import";
+import { sendChapterToStudio } from "@/services/chapter-to-studio";
 import { hasUnpublishedEdits } from "@/services/page-history";
 import { publishPage } from "@/services/page-publish";
 import { withPageLock } from "@/queue/page-queue";
@@ -489,6 +491,36 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     {
       params: t.Object({ id: IdParam }),
       response: { 200: t.Composite([ChapterDetail, t.Object({ published: t.Integer() })]), 404: ErrBody },
+    },
+  )
+
+  .post(
+    "/chapters/:id/to-studio",
+    async ({ params, principal, status }) => {
+      const chapter = await ChapterStore.findById(params.id);
+      if (!chapter) return status(404, { error: "chapter not found" });
+      // Drafts, not the chapter's own pages: readers keep the published chapter until a draft is published back
+      const report = await sendChapterToStudio(chapter, principal?.user.id ?? null);
+      return {
+        workspace_id: report.workspace.id,
+        name: report.workspace.name,
+        copied: report.copied,
+        existing: report.existing,
+        skipped: report.skipped,
+      };
+    },
+    {
+      params: t.Object({ id: IdParam }),
+      response: {
+        200: t.Object({
+          workspace_id: t.Integer(),
+          name: t.String(),
+          copied: t.Integer(),
+          existing: t.Integer(),
+          skipped: t.Array(t.Object({ pageId: t.String(), reason: t.String() })),
+        }),
+        404: ErrBody,
+      },
     },
   )
 

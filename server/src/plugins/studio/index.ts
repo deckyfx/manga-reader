@@ -22,6 +22,8 @@
  * GET   /studio/api/pages/:id/history/:revision  a snapshot image
  * POST  /studio/api/pages/:id/rollback           publish an earlier snapshot again
  *
+ * Workspaces live in ./workspaces.ts.
+ *
  * Mutations of one page (edit, run, publish, rollback) run under a per-page lock so their steps never interleave.
  */
 import Elysia, { t } from "elysia";
@@ -34,8 +36,9 @@ import { ErrBody, optionalEnum } from "@/lib/schemas";
 import { runExclusiveResult, withPageLock } from "@/queue/page-queue";
 import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
-import { hasUnpublishedEdits, historyFile, listHistory, publishedFile, restoreResult } from "@/services/page-history";
+import { historyFile, listHistory, restoreResult } from "@/services/page-history";
 import { pageLocation, pageLocations } from "@/services/page-location";
+import { publishBlocker, publishDraft } from "@/services/draft-publish";
 import { publishPage } from "@/services/page-publish";
 import { decodeBase64Image, runStoredPage, submitPageJob } from "@/services/page-jobs";
 import { MASK_LAYER_FILES, PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
@@ -43,6 +46,8 @@ import { FONT_FILES } from "@/services/typeset-service";
 import { FONT_VARIANTS, TEXT_ALIGNS } from "@/shared/typeset";
 import { imageSize, maskFromImage, maskToPng } from "@/lib/mask";
 import { PAGE_JOBS_DIR, pageDir, PageStore, type StageName } from "@/stores/page-store";
+import { PageSummary, toSummary } from "@/plugins/studio/page-summary";
+import { workspacesPlugin } from "@/plugins/studio/workspaces";
 
 const log = childLogger("studio");
 
@@ -148,39 +153,6 @@ function geometryError(page: Page, geometry: { x: number; y: number; w: number; 
   return null;
 }
 
-const PageLocationSchema = t.Object({
-  series_id: t.Integer(),
-  series_title: t.String(),
-  chapter_id: t.Integer(),
-  chapter_title: t.String(),
-  chapter_number: t.Nullable(t.String()),
-  index: t.Integer(),
-  total: t.Integer(),
-});
-
-const PageSummary = t.Object({
-  id: t.String(),
-  source: t.String(),
-  width: t.Integer(),
-  height: t.Integer(),
-  status: t.String(),
-  error: t.Nullable(t.String()),
-  clean_sfx: t.Boolean(),
-  revision: t.Integer(),
-  created_at: t.String(),
-  updated_at: t.String(),
-  has_result: t.Boolean(),
-  /** Published at least once: this is the version readers get. */
-  published: t.Boolean(),
-  /** The current burn is newer than the last publish, so readers can't see it yet. */
-  has_edits: t.Boolean(),
-  /** Chapter the page belongs to; null = Inbox. */
-  chapter_id: t.Nullable(t.Integer()),
-  name: t.Nullable(t.String()),
-  /** Series, chapter and reading position, for pages filed into a chapter. */
-  location: t.Optional(t.Nullable(PageLocationSchema)),
-});
-
 const StageSchema = t.Object({
   stage: t.String(),
   status: t.String(),
@@ -212,26 +184,6 @@ const PageDetail = t.Object({ page: PageSummary, stages: t.Array(StageSchema), b
 
 const PublishResult = t.Object({ revision: t.Integer(), notified: t.Integer() });
 
-function toSummary(page: Page) {
-  return {
-    id: page.id,
-    source: page.source,
-    width: page.width,
-    height: page.height,
-    status: page.status,
-    error: page.errorMessage,
-    clean_sfx: page.cleanSfx,
-    revision: page.revision,
-    created_at: page.createdAt,
-    updated_at: page.updatedAt,
-    has_result: existsSync(join(pageDir(page.id), "result.png")),
-    published: publishedFile(page.id) !== null,
-    has_edits: hasUnpublishedEdits(page.id),
-    chapter_id: page.chapterId,
-    name: page.name,
-  };
-}
-
 function toStage(row: PageStageRow) {
   return { stage: row.stage, status: row.status, file: row.file, error: row.errorMessage, updated_at: row.updatedAt };
 }
@@ -257,6 +209,8 @@ async function editablePage(id: string): Promise<{ page: Page } | { code: 404 | 
 }
 
 export const studioPlugin = new Elysia({ prefix: "/studio/api" })
+  .use(workspacesPlugin)
+
   .get(
     "/pages",
     async ({ query }) => {
@@ -681,14 +635,22 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
   .post(
     "/pages/:id/rerun",
     async ({ params, body, status }) => {
-      const check = await editablePage(params.id);
-      if ("code" in check) return status(check.code, { error: check.error });
-      // Runs the whole pipeline from the stored original: for imported pages, and after a detection change
-      const result = await runStoredPage(params.id, {
-        source: check.page.source,
-        cleanSfx: body?.clean_sfx ?? check.page.cleanSfx,
-        force: true,
+      // Admission under the page's lock: it marks the page queued, and a publish holding the lock must finish
+      // deciding on the page it read before that happens. The run itself queues behind, outside this lock.
+      const check = await withPageLock(params.id, async () => {
+        const editable = await editablePage(params.id);
+        if ("code" in editable) return editable;
+        return {
+          ...editable,
+          result: await runStoredPage(params.id, {
+            source: editable.page.source,
+            cleanSfx: body?.clean_sfx ?? editable.page.cleanSfx,
+            force: true,
+          }),
+        };
       });
+      if ("code" in check) return status(check.code, { error: check.error });
+      const { result } = check;
       if (!result.ok) return status(result.code === 404 ? 404 : result.code === 400 ? 422 : result.code, { error: result.error });
       return status(202, { job_id: result.job_id });
     },
@@ -704,13 +666,12 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
     ({ params, status }) => withPageLock(params.id, async () => {
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
-      if (!existsSync(join(pageDir(params.id), "result.png"))) return status(409, { error: "page has no result to publish" });
-      // An edit saved after the last render would otherwise publish an image without it
-      const stages = await PageStore.listStages(params.id);
-      if (stages.some((s) => s.stage === "render" && s.status === "stale")) {
-        return status(409, { error: "the page changed since it was last rendered — re-render before publishing" });
-      }
-      return publishPage(params.id);
+      const blocker = publishBlocker(check.page, await PageStore.listStages(params.id));
+      if (blocker) return status(409, { error: blocker });
+      // A draft of a chapter page publishes over that page instead of itself
+      const outcome = await publishDraft(check.page);
+      if (!outcome.ok) return status(outcome.code, { error: outcome.error });
+      return { revision: outcome.revision, notified: outcome.notified };
     }),
     { params: IdParams, response: { 200: PublishResult, 404: ErrBody, 409: ErrBody } },
   )

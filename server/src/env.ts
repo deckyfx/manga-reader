@@ -43,6 +43,16 @@ class EnvConfig {
   get isDev(): boolean { return this.NODE_ENV === "development"; }
   get isProd(): boolean { return this.NODE_ENV === "production"; }
 
+  // ── Where runtime files live ─────────────────────────────────────────────
+
+  /**
+   * The folder everything the server writes goes under: the database, page folders, covers, logs and the secret key.
+   * One setting, so a test run (or a second instance) can be pointed somewhere else wholesale.
+   */
+  get DATA_DIR(): string {
+    return Bun.env.DATA_DIR ?? "./data";
+  }
+
   // ── Secrets at rest ──────────────────────────────────────────────────────
 
   /** 32 bytes of base64 that seal TOTP secrets. Left unset, a key file is made beside the database. */
@@ -52,7 +62,7 @@ class EnvConfig {
 
   /** Where that key is kept when SECRET_KEY isn't set. Back it up with the database. */
   get SECRET_KEY_FILE(): string {
-    return Bun.env.SECRET_KEY_FILE ?? "./data/secret.key";
+    return Bun.env.SECRET_KEY_FILE ?? `${this.DATA_DIR}/secret.key`;
   }
 
   // ── Passkeys ─────────────────────────────────────────────────────────────
@@ -80,19 +90,19 @@ class EnvConfig {
   // ── Database ─────────────────────────────────────────────────────────────
 
   get DATABASE_URL(): string {
-    return Bun.env.DATABASE_URL ?? "./data/ocr.db";
+    return Bun.env.DATABASE_URL ?? `${this.DATA_DIR}/ocr.db`;
   }
 
   // ── Model directories ────────────────────────────────────────────────────
 
   get OCR_MODELS_DIR(): string {
-    return Bun.env.OCR_MODELS_DIR ?? (this.OCR_ENGINE === "baberu" ? "./data/models/baberu" : "./data/models/ocr");
+    return Bun.env.OCR_MODELS_DIR ?? `${this.DATA_DIR}/models/${this.OCR_ENGINE === "baberu" ? "baberu" : "ocr"}`;
   }
-  get TRANSLATE_MODELS_DIR(): string { return Bun.env.TRANSLATE_MODELS_DIR ?? "./data/models/translate"; }
-  get INPAINT_MODELS_DIR(): string { return Bun.env.INPAINT_MODELS_DIR ?? "./data/models/inpaint"; }
-  get BUBBLE_MODELS_DIR(): string { return Bun.env.BUBBLE_MODELS_DIR ?? "./data/models/bubble"; }
-  get TEXT_SEG_MODELS_DIR(): string { return Bun.env.TEXT_SEG_MODELS_DIR ?? "./data/models/textseg"; }
-  get DICT_DIR(): string { return Bun.env.DICT_DIR ?? "./data/models/jdict"; }
+  get TRANSLATE_MODELS_DIR(): string { return Bun.env.TRANSLATE_MODELS_DIR ?? `${this.DATA_DIR}/models/translate`; }
+  get INPAINT_MODELS_DIR(): string { return Bun.env.INPAINT_MODELS_DIR ?? `${this.DATA_DIR}/models/inpaint`; }
+  get BUBBLE_MODELS_DIR(): string { return Bun.env.BUBBLE_MODELS_DIR ?? `${this.DATA_DIR}/models/bubble`; }
+  get TEXT_SEG_MODELS_DIR(): string { return Bun.env.TEXT_SEG_MODELS_DIR ?? `${this.DATA_DIR}/models/textseg`; }
+  get DICT_DIR(): string { return Bun.env.DICT_DIR ?? `${this.DATA_DIR}/models/jdict`; }
   /** Official jitendex.org download link — always redirects to the newest build. */
   get JITENDEX_ZIP_URL(): string {
     return Bun.env.JITENDEX_ZIP_URL
@@ -100,7 +110,7 @@ class EnvConfig {
   }
   get DICT_MODEL_ENABLED(): boolean { return Bun.env.DICT_MODEL_ENABLED !== "false"; }
   /** kuromoji IPADIC tokenizer dictionary (used by /analyze). */
-  get KUROMOJI_DICT_DIR(): string { return Bun.env.KUROMOJI_DICT_DIR ?? "./data/models/kuromoji"; }
+  get KUROMOJI_DICT_DIR(): string { return Bun.env.KUROMOJI_DICT_DIR ?? `${this.DATA_DIR}/models/kuromoji`; }
   /** Base URL serving the kuromoji *.dat.gz files; pinned to the installed @patdx/kuromoji version. */
   get KUROMOJI_DICT_URL(): string {
     return Bun.env.KUROMOJI_DICT_URL || "https://cdn.jsdelivr.net/npm/@patdx/kuromoji@1.0.4/dict";

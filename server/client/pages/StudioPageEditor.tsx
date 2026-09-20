@@ -21,6 +21,7 @@ import {
   type PageImage,
   type StudioBlock,
   type StudioPageDetail,
+  getWorkspace,
 } from "../api";
 import { ActionsMenu, type MenuAction } from "../components/ActionsMenu";
 import { ChapterPicker } from "../components/ChapterPicker";
@@ -127,7 +128,15 @@ export function StudioPageEditor() {
     queryFn: () => getChapter(chapterId ?? 0),
     enabled: chapterId !== null,
   });
-  const neighbours = chapterQ.data?.pages ?? [];
+  // A page in a workspace walks through that workspace, in its order — including one filed into a chapter, which
+  // belongs to both; the workspace is what is being worked on
+  const workspaceId = pageQ.data?.page.workspace_id ?? null;
+  const workspaceQ = useQuery({
+    queryKey: ["workspace", workspaceId],
+    queryFn: () => getWorkspace(workspaceId ?? 0),
+    enabled: workspaceId !== null,
+  });
+  const neighbours = workspaceId !== null ? (workspaceQ.data?.pages ?? []) : (chapterQ.data?.pages ?? []);
   const here = neighbours.findIndex((neighbour) => neighbour.id === id);
   const previousPage = here > 0 ? neighbours[here - 1] : undefined;
   const nextPage = here >= 0 ? neighbours[here + 1] : undefined;
@@ -327,13 +336,13 @@ export function StudioPageEditor() {
     <div className="flex flex-col h-full">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-800">
         <Link
-          to={page.location ? `/manage/chapters/${page.location.chapter_id}` : "/studio"}
+          to={workspaceId !== null ? `/studio/w/${workspaceId}` : page.location ? `/manage/chapters/${page.location.chapter_id}` : "/studio"}
           className="text-gray-400 hover:text-white"
-          title={page.location ? "Back to the chapter" : "All pages"}
+          title={workspaceId !== null ? "Back to the workspace" : page.location ? "Back to the chapter" : "All pages"}
         >
           <ArrowLeft size={18} />
         </Link>
-        {page.location ? (
+        {workspaceId === null && page.location ? (
           <>
             <h1 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
               <Link to={`/read/series/${page.location.series_id}`} className="truncate text-gray-400 hover:text-white">{page.location.series_title}</Link>
@@ -361,6 +370,39 @@ export function StudioPageEditor() {
                 <ChevronRight size={14} />
               </Link>
             </div>
+          </>
+        ) : workspaceId !== null ? (
+          <>
+            <h1 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
+              <Link to={`/studio/w/${workspaceId}`} className="truncate text-gray-400 hover:text-white">
+                {workspaceQ.data?.workspace.name ?? "Workspace"}
+              </Link>
+              <span className="text-gray-600">›</span>
+              <span className="truncate">{page.name ?? `Page ${page.id.slice(-8)}`}</span>
+            </h1>
+            {here >= 0 && (
+              <div className="flex items-center gap-1 text-xs text-gray-500">
+                <Link
+                  to={previousPage ? `/studio/pages/${previousPage.id}` : "#"}
+                  aria-disabled={!previousPage}
+                  title="Previous page in the workspace"
+                  aria-label="Previous page in the workspace"
+                  className={`rounded p-1 ${previousPage ? "hover:bg-gray-800 hover:text-white" : "pointer-events-none opacity-30"}`}
+                >
+                  <ChevronLeft size={14} />
+                </Link>
+                <span className="tabular-nums">page {here + 1}/{neighbours.length}</span>
+                <Link
+                  to={nextPage ? `/studio/pages/${nextPage.id}` : "#"}
+                  aria-disabled={!nextPage}
+                  title="Next page in the workspace"
+                  aria-label="Next page in the workspace"
+                  className={`rounded p-1 ${nextPage ? "hover:bg-gray-800 hover:text-white" : "pointer-events-none opacity-30"}`}
+                >
+                  <ChevronRight size={14} />
+                </Link>
+              </div>
+            )}
           </>
         ) : (
           <h1 className="truncate text-base font-semibold">{page.name ?? `Page ${page.id.slice(-8)}`}</h1>
@@ -551,7 +593,11 @@ export function StudioPageEditor() {
             setDiscarding(false);
             if (deleted) {
               qc.removeQueries({ queryKey: ["studio-page", id] });
-              navigate(page.location ? `/manage/chapters/${page.location.chapter_id}` : "/studio");
+              navigate(workspaceId !== null
+                ? `/studio/w/${workspaceId}`
+                : page.location
+                  ? `/manage/chapters/${page.location.chapter_id}`
+                  : "/studio");
             } else {
               void qc.invalidateQueries({ queryKey: ["studio-page", id] });
             }

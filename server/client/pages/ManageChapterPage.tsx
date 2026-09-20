@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, Download, Inbox, Loader2, Play, RefreshCw, Send, SquarePen, Upload, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Download, Inbox, Layers, Loader2, Play, RefreshCw, Send, SquarePen, Upload, X } from "lucide-react";
 import {
   chapterExportUrl,
   copyPageIntoChapter,
@@ -10,6 +10,7 @@ import {
   importChapterPages,
   listInbox,
   publishChapterEdits,
+  sendChapterToStudio,
   publishPageEdits,
   readPageImageUrl,
   reorderChapterPages,
@@ -20,12 +21,15 @@ import {
 } from "../api";
 import { useConfirm } from "../components/ConfirmDialog";
 import { StatusBadge } from "../components/StatusBadge";
+import { useToast } from "../components/Toast";
 
 /** One chapter's pages: importing, reordering, translating the whole chapter and exporting it. */
 export function ManageChapterPage() {
   const { id = "" } = useParams();
   const chapterId = Number(id);
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const toast = useToast();
   const confirm = useConfirm();
   const chapterQ = useQuery({
     queryKey: ["chapter", chapterId],
@@ -100,6 +104,17 @@ export function ManageChapterPage() {
   });
   const rerunM = useMutation({ mutationFn: (pageId: string) => rerunPage(pageId, { clean_sfx: cleanSfx }), onSuccess: reload });
   const publishPageM = useMutation({ mutationFn: (pageId: string) => publishPageEdits(pageId), onSuccess: reload });
+  // Working on a chapter in the Studio means draft copies: readers keep the published chapter until a draft goes back
+  const toStudioM = useMutation({
+    mutationFn: () => sendChapterToStudio(chapterId),
+    onSuccess: (report) => {
+      void qc.invalidateQueries({ queryKey: ["workspaces"] });
+      // A page still in the pipeline has no draft yet; the workspace would otherwise look complete
+      for (const entry of report.skipped) toast.error(`A page wasn't copied: ${entry.reason}`);
+      if (report.copied === 0 && report.existing > 0) toast.info("Every page already has a draft here");
+      navigate(`/studio/w/${report.workspace_id}`);
+    },
+  });
   const publishChapterM = useMutation({
     mutationFn: () => publishChapterEdits(chapterId),
     onSuccess: (detail) => {
@@ -112,7 +127,7 @@ export function ManageChapterPage() {
   const series = chapterQ.data?.series;
   const pages = chapterQ.data?.pages ?? [];
   const error = chapterQ.error ?? importM.error ?? reorderM.error ?? runM.error ?? rerunM.error ?? unfileM.error ?? addM.error
-    ?? publishPageM.error ?? publishChapterM.error;
+    ?? publishPageM.error ?? publishChapterM.error ?? toStudioM.error;
 
   // Pages holding work readers can't see yet
   const unpublished = pages.filter((page) => page.has_edits).length;
@@ -189,6 +204,17 @@ export function ManageChapterPage() {
             >
               {publishChapterM.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
               Publish {unpublished} page{unpublished === 1 ? "" : "s"}
+            </button>
+          )}
+          {pages.length > 0 && (
+            <button
+              onClick={() => toStudioM.mutate()}
+              disabled={toStudioM.isPending || running}
+              title="Open these pages in the Studio as drafts; readers keep this chapter until a draft is published"
+              className="flex items-center gap-2 rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-gray-200 transition-colors hover:bg-gray-700 disabled:opacity-50"
+            >
+              {toStudioM.isPending ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} />}
+              Send to Studio
             </button>
           )}
           {pages.length > 0 && (

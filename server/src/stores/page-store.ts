@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { db } from "@/db/index";
+import { env } from "@/env";
 import { childLogger } from "@/lib/logger";
 import { pageBlocks, pages, pageStages, type NewPage, type Page, type PageStageRow } from "@/db/schema";
 import type { BlockShape, JobRepository, PageBlock, PageJob } from "@/services/page-pipeline";
@@ -25,7 +26,7 @@ export interface BlockGeometry {
 }
 
 /** Stage images of every page live in `<PAGE_JOBS_DIR>/<page id>/`. */
-export const PAGE_JOBS_DIR = "./data/jobs";
+export const PAGE_JOBS_DIR = `${env.DATA_DIR}/jobs`;
 
 export const STAGE_NAMES = ["detect", "ocr", "translate", "clean_text", "clean_sfx", "render"] as const;
 export type StageName = (typeof STAGE_NAMES)[number];
@@ -80,7 +81,8 @@ export class PageStore {
    * nothing more — each is a complete page — so it is left unguarded rather than serialised.
    */
   static async findOrCreate(imageHash: string, source: string): Promise<{ page: Page; created: boolean }> {
-    const inbox = and(eq(pages.imageHash, imageHash), isNull(pages.chapterId));
+    // Loose only: a workspace's page belongs to that workspace, and must not be handed back to the extension
+    const inbox = and(eq(pages.imageHash, imageHash), isNull(pages.chapterId), isNull(pages.workspaceId));
     const existing = await db.query.pages.findFirst({ where: inbox, orderBy: desc(pages.createdAt) });
     if (existing) return { page: existing, created: false };
     const [row] = await db.insert(pages).values({ id: randomUUIDv7(), imageHash, source }).returning();
@@ -96,13 +98,33 @@ export class PageStore {
   }
 
   /**
+   * A page appended to a Studio workspace at `sortOrder` (its import position); never reuses an existing page.
+   * `originPageId` marks it as a draft copy of a chapter page, which it replaces when it is published.
+   */
+  static async createInWorkspace(
+    imageHash: string,
+    source: string,
+    workspaceId: number,
+    sortOrder: number,
+    name: string | null,
+    originPageId: string | null = null,
+  ): Promise<Page> {
+    const [row] = await db.insert(pages).values({ id: randomUUIDv7(), imageHash, source, workspaceId, sortOrder, name, originPageId }).returning();
+    if (!row) throw new Error("failed to create page");
+    return row;
+  }
+
+  /**
    * Pages for the Studio's list: the Inbox, the pages inside chapters, or both, newest first. `search` matches the
    * page name and its source.
    */
   static async listFiltered(options: { filed?: "inbox" | "chapter" | "all"; chapterId?: number; search?: string; limit?: number } = {}): Promise<Page[]> {
     const filters = [];
     if (options.chapterId !== undefined) filters.push(eq(pages.chapterId, options.chapterId));
-    else if (options.filed === "inbox") filters.push(isNull(pages.chapterId));
+    // Pages in a workspace are listed with it, not among the loose ones. A chapter-scoped query still returns them:
+    // asking for a chapter's pages means all of them, wherever they are being worked on.
+    else if (options.filed === "inbox") filters.push(isNull(pages.chapterId), isNull(pages.workspaceId));
+    else if (options.filed === "all") filters.push(isNull(pages.workspaceId));
     else if (options.filed === "chapter") filters.push(isNotNull(pages.chapterId));
     const search = options.search?.trim();
     if (search) {
@@ -144,9 +166,12 @@ export class PageStore {
     return db.select().from(pages).where(eq(pages.chapterId, chapterId)).orderBy(pages.sortOrder, pages.createdAt, pages.id);
   }
 
-  /** Pages not filed into a chapter yet (extension jobs and uploads), newest first. */
+  /**
+   * Pages not filed into a chapter yet (extension jobs and uploads), newest first. Workspace pages are left out, as
+   * in the Studio's list: they are filed with their workspace, not one at a time.
+   */
   static async listInbox(): Promise<Page[]> {
-    return db.select().from(pages).where(isNull(pages.chapterId)).orderBy(desc(pages.createdAt));
+    return db.select().from(pages).where(and(isNull(pages.chapterId), isNull(pages.workspaceId))).orderBy(desc(pages.createdAt));
   }
 
   /** How many pages each of these chapters holds. */

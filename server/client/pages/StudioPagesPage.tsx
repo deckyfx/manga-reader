@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, FolderInput, Loader2, Plus, Search, Trash2, X } from "lucide-react";
-import { listPages, pageFileUrl, type PageScope, type StudioPageSummary } from "../api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { BookOpen, FolderInput, FolderPlus, Layers, Loader2, Plus, Search, Trash2, X } from "lucide-react";
+import { createWorkspace, listPages, listWorkspaces, pageFileUrl, type PageScope, type StudioPageSummary } from "../api";
 import { ChapterPicker } from "../components/ChapterPicker";
 import { DiscardPageDialog } from "../components/DiscardPageDialog";
+import { Modal } from "../components/Modal";
 import { NewPageDialog } from "../components/NewPageDialog";
-import { StatusBadge } from "../components/StatusBadge";
+import { StudioPageCard, pageLabel } from "../components/StudioPageCard";
+import { useToast } from "../components/Toast";
 
 const SCOPE_KEY = "studio-scope";
 const SCOPES: { value: PageScope; label: string; hint: string }[] = [
@@ -24,20 +26,7 @@ function readScope(): PageScope {
   }
 }
 
-/** What a page is called in the Studio: its name, else the file name of its source, else the tail of its id. */
-function pageLabel(page: StudioPageSummary): string {
-  if (page.name) return page.name;
-  if (page.source === "upload" || page.source === "import") return page.id.slice(-8);
-  try {
-    const file = new URL(page.source).pathname.split("/").filter(Boolean).pop();
-    if (file) return decodeURIComponent(file);
-  } catch {
-    // Not a URL (an extension source string): fall through to the id
-  }
-  return page.id.slice(-8);
-}
-
-/** The Studio's pages: drafts waiting in the Inbox, and the chapter pages being worked on. */
+/** The Studio: the workspaces being worked on, then the loose pages (Inbox drafts and chapter pages). */
 export function StudioPagesPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -46,6 +35,8 @@ export function StudioPagesPage() {
   const [filing, setFiling] = useState<StudioPageSummary | null>(null);
   const [discarding, setDiscarding] = useState<StudioPageSummary | null>(null);
   const [scope, setScopeState] = useState<PageScope>(readScope);
+  const [newWorkspace, setNewWorkspace] = useState<string | null>(null);
+  const toast = useToast();
 
   const setScope = (next: PageScope) => {
     setScopeState(next);
@@ -59,6 +50,19 @@ export function StudioPagesPage() {
   const query = { filed: scope, ...(search.trim() ? { q: search.trim() } : {}) };
   const pagesQ = useQuery({ queryKey: ["studio-pages", query], queryFn: () => listPages(query), refetchInterval: 5000 });
   const pages = pagesQ.data ?? [];
+  // Workspaces hold their own pages, so they are listed above the loose ones rather than among them
+  const workspacesQ = useQuery({ queryKey: ["workspaces"], queryFn: () => listWorkspaces(), refetchInterval: 10_000 });
+  const workspaces = workspacesQ.data ?? [];
+
+  const createM = useMutation({
+    mutationFn: (name: string) => createWorkspace({ name }),
+    onSuccess: (workspace) => {
+      setNewWorkspace(null);
+      void qc.invalidateQueries({ queryKey: ["workspaces"] });
+      navigate(`/studio/w/${workspace.id}`);
+    },
+    onError: (error) => toast.error(error.message),
+  });
 
   return (
     <div className="flex h-full flex-col">
@@ -96,6 +100,13 @@ export function StudioPagesPage() {
           )}
         </label>
         <button
+          onClick={() => setNewWorkspace("")}
+          title="A folder of pages worked on together"
+          className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-800"
+        >
+          <FolderPlus size={14} /> New workspace
+        </button>
+        <button
           onClick={() => setCreating(true)}
           className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-indigo-500"
         >
@@ -104,6 +115,51 @@ export function StudioPagesPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
+        {workspacesQ.isError && (
+          <p className="mb-4 text-sm text-red-400">
+            The workspaces couldn't be loaded: {workspacesQ.error.message}{" "}
+            <button type="button" onClick={() => void workspacesQ.refetch()} className="text-gray-300 underline hover:text-white">Try again</button>
+          </p>
+        )}
+        {workspaces.length > 0 && (
+          <section className="mb-6">
+            <h2 className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+              <Layers size={13} /> Workspaces
+            </h2>
+            <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
+              {workspaces.map((workspace) => (
+                <Link
+                  key={workspace.id}
+                  to={`/studio/w/${workspace.id}`}
+                  className="flex gap-3 overflow-hidden rounded-xl border border-gray-800 bg-gray-900 p-2 transition-colors hover:border-indigo-500"
+                >
+                  <div className="h-20 w-14 shrink-0 overflow-hidden rounded-lg bg-gray-950">
+                    {workspace.first_page_id && (
+                      <img src={pageFileUrl(workspace.first_page_id, "original.png", workspace.updated_at)} alt="" loading="lazy" className="h-full w-full object-cover" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm text-gray-200" title={workspace.name}>{workspace.name}</div>
+                    <div className="text-[11px] text-gray-500">
+                      {workspace.pages} page{workspace.pages === 1 ? "" : "s"}
+                      {workspace.running > 0 && <span className="text-indigo-400"> · {workspace.running} running</span>}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                      {workspace.done > 0 && <span className="rounded-full bg-emerald-900/50 px-1.5 text-emerald-300">{workspace.done} done</span>}
+                      {workspace.idle > 0 && <span className="rounded-full bg-gray-800 px-1.5 text-gray-400">{workspace.idle} to do</span>}
+                      {workspace.stale > 0 && <span className="rounded-full bg-amber-900/50 px-1.5 text-amber-300">{workspace.stale} stale</span>}
+                      {workspace.error > 0 && <span className="rounded-full bg-red-900/50 px-1.5 text-red-300">{workspace.error} failed</span>}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {workspaces.length > 0 && (
+          <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">Loose pages</h2>
+        )}
         {pagesQ.isLoading && <Loader2 className="animate-spin text-gray-500" />}
         {pagesQ.error && <p className="text-sm text-red-400">{pagesQ.error.message}</p>}
         {!pagesQ.isLoading && pages.length === 0 && (
@@ -120,72 +176,43 @@ export function StudioPagesPage() {
           {pages.map((page) => {
             const busy = page.status === "queued" || page.status === "running";
             return (
-              <div key={page.id} className="group relative">
-                <Link
-                  to={`/studio/pages/${page.id}`}
-                  className="flex flex-col overflow-hidden rounded-xl border border-gray-800 bg-gray-900 transition-colors hover:border-indigo-500"
-                >
-                  <div className="aspect-2/3 overflow-hidden bg-gray-950">
-                    <img
-                      src={pageFileUrl(page.id, page.has_result ? "result.png" : "original.png", `${page.updated_at}-${page.revision}`)}
-                      alt=""
-                      loading="lazy"
-                      className="h-full w-full object-contain"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between gap-2 px-3 pt-2">
-                    <StatusBadge status={page.status} />
-                    {page.has_edits ? (
-                      <span
-                        className="rounded-full bg-amber-900/60 px-2 py-0.5 text-xs font-medium text-amber-300"
-                        title={page.published ? "Burned since the last publish — readers still see the published version" : "Not published yet"}
+              <StudioPageCard
+                key={page.id}
+                page={page}
+                actions={
+                  <>
+                    {page.location ? (
+                      <Link
+                        to={`/manage/chapters/${page.location.chapter_id}`}
+                        title={`${page.location.series_title} · ${page.location.chapter_title}`}
+                        aria-label="Open the chapter in Manage"
+                        className="rounded-md bg-gray-900/90 p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white"
                       >
-                        {page.published ? "edited" : "unpublished"}
-                      </span>
-                    ) : page.published ? (
-                      <span className="text-xs text-gray-500" title={`Published as revision ${page.revision}`}>rev {page.revision}</span>
-                    ) : null}
-                  </div>
-                  <div className="truncate px-3 pt-1 text-xs text-gray-300" title={page.source}>{pageLabel(page)}</div>
-                  <div className="truncate px-3 pb-2 text-[11px] text-gray-500">
-                    {page.location
-                      ? `${page.location.chapter_title} · page ${page.location.index}/${page.location.total}`
-                      : `${page.width}×${page.height} · draft`}
-                  </div>
-                </Link>
-
-                <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                  {page.location ? (
-                    <Link
-                      to={`/manage/chapters/${page.location.chapter_id}`}
-                      title={`${page.location.series_title} · ${page.location.chapter_title}`}
-                      aria-label="Open the chapter in Manage"
-                      className="rounded-md bg-gray-900/90 p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white"
-                    >
-                      <BookOpen size={14} />
-                    </Link>
-                  ) : (
+                        <BookOpen size={14} />
+                      </Link>
+                    ) : (
+                      <button
+                        onClick={() => setFiling(page)}
+                        disabled={busy}
+                        title="File this draft into a chapter"
+                        aria-label="File into a chapter"
+                        className="rounded-md bg-gray-900/90 p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white disabled:opacity-40"
+                      >
+                        <FolderInput size={14} />
+                      </button>
+                    )}
                     <button
-                      onClick={() => setFiling(page)}
+                      onClick={() => setDiscarding(page)}
                       disabled={busy}
-                      title="File this draft into a chapter"
-                      aria-label="File into a chapter"
-                      className="rounded-md bg-gray-900/90 p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white disabled:opacity-40"
+                      title={busy ? "Can't discard while the page is being translated" : "Discard page"}
+                      aria-label="Discard page"
+                      className="rounded-md bg-gray-900/90 p-1.5 text-gray-400 hover:bg-gray-800 hover:text-red-400 disabled:opacity-40"
                     >
-                      <FolderInput size={14} />
+                      <Trash2 size={14} />
                     </button>
-                  )}
-                  <button
-                    onClick={() => setDiscarding(page)}
-                    disabled={busy}
-                    title={busy ? "Can't discard while the page is being translated" : "Discard page"}
-                    aria-label="Discard page"
-                    className="rounded-md bg-gray-900/90 p-1.5 text-gray-400 hover:bg-gray-800 hover:text-red-400 disabled:opacity-40"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
+                  </>
+                }
+              />
             );
           })}
         </div>
@@ -211,6 +238,45 @@ export function StudioPagesPage() {
           onClose={() => setFiling(null)}
           onFiled={() => setFiling(null)}
         />
+      )}
+
+      {newWorkspace !== null && (
+        <Modal
+          title="New workspace"
+          onClose={() => setNewWorkspace(null)}
+          footer={
+            <>
+              <button onClick={() => setNewWorkspace(null)} className="rounded-lg px-3 py-1.5 text-sm text-gray-400 hover:bg-gray-800">Cancel</button>
+              <button
+                onClick={() => createM.mutate(newWorkspace.trim())}
+                disabled={!newWorkspace.trim() || createM.isPending}
+                className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {createM.isPending && <Loader2 size={14} className="animate-spin" />} Create
+              </button>
+            </>
+          }
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (newWorkspace.trim()) createM.mutate(newWorkspace.trim());
+            }}
+          >
+            <label className="block text-sm">
+              <span className="mb-1 block text-gray-400">Name</span>
+              <input
+                value={newWorkspace}
+                onChange={(e) => setNewWorkspace(e.target.value)}
+                placeholder="Chapter 12"
+                maxLength={200}
+                autoFocus
+                className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+              />
+            </label>
+            <p className="mt-2 text-xs text-gray-500">A folder of pages worked on together: add pages to it, run them all, then file them into a chapter.</p>
+          </form>
+        </Modal>
       )}
 
       {discarding && (

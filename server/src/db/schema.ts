@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 // ── OCR / Translate logs (mirrors C# OcrLog / TranslateLog) ────────────────
@@ -151,11 +151,47 @@ export const pages = sqliteTable("pages", {
   cleanSfx: integer("clean_sfx", { mode: "boolean" }).notNull().default(false),
   /** Bumped on every publish so open extension tabs reload the result. */
   revision: integer("revision").notNull().default(0),
+  /**
+   * The Studio workspace this page is being worked on in; null = loose. Deleting a workspace never deletes its pages:
+   * they fall back to loose. Within a workspace, `sortOrder` is the order the pages were imported in.
+   */
+  workspaceId: integer("workspace_id").references((): AnySQLiteColumn => workspaces.id, { onDelete: "set null" }),
+  /**
+   * For a draft copy made by "Send chapter to Studio": the chapter page it will replace when it is published. The
+   * chapter keeps serving the original until then.
+   */
+  originPageId: text("origin_page_id").references((): AnySQLiteColumn => pages.id, { onDelete: "set null" }),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 }, (table) => ({
   pageHashIdx: index("pages_image_hash_idx").on(table.imageHash),
   pageChapterIdx: index("pages_chapter_sort_idx").on(table.chapterId, table.sortOrder),
+  pageWorkspaceIdx: index("pages_workspace_sort_idx").on(table.workspaceId, table.sortOrder),
+  pageOriginIdx: index("pages_origin_idx").on(table.originPageId),
+}));
+
+/**
+ * A folder of Studio pages: a chapter imported from the browser, a batch of uploads, or a chapter sent to the Studio
+ * to be worked on as drafts. Pages belong to at most one.
+ */
+export const workspaces = sqliteTable("workspaces", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  /** Set when the workspace works on a chapter's pages (sent to the Studio, or filed into one). */
+  chapterId: integer("chapter_id").references(() => chapters.id, { onDelete: "set null" }),
+  /** Who made it. Kept when the account goes, as a nameless workspace rather than a lost one. */
+  createdBy: integer("created_by").references((): AnySQLiteColumn => users.id, { onDelete: "set null" }),
+  /** The page an import came from, so importing the same chapter again can offer to extend this one. */
+  sourceUrl: text("source_url"),
+  /** Which extractor read it ("rawkuma", "generic", …). */
+  sourceProvider: text("source_provider"),
+  /** Set by extractors for adult sites, and carried into a series filed from it. */
+  adult: integer("adult", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  workspacesSourceIdx: index("workspaces_source_url_idx").on(table.sourceUrl),
+  workspacesChapterIdx: index("workspaces_chapter_idx").on(table.chapterId),
 }));
 
 export const pageStages = sqliteTable("page_stages", {
@@ -385,3 +421,6 @@ export type NewCredential = typeof credentials.$inferInsert;
 export type OauthAccount = typeof oauthAccounts.$inferSelect;
 
 export type ServerSetting = typeof serverSettings.$inferSelect;
+
+export type Workspace = typeof workspaces.$inferSelect;
+export type NewWorkspace = typeof workspaces.$inferInsert;

@@ -188,6 +188,48 @@ export const pageEventsUrl = (id: string) => `/api/translate-page/${id}/events`;
 
 export type { PageJobEvent } from "../../src/stores/translation-job-store";
 
+// ── Workspaces: folders of Studio pages ───────────────────────────────────────
+
+export const listWorkspaces = (query: { source_url?: string } = {}) => unwrap(api.studio.api.workspaces.get({ query }));
+
+export const getWorkspace = (id: number) => unwrap(api.studio.api.workspaces({ id }).get());
+
+export const createWorkspace = (body: { name: string; source_url?: string; source_provider?: string; adult?: boolean }) =>
+  unwrap(api.studio.api.workspaces.post(body));
+
+export const renameWorkspace = (id: number, body: { name?: string; adult?: boolean }) =>
+  unwrap(api.studio.api.workspaces({ id }).patch(body));
+
+/** Removes the workspace only: its pages stay in the Studio, loose. */
+export const deleteWorkspace = (id: number) => unwrap(api.studio.api.workspaces({ id }).delete());
+
+/**
+ * Appends images at `startIndex` (0-based). A batch sent again skips the positions it already stored, so a retry
+ * after a dropped connection can't duplicate pages.
+ */
+export const uploadWorkspacePages = (id: number, files: File[], startIndex: number, sources?: string[]) =>
+  unwrap(api.studio.api.workspaces({ id }).pages.post({ files, start_index: startIndex, ...(sources ? { sources } : {}) }));
+
+/** Translates the pages that need it; 409 when a run is already going. */
+export const startWorkspaceRun = (id: number, body: { force?: boolean; clean_sfx?: boolean } = {}) =>
+  unwrap(api.studio.api.workspaces({ id }).run.post(body));
+
+/** Progress of that run, or `{ pending }` when none has started. */
+export const getWorkspaceRun = (id: number) => unwrap(api.studio.api.workspaces({ id }).run.get());
+
+/** Publishes every page of the workspace holding work readers can't see yet (a draft publishes over its origin). */
+export const publishWorkspace = (id: number) => unwrap(api.studio.api.workspaces({ id }).publish.post());
+
+/** Works on a chapter in the Studio: a workspace of draft copies, made or extended. */
+export const sendChapterToStudio = (id: number) => unwrap(api.manage.api.chapters({ id })["to-studio"].post());
+
+/** Moves the workspace's pages into a chapter, in order, publishing the translated ones. */
+export const fileWorkspace = (id: number, chapterId: number) =>
+  unwrap(api.studio.api.workspaces({ id }).file.post({ chapter_id: chapterId }));
+
+export type StudioWorkspace = Awaited<ReturnType<typeof listWorkspaces>>[number];
+export type WorkspaceRunState = Awaited<ReturnType<typeof getWorkspaceRun>>;
+
 export type { FontVariant, LetteringPaths, TextAlign, TextPatch, TextStyle } from "../../src/shared/typeset";
 
 /**

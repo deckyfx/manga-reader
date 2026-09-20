@@ -48,3 +48,19 @@ export function withPageLock<T>(pageId: string, task: () => Promise<T>): Promise
   });
   return result;
 }
+
+/**
+ * `withPageLock` for a workspace: appends to one workspace run one after another, so a retried upload batch sees the
+ * pages the first attempt stored. Page ids never contain a colon, so the keys can't collide.
+ */
+export function withWorkspaceLock<T>(workspaceId: number, task: () => Promise<T>): Promise<T> {
+  return withPageLock(`workspace:${workspaceId}`, task);
+}
+
+/**
+ * `withPageLock` for a chapter, for steps that read then write a chapter's Studio workspace. Page ids never contain
+ * a colon, so the keys can't collide.
+ */
+export function withChapterLock<T>(chapterId: number, task: () => Promise<T>): Promise<T> {
+  return withPageLock(`chapter:${chapterId}`, task);
+}

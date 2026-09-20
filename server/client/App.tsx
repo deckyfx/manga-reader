@@ -7,6 +7,7 @@ import { AuthProvider } from "./auth/AuthProvider";
 import { Layout } from "./components/Layout";
 import { HomePage } from "./pages/HomePage";
 import { StudioPagesPage } from "./pages/StudioPagesPage";
+import { StudioWorkspacePage } from "./pages/StudioWorkspacePage";
 import { StudioPageEditor } from "./pages/StudioPageEditor";
 import { ReadPage } from "./pages/ReadPage";
 import { ManagePage } from "./pages/ManagePage";
@@ -60,6 +61,7 @@ export function App() {
             <Route path="home" element={<HomePage />} />
             <Route path="studio" element={<StudioPagesPage />} />
             <Route path="studio/pages/:id" element={<StudioPageEditorRoute />} />
+            <Route path="studio/w/:id" element={<StudioWorkspacePage />} />
             <Route path="read" element={<ReadPage />} />
             <Route path="read/series/:id" element={<SeriesPage />} />
             <Route path="read/chapters/:id/pages/:n" element={<ReaderPage />} />

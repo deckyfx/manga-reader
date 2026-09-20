@@ -7,9 +7,10 @@ import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { MAX_IMAGE_BYTES } from "@/services/page-jobs";
 import { normalisePage } from "@/services/page-pipeline";
+import { env } from "@/env";
 
 /** Covers live beside the page folders, under the server's data directory. */
-export const COVERS_DIR = "./data/covers";
+export const COVERS_DIR = `${env.DATA_DIR}/covers`;
 
 /** Absolute path of a stored cover; `name` is what the series row holds. */
 export const coverFilePath = (name: string): string => join(COVERS_DIR, name);

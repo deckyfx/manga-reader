@@ -16,17 +16,24 @@
 import pino from "pino";
 import { mkdirSync } from "node:fs";
 
-const LOG_DIR = "./data/logs";
+// Read directly rather than through env.ts, so the logger stays importable from anywhere without a cycle
+const LOG_DIR = `${Bun.env.DATA_DIR ?? "./data"}/logs`;
 mkdirSync(LOG_DIR, { recursive: true });
 
 const isDev = (Bun.env.NODE_ENV ?? "development") !== "production";
+/**
+ * A test run logs warnings and worse only: an info line per request would bury the one failure worth reading. Still
+ * written, so a failing test's server-side complaint is there to see.
+ */
+const isTest = Bun.env.NODE_ENV === "test";
+const consoleLevel = isTest ? "warn" : isDev ? "debug" : "info";
 
 const transport = pino.transport({
   targets: [
     // ── Colourful terminal ──────────────────────────────────────────────────
     {
       target: "pino-pretty",
-      level: isDev ? "debug" : "info",
+      level: consoleLevel,
       options: {
         colorize: true,
         translateTime: "SYS:HH:MM:ss.l",
@@ -56,6 +63,7 @@ const transport = pino.transport({
 
 export const logger = pino(
   {
+    // The lowest level any target wants: the root filters first, so a higher level here would starve the file
     level: isDev ? "debug" : "info",
     base: { pid: process.pid },
     timestamp: pino.stdTimeFunctions.isoTime,

@@ -10,6 +10,7 @@
     "start": "./app",
     "build": "bun run embed:migrations && bun run typecheck && bun run build.ts",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "types:api": "tsc -p tsconfig.api.json",
     "db:generate": "drizzle-kit generate && bun run embed:migrations",
     "db:migrate": "bun run src/db/migrate.ts",
