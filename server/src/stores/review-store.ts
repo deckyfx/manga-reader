@@ -54,10 +54,16 @@ export class ReviewStore {
     return row;
   }
 
-  /** Removes one review. Anyone may remove their own; an admin may remove anyone's, which is what `userId` omits. */
-  static async remove(id: number, userId?: number): Promise<boolean> {
-    const filters = [eq(reviews.id, id)];
-    if (userId !== undefined) filters.push(eq(reviews.userId, userId));
+  /**
+   * Removes one review of one thing. Anyone may remove their own; an admin may remove anyone's, which is what
+   * omitting `userId` means.
+   *
+   * The target is part of the query, not just of the URL: a review id alone would let a request about one series
+   * delete the caller's review of something else, and answer with the wrong page afterwards.
+   */
+  static async remove(where: { id: number; target: ReviewTarget; targetId: number; userId?: number }): Promise<boolean> {
+    const filters = [eq(reviews.id, where.id), eq(reviews.target, where.target), eq(reviews.targetId, where.targetId)];
+    if (where.userId !== undefined) filters.push(eq(reviews.userId, where.userId));
     const removed = await db.delete(reviews).where(and(...filters)).returning({ id: reviews.id });
     return removed.length > 0;
   }

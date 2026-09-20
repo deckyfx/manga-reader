@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Star, Trash2 } from "lucide-react";
@@ -58,6 +58,13 @@ export function Reviews({ target, id }: { target: "series" | "chapter"; id: numb
   const [rating, setRating] = useState(0);
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState(false);
+
+  // Moving between series without remounting would otherwise carry a half-written review to the next one
+  useEffect(() => {
+    setRating(0);
+    setBody("");
+    setEditing(false);
+  }, [target, id]);
 
   const key = ["reviews", target, id];
   const reviewsQ = useQuery({

@@ -113,6 +113,34 @@ describe("the backfill", () => {
     expect(after?.revision).toBe(before!.revision);
   });
 
+  test("a page whose render went stale is left alone, however it got into the chapter", async () => {
+    const { cookie } = await signedIn("contributor");
+    const { pageIds } = await chapterWithPages(cookie, 1);
+    const [pageId] = pageIds;
+    await burn(pageId);
+    // The state filing a workspace leaves behind when it refuses to publish a page: a burn, and an edit since
+    await PageStore.setStage(pageId, "render", "stale");
+
+    expect(await pagesNeedingPublish()).not.toContain(pageId);
+    const report = await backfillPublishes();
+    expect(report.published).not.toContain(pageId);
+    expect(publishedFile(pageId)).toBeNull();
+
+    // Re-rendered, it becomes ordinary work the backfill will publish
+    await PageStore.setStage(pageId, "render", "fresh");
+    expect(await pagesNeedingPublish()).toContain(pageId);
+  });
+
+  test("a page still being translated is left alone", async () => {
+    const { cookie } = await signedIn("contributor");
+    const { pageIds } = await chapterWithPages(cookie, 1);
+    const [pageId] = pageIds;
+    await burn(pageId);
+    await PageStore.update(pageId, { status: "running" });
+
+    expect(await pagesNeedingPublish()).not.toContain(pageId);
+  });
+
   test("an Inbox draft holding a burn is none of its business", async () => {
     // Straight to the store: the pipeline route needs models, and what matters here is a page nobody can read
     const { page } = await PageStore.findOrCreate(`hash-${crypto.randomUUID()}`, "upload");

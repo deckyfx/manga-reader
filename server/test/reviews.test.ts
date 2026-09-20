@@ -109,6 +109,20 @@ describe("who may review, and who may remove one", () => {
     expect(after.body.rating).toEqual({ average: 1, count: 1 });
   });
 
+  test("a delete is scoped to the thing in the URL, not just the review id", async () => {
+    const owner = await signedIn("contributor");
+    const reader = await signedIn("reader");
+    const seriesId = await aSeries(owner.cookie);
+    const chapterId = await aChapter(owner.cookie, seriesId);
+    const onSeries = await call<ReviewPage>("PUT", `/manage/api/reviews/series/${seriesId}`, { rating: 5 }, { cookie: reader.cookie });
+    const reviewId = onSeries.body.reviews[0].id;
+
+    // The same id and the same caller, but a URL about something else: their own review must survive it
+    expect((await call("DELETE", `/manage/api/reviews/chapter/${chapterId}/${reviewId}`, undefined, { cookie: reader.cookie })).status).toBe(404);
+    expect((await call("DELETE", `/manage/api/reviews/series/${seriesId + 12345}/${reviewId}`, undefined, { cookie: reader.cookie })).status).toBe(404);
+    expect(await ReviewStore.list("series", seriesId)).toHaveLength(1);
+  });
+
   test("an admin may remove anybody's", async () => {
     const admin = await signedIn("admin");
     const reader = await signedIn("reader");

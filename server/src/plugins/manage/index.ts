@@ -827,8 +827,13 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       if (!principal) return status(401, { error: "sign in to remove a review" });
       // Yours to remove; an admin may remove anyone's, which is what passing no user id means
       const admin = principal.user.role === "admin";
-      const removed = await ReviewStore.remove(params.reviewId, admin ? undefined : principal.user.id);
-      if (!removed) return status(404, { error: "no such review of yours" });
+      const removed = await ReviewStore.remove({
+        id: params.reviewId,
+        target: params.target,
+        targetId: params.id,
+        ...(admin ? {} : { userId: principal.user.id }),
+      });
+      if (!removed) return status(404, { error: "no such review of yours, on this one" });
       return reviewPage(params.target, params.id, principal.user.id);
     },
     {

@@ -24,13 +24,14 @@ export class CoverTooLargeError extends Error {}
  * Stores an uploaded cover for a series and returns the name to save on the row. The image is rotated by its EXIF,
  * flattened and scaled down, so the library grid doesn't load full-size scans.
  *
- * The name carries a random part: a series holds several covers now, and the old `series-<id>.png` would have had
- * each upload overwrite the last — including the one another cover row still pointed at.
+ * The name carries a whole UUID: a series holds several covers now, and the old `series-<id>.png` would have had
+ * each upload overwrite the last — including the one another cover row still pointed at. A shortened UUID would
+ * have made that collision rare rather than impossible, and a shared file means deleting either cover blanks both.
  */
 export async function saveCover(seriesId: number, bytes: Uint8Array): Promise<string> {
   if (bytes.byteLength > MAX_IMAGE_BYTES) throw new CoverTooLargeError("cover image too large (max 15 MB)");
   await mkdir(COVERS_DIR, { recursive: true });
-  const name = `series-${seriesId}-${crypto.randomUUID().slice(0, 8)}.png`;
+  const name = `series-${seriesId}-${crypto.randomUUID()}.png`;
   const image = normalisePage(sharp(Buffer.from(bytes))).resize({
     width: MAX_COVER_SIDE,
     height: MAX_COVER_SIDE,
