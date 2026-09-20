@@ -26,8 +26,6 @@ interface ImportStatusReply {
 }
 
 const POLL_MS = 900;
-/** Enough of the list to spot a wrong guess without making the popup enormous. */
-const PREVIEW_ROWS = 12;
 
 let pollTimer: number | undefined;
 
@@ -131,8 +129,10 @@ function renderFound(found: Extract<ChapterExtractResult, { ok: true }>, sourceU
   name.maxLength = 200;
   name.setAttribute("aria-label", "Workspace name");
 
+  // Every page gets a row: the untick list is the safety net for a wrong guess, and a stray image is as likely to
+  // be page 20 as page 2. The list scrolls.
   const list = el("div", "import-list");
-  found.images.slice(0, PREVIEW_ROWS).forEach((url, i) => {
+  found.images.forEach((url, i) => {
     const row = el("label", "import-row");
     const tick = el("input") as HTMLInputElement;
     tick.type = "checkbox";
@@ -145,9 +145,6 @@ function renderFound(found: Extract<ChapterExtractResult, { ok: true }>, sourceU
     row.append(tick, el("span", "import-row-index", String(i + 1)), el("span", "import-row-url", url.split("/").pop() ?? url));
     list.append(row);
   });
-  if (found.images.length > PREVIEW_ROWS) {
-    list.append(el("p", "muted", `…and ${found.images.length - PREVIEW_ROWS} more`));
-  }
 
   const translate = el("label", "import-option");
   const translateTick = el("input") as HTMLInputElement;

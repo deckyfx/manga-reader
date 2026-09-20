@@ -132,6 +132,16 @@ export async function uploadWorkspacePages(
   return { imported: data.imported, existing: data.existing, skipped: data.skipped };
 }
 
+/**
+ * The image addresses a workspace already holds. An import that adds to an earlier one skips these, so running the
+ * same chapter twice extends it with what is new instead of appending a second copy of everything.
+ */
+export async function workspacePageSources(serverUrl: string, apiKey: string, workspaceId: number): Promise<Set<string>> {
+  const { data, error } = await studioApi(serverUrl, apiKey).studio.api.workspaces({ id: workspaceId }).get();
+  if (error) throw new Error(errorMessage(error));
+  return new Set(data.pages.map((page) => page.source));
+}
+
 /** Starts "Run all" on the workspace; a run already going answers 409, which is not a failure worth reporting. */
 export async function startWorkspaceRun(serverUrl: string, apiKey: string, workspaceId: number): Promise<void> {
   const { error } = await studioApi(serverUrl, apiKey).studio.api.workspaces({ id: workspaceId }).run.post({});

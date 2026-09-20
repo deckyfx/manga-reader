@@ -9,7 +9,7 @@
  * Downloads are paced by the provider's `minIntervalMs` and run two at a time; pages are uploaded in small batches as
  * they arrive, so the Studio shows progress early and the worker never holds a whole chapter in memory.
  */
-import { createWorkspace, findWorkspaceBySource, serverHasWorkspaces, startWorkspaceRun, uploadWorkspacePages } from "./api";
+import { createWorkspace, findWorkspaceBySource, serverHasWorkspaces, startWorkspaceRun, uploadWorkspacePages, workspacePageSources } from "./api";
 import { loadServerAccess } from "./settings-store";
 import type { ImportRequest } from "./types";
 
@@ -54,6 +54,10 @@ const BATCH_SIZE = 5;
 const PARALLEL_DOWNLOADS = 2;
 /** The server refuses anything larger, so there is no point sending it. */
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+/** Goes at one image before it is called failed. */
+const DOWNLOAD_ATTEMPTS = 3;
+/** First backoff between goes; it doubles from there. */
+const RETRY_BACKOFF_MS = 700;
 
 /** True while this worker is inside the loop, so a second call doesn't run the same job twice. */
 let working = false;
@@ -106,22 +110,54 @@ export async function clearImport(): Promise<void> {
   showBadge(null);
 }
 
-/** One image, as a file the upload can carry. Refused before download when the server would refuse it anyway. */
-async function downloadPage(url: string, minIntervalMs: number): Promise<File> {
+/** A failure worth another go: the network dropped, or the CDN is rate-limiting or briefly broken. */
+class Transient extends Error {}
+
+/** One attempt at one image. Throws `Transient` when trying again might work. */
+async function fetchPage(url: string, minIntervalMs: number): Promise<File> {
   const wait = lastRequestAt + minIntervalMs - Date.now();
   if (wait > 0) await delay(wait);
   lastRequestAt = Date.now();
 
   // No spoofed headers: rawkuma's CDN serves without a Referer, and anything that needs one gets its own rule later
-  const response = await fetch(url, { redirect: "error", cache: "no-store" });
+  let response: Response;
+  try {
+    response = await fetch(url, { redirect: "error", cache: "no-store" });
+  } catch (err) {
+    // A dropped connection says nothing about the image itself
+    throw new Transient(err instanceof Error ? err.message : String(err));
+  }
+  if (response.status === 408 || response.status === 429 || response.status >= 500) {
+    throw new Transient(`the site answered ${response.status}`);
+  }
   if (!response.ok) throw new Error(`the site answered ${response.status}`);
+
   const blob = await response.blob();
-  if (blob.size === 0) throw new Error("the site sent an empty file");
+  if (blob.size === 0) throw new Transient("the site sent an empty file");
+  // These two are about the image, not the moment: another go would fetch the same thing
   if (blob.size > MAX_IMAGE_BYTES) throw new Error("image too large (max 15 MB)");
   if (blob.type && !blob.type.startsWith("image/")) throw new Error(`not an image (${blob.type})`);
 
   const name = new URL(url).pathname.split("/").filter(Boolean).pop() || "page.jpg";
   return new File([blob], name, { type: blob.type || "image/jpeg" });
+}
+
+/**
+ * One image, with a few goes at it. A CDN that hiccups on page 12 of 25 shouldn't cost the page: the attempts back
+ * off, and only a lasting failure — or one that says the image itself is wrong — gives up.
+ */
+async function downloadPage(url: string, minIntervalMs: number): Promise<File> {
+  let lastError: Error = new Error("download failed");
+  for (let attempt = 0; attempt < DOWNLOAD_ATTEMPTS; attempt++) {
+    try {
+      return await fetchPage(url, minIntervalMs);
+    } catch (err) {
+      if (!(err instanceof Transient)) throw err;
+      lastError = err;
+      if (attempt < DOWNLOAD_ATTEMPTS - 1) await delay(RETRY_BACKOFF_MS * 2 ** attempt);
+    }
+  }
+  throw new Error(`${lastError.message} (after ${DOWNLOAD_ATTEMPTS} attempts)`);
 }
 
 /**
@@ -248,7 +284,8 @@ export async function startChapterImport(request: ImportRequest): Promise<Import
   const target = request.workspaceId !== undefined
     ? await findWorkspaceBySource(access.serverUrl, access.apiKey, request.sourceUrl)
     : null;
-  const workspace = target?.id === request.workspaceId && target
+  const reusing = target !== null && target.id === request.workspaceId;
+  const workspace = reusing && target
     ? target
     : await createWorkspace(access.serverUrl, access.apiKey, {
         name: request.name,
@@ -256,6 +293,12 @@ export async function startChapterImport(request: ImportRequest): Promise<Import
         source_provider: request.provider,
         ...(request.adult !== undefined ? { adult: request.adult } : {}),
       });
+
+  // Adding to an earlier import: whatever it already holds is left alone, so the same chapter twice extends it
+  // rather than appending a second copy of every page
+  const already = reusing ? await workspacePageSources(access.serverUrl, access.apiKey, workspace.id).catch(() => new Set<string>()) : new Set<string>();
+  const images = request.images.filter((url) => !already.has(url));
+  if (images.length === 0) throw new Error("every page of this chapter is already in that workspace");
 
   const job: ImportJob = {
     workspaceId: workspace.id,
@@ -265,7 +308,7 @@ export async function startChapterImport(request: ImportRequest): Promise<Import
     minIntervalMs: request.minIntervalMs,
     runAfter: request.runAfter,
     // Appended after whatever the workspace already holds, so adding to an earlier import doesn't overwrite it
-    pages: request.images.map((url, offset) => ({ index: (workspace.next_index ?? 0) + offset, url, state: "pending" as const })),
+    pages: images.map((url, offset) => ({ index: (workspace.next_index ?? 0) + offset, url, state: "pending" as const })),
     startedAt: Date.now(),
   };
   await saveJob(job);
