@@ -5,7 +5,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { pageDir } from "@/stores/page-store";
+import { pageDir, PageStore } from "@/stores/page-store";
 import { call, png, signedIn } from "./harness";
 
 let cookie = "";
@@ -169,6 +169,29 @@ describe("filing a workspace into a chapter", () => {
     const inChapter = await call<{ id: string }[]>("GET", `/studio/api/pages?filed=chapter&chapter_id=${chapterId}`, undefined, { cookie });
     expect(inChapter.body.map((p) => p.id).sort()).toEqual(filed.body.pages.map((p: { id: string }) => p.id).sort());
     expect(filed.body.pages.every((p: { chapter_id: number | null }) => p.chapter_id === chapterId)).toBe(true);
+  });
+
+  test("publishes a page that is ready, and says why one isn't", async () => {
+    const series = await call<{ series: { id: number } }>("POST", "/manage/api/series", { title: `Ready ${crypto.randomUUID()}` }, { cookie });
+    const made = await call<{ unsorted: { id: number }[] }>("POST", "/manage/api/chapters", { series_id: series.body.series.id, title: "One" }, { cookie });
+    const chapterId = made.body.unsorted[0]!.id;
+    const id = await create({ name: "Half done" });
+    const uploaded = await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(0, ["ready.png", "raw.png"]), { cookie });
+    const readyId: string = uploaded.body.pages[0].id;
+
+    // Stand in for a burn on the first page only; the second has never been run
+    await Bun.write(join(pageDir(readyId), "result.png"), await png("#445566"));
+    // …and a stale render on it would mean readers get an image that isn't current
+    const stalePage: string = uploaded.body.pages[1].id;
+    await Bun.write(join(pageDir(stalePage), "result.png"), await png("#665544"));
+    await PageStore.setStage(stalePage, "render", "stale");
+
+    const filed = await call("POST", `/studio/api/workspaces/${id}/file`, { chapter_id: chapterId }, { cookie });
+    expect(filed.body).toMatchObject({ filed: 2, published: 1 });
+    expect(filed.body.skipped[0].reason).toContain("moved, not published");
+
+    const page = await call("GET", `/studio/api/pages/${readyId}`, undefined, { cookie });
+    expect(page.body.page).toMatchObject({ revision: 1, published: true, chapter_id: chapterId });
   });
 
   test("won't file a workspace that already works on a chapter", async () => {
