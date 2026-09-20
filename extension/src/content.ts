@@ -12,6 +12,7 @@ import type {
   FromEngineMsg,
   FetchImageMsg,
 } from "./types";
+import { extractChapterHere } from "./chapter-extract";
 import { loadServerAccess } from "./settings-store";
 import { errorMessage, serverApi, streamUrl, type PageJobEvent, type PageLiveEvent } from "./api";
 
@@ -57,6 +58,14 @@ function init(): void {
     else if (msg.type === "explain-result")   showExplain(msg.tokens, msg.definitions, msg.mode);
     else if (msg.type === "explain-error")    showExplainError(msg.message);
     else if (msg.type === "image-updated") showRevision(msg.jobId, msg.resultUrl);
+  });
+
+  // Its own listener, because this one answers: reading the page is asynchronous (a reader may have to be scrolled
+  // through first), and `true` is what keeps the message channel open until the result is ready.
+  chrome.runtime.onMessage.addListener((msg: ToContentMsg, _sender, sendResponse) => {
+    if (msg.type !== "extract-chapter") return undefined;
+    void extractChapterHere(msg.rescan === true).then(sendResponse);
+    return true;
   });
 
   // Studio page → extension bridge: relay image-updated events from the same origin

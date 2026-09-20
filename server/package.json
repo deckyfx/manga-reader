@@ -53,6 +53,7 @@
     "@types/react-dom": "^19.3.0",
     "bun-plugin-tailwind": "^0.1.2",
     "drizzle-kit": "^0.31.10",
+    "linkedom": "^0.18.13",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2"
   }

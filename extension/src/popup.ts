@@ -1,3 +1,4 @@
+import { start as startImportPanel } from "./popup-import";
 import type { PopupModeMsg } from "./types";
 
 document.getElementById("btn-region")?.addEventListener("click", () => {
@@ -13,3 +14,6 @@ function sendMode(mode: "region" | "image"): void {
   chrome.runtime.sendMessage(msg).catch(console.error);
   window.close();
 }
+
+// The import panel decides for itself what to show: a running import, what this page holds, or why neither applies
+void startImportPanel();
