@@ -21,6 +21,24 @@ export const MAX_URLS_PER_IMPORT = 50;
  */
 export type Download = (url: string) => Promise<Buffer>;
 
+/**
+ * Trims, drops blanks, and keeps the first of any address given twice, in the order given.
+ *
+ * A list pasted from a reader often repeats an address — a page shown twice, a preview alongside the full image —
+ * and each repeat would otherwise become its own page. The first occurrence is the one that keeps its position.
+ */
+export function tidyUrls(urls: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const tidy: string[] = [];
+  for (const raw of urls) {
+    const url = raw.trim();
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    tidy.push(url);
+  }
+  return tidy;
+}
+
 /** A readable page name from an address: its file name, else its last path segment, else the host. */
 export function nameFromUrl(raw: string): string {
   try {

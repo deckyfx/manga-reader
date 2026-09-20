@@ -5,22 +5,36 @@ import { Modal } from "./Modal";
 
 const MAX_URLS = 50;
 
-/** One address per line, blank lines ignored, and nothing that isn't http(s) gets sent. */
-export function splitUrls(text: string): { urls: string[]; rejected: string[] } {
+/**
+ * One address per line: blanks ignored, anything that isn't http(s) rejected, and an address given twice kept once.
+ * A list pasted out of a reader often repeats one, and each repeat would otherwise become its own page.
+ */
+export function splitUrls(text: string): { urls: string[]; rejected: string[]; duplicates: number } {
   const urls: string[] = [];
   const rejected: string[] = [];
+  const seen = new Set<string>();
+  let duplicates = 0;
   for (const line of text.split(/\r?\n/)) {
     const url = line.trim();
     if (!url) continue;
     try {
       const parsed = new URL(url);
-      if (parsed.protocol === "http:" || parsed.protocol === "https:") urls.push(url);
-      else rejected.push(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        rejected.push(url);
+        continue;
+      }
     } catch {
       rejected.push(url);
+      continue;
     }
+    if (seen.has(url)) {
+      duplicates++;
+      continue;
+    }
+    seen.add(url);
+    urls.push(url);
   }
-  return { urls, rejected };
+  return { urls, rejected, duplicates };
 }
 
 /**
@@ -38,7 +52,7 @@ export function AddPageUrlsDialog({
   onImport: (urls: string[]) => Promise<{ imported: number; skipped: { name: string; reason: string }[] }>;
 }) {
   const [text, setText] = useState("");
-  const { urls, rejected } = splitUrls(text);
+  const { urls, rejected, duplicates } = splitUrls(text);
   const tooMany = urls.length > MAX_URLS;
 
   const importM = useMutation({
@@ -90,6 +104,11 @@ export function AddPageUrlsDialog({
         {tooMany && (
           <p className="text-xs text-amber-400">
             {urls.length} addresses — {MAX_URLS} at a time is the limit. Split the list.
+          </p>
+        )}
+        {duplicates > 0 && (
+          <p className="text-xs text-gray-500">
+            {duplicates} repeated address{duplicates === 1 ? "" : "es"} will be downloaded once.
           </p>
         )}
         {rejected.length > 0 && (

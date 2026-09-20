@@ -6,7 +6,7 @@
  * what they validate and who may call them.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { importUrlsIntoChapter, importUrlsIntoWorkspace, nameFromUrl } from "@/services/url-import";
+import { importUrlsIntoChapter, importUrlsIntoWorkspace, nameFromUrl, tidyUrls } from "@/services/url-import";
 import { WorkspaceStore } from "@/stores/workspace-store";
 import { PageStore } from "@/stores/page-store";
 import { call, png, signedIn } from "./harness";
@@ -54,6 +54,13 @@ describe("naming a page after its address", () => {
     expect(nameFromUrl("https://host.test/manga/ch1/")).toBe("ch1");
     expect(nameFromUrl("https://host.test/")).toBe("host.test");
     expect(nameFromUrl("not a url at all")).toBe("not a url at all");
+  });
+});
+
+describe("tidying the list given", () => {
+  test("trims, drops blanks, and keeps a repeated address once, in the order given", () => {
+    expect(tidyUrls([" https://a.test/1.png ", "", "https://a.test/2.png", "https://a.test/1.png"]))
+      .toEqual(["https://a.test/1.png", "https://a.test/2.png"]);
   });
 });
 
@@ -121,6 +128,20 @@ describe("into a workspace", () => {
 });
 
 describe("the routes", () => {
+  test("a repeated address becomes one page, not two", async () => {
+    const { cookie } = await signedIn("contributor");
+    const chapterId = await aChapter(cookie);
+
+    // Through the route, which is where the list is tidied. These addresses are refused as private, so each one
+    // that reached a download left exactly one skipped entry: two entries would mean the repeat was downloaded too
+    const viaRoute = await call<{ imported: number; skipped: { name: string }[] }>(
+      "POST", `/manage/api/chapters/${chapterId}/pages/urls`, { urls: [`${origin}/9.png`, `${origin}/9.png`] }, { cookie },
+    );
+    expect(viaRoute.status).toBe(200);
+    expect(viaRoute.body.skipped).toHaveLength(1);
+    expect(viaRoute.body.skipped[0].name).toBe("9.png");
+  });
+
   test("a chapter import needs at least one address, and a chapter that exists", async () => {
     const { cookie } = await signedIn("contributor");
     const chapterId = await aChapter(cookie);

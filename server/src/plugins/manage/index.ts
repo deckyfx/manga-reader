@@ -48,7 +48,7 @@ import { ErrBody, optionalEnum } from "@/lib/schemas";
 import { chapterRun, pagesToRun, startChapterRun } from "@/services/chapter-batch";
 import { exportChapter } from "@/services/chapter-export";
 import { importIntoChapter, type ImportSource } from "@/services/chapter-import";
-import { importUrlsIntoChapter, MAX_URLS_PER_IMPORT } from "@/services/url-import";
+import { importUrlsIntoChapter, MAX_URLS_PER_IMPORT, tidyUrls } from "@/services/url-import";
 import { sendChapterToStudio } from "@/services/chapter-to-studio";
 import { hasUnpublishedEdits } from "@/services/page-history";
 import { publishPage } from "@/services/page-publish";
@@ -425,7 +425,7 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     "/chapters/:id/pages/urls",
     async ({ params, body, status }) => {
       if (!(await ChapterStore.findById(params.id))) return status(404, { error: "chapter not found" });
-      const urls = body.urls.map((url) => url.trim()).filter(Boolean);
+      const urls = tidyUrls(body.urls);
       if (urls.length === 0) return status(422, { error: "give at least one image address" });
       const report = await importUrlsIntoChapter(params.id, urls);
       const detail = await chapterDetail(params.id);

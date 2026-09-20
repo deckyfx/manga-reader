@@ -21,7 +21,7 @@ import { publishBlocker, publishDraft } from "@/services/draft-publish";
 import { batchRun, pagesNeedingRun, startBatchRun } from "@/services/page-batch";
 import { fileWorkspaceIntoChapter } from "@/services/workspace-file";
 import { importIntoWorkspace, type WorkspaceUpload } from "@/services/workspace-import";
-import { importUrlsIntoWorkspace, MAX_URLS_PER_IMPORT } from "@/services/url-import";
+import { importUrlsIntoWorkspace, MAX_URLS_PER_IMPORT, tidyUrls } from "@/services/url-import";
 import { withPageLock, withWorkspaceLock } from "@/queue/page-queue";
 import { ChapterStore } from "@/stores/library-store";
 import { PageStore } from "@/stores/page-store";
@@ -230,7 +230,7 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
     "/:id/pages/urls",
     async ({ params, body, status }) => {
       if (!(await WorkspaceStore.findById(params.id))) return status(404, { error: "workspace not found" });
-      const urls = body.urls.map((url) => url.trim()).filter(Boolean);
+      const urls = tidyUrls(body.urls);
       if (urls.length === 0) return status(422, { error: "give at least one image address" });
       const report = await importUrlsIntoWorkspace(params.id, body.start_index, urls);
       const detail = await workspaceDetail(params.id);
