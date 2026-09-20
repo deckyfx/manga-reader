@@ -13,6 +13,7 @@ import type {
 import { DEFAULT_SETTINGS } from "./types";
 import { loadSettings, usableApiKey } from "./settings-store";
 import { errorMessage, serverApi } from "./api";
+import { clearImport, currentImport, resumeChapterImport, startChapterImport } from "./import-queue";
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,11 @@ chrome.runtime.onInstalled.addListener((details) => {
     chrome.tabs.create({ url: chrome.runtime.getURL("options.html") });
   }
 });
+
+// An MV3 worker is stopped whenever it looks idle, including mid-import: whatever was left is picked up here, both
+// when the browser starts and whenever this worker wakes for any other reason
+chrome.runtime.onStartup.addListener(() => void resumeChapterImport());
+void resumeChapterImport();
 
 // ── Popup mode handler ────────────────────────────────────────────────────────
 
@@ -66,6 +72,24 @@ chrome.runtime.onMessage.addListener((
   sender,
   sendResponse: (response: unknown) => void,
 ) => {
+  // The chapter-import messages all answer, so they keep the channel open the same way fetch-image does
+  if (msg.type === "start-chapter-import") {
+    startChapterImport(msg.request)
+      .then((job) => sendResponse({ ok: true, job }))
+      .catch((err: unknown) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+    return true;
+  }
+  if (msg.type === "import-status") {
+    currentImport().then((status) => sendResponse(status)).catch(() => sendResponse(null));
+    return true;
+  }
+  if (msg.type === "clear-import") {
+    clearImport()
+      .then(() => sendResponse({ ok: true }))
+      .catch((err: unknown) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+    return true;
+  }
+
   // fetch-image must return true to keep the message channel open for the async response
   if ((msg as FetchImageMsg).type === "fetch-image") {
     const { url } = msg as FetchImageMsg;

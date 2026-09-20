@@ -119,6 +119,26 @@ export interface ImageUpdatedRelayMsg  { type: "image-updated-relay"; jobId: str
 // ── Messages: popup → background ─────────────────────────────────────────────
 
 export interface PopupModeMsg         { type: "popup-mode"; mode: "region" | "image" }
+
+/** What the popup hands over to start a chapter import: the extractor's find, plus what the user chose to do with it. */
+export interface ImportRequest {
+  sourceUrl: string;
+  provider: string;
+  minIntervalMs: number;
+  images: string[];
+  /** Workspace name, from the page title and chapter number unless the user edited it. */
+  name: string;
+  adult?: boolean;
+  /** Add to this workspace instead of making one (offered for an earlier import of the same address). */
+  workspaceId?: number;
+  /** Start "Run all" once every page is in. */
+  runAfter: boolean;
+}
+
+export interface StartChapterImportMsg { type: "start-chapter-import"; request: ImportRequest }
+export interface ImportStatusMsg       { type: "import-status" }
+/** Forgets a finished import so the popup offers a fresh one. */
+export interface ClearImportMsg        { type: "clear-import" }
 export interface FetchImageMsg        { type: "fetch-image"; url: string }
 
 export type FromContentMsg =
@@ -127,7 +147,10 @@ export type FromContentMsg =
   | ExplainRequestMsg
   | ImageUpdatedRelayMsg
   | PopupModeMsg
-  | FetchImageMsg;
+  | FetchImageMsg
+  | StartChapterImportMsg
+  | ImportStatusMsg
+  | ClearImportMsg;
 
 // ── Messages: engine iframe ↔ content (window.postMessage) ───────────────────
 
