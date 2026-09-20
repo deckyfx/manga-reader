@@ -75,6 +75,14 @@ async function renderProgress(status: ImportStatusReply): Promise<void> {
   ];
 
   if (job.error) nodes.push(el("p", "error", job.error));
+  // Stopped rather than finished: the pages already downloaded are still waiting, so offer to carry on
+  if (job.error && !finished) {
+    const again = el("button", "menu-btn", "Try again");
+    again.addEventListener("click", () => {
+      void send({ type: "retry-import" }).then(() => pollProgress());
+    });
+    nodes.push(again);
+  }
   // Only the first few reasons: a chapter whose CDN is refusing everything would otherwise fill the popup
   for (const page of job.pages.filter((candidate) => candidate.state === "failed").slice(0, 3)) {
     nodes.push(el("p", "error", `Page ${page.index + 1}: ${page.reason ?? "failed"}`));
@@ -164,12 +172,23 @@ function renderFound(found: Extract<ChapterExtractResult, { ok: true }>, sourceU
   }
 
   const importButton = el("button", "menu-btn import-go", "Import chapter");
+  // Shown inside the panel rather than replacing it: a refused start (server down, key missing) should leave the
+  // form, the name and the ticks exactly as they were so the button can simply be pressed again
+  const importError = el("p", "error");
+  importError.hidden = true;
+  const failed = (text: string): void => {
+    importError.textContent = text;
+    importError.hidden = false;
+    importButton.removeAttribute("disabled");
+  };
+
   importButton.addEventListener("click", () => {
     const images = found.images.filter((url) => chosen.has(url));
     if (images.length === 0) {
-      message("Tick at least one page to import.", "error");
+      failed("Tick at least one page to import.");
       return;
     }
+    importError.hidden = true;
     importButton.setAttribute("disabled", "true");
     const request: ImportRequest = {
       sourceUrl,
@@ -181,20 +200,20 @@ function renderFound(found: Extract<ChapterExtractResult, { ok: true }>, sourceU
       ...(found.adult !== undefined ? { adult: found.adult } : {}),
       ...(earlier && addToEarlier?.checked ? { workspaceId: earlier.id } : {}),
     };
-    void send<{ ok: boolean; error?: string }>({ type: "start-chapter-import", request }).then((reply) => {
+    send<{ ok: boolean; error?: string }>({ type: "start-chapter-import", request }).then((reply) => {
       if (!reply?.ok) {
-        message(reply?.error ?? "the import didn't start", "error");
+        failed(reply?.error ?? "the import didn't start");
         return;
       }
       void send<ImportStatusReply>({ type: "import-status" }).then((status) => void renderProgress(status));
       pollProgress();
-    });
+    }).catch((err: unknown) => failed(err instanceof Error ? err.message : String(err)));
   });
 
   const rescan = el("button", "link-btn", "Scan again");
   rescan.addEventListener("click", () => void start(true));
 
-  show(header, name, list, ...options, importButton, rescan);
+  show(header, name, list, ...options, importError, importButton, rescan);
 }
 
 // ── Entry ────────────────────────────────────────────────────────────────────

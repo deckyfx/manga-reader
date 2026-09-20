@@ -79,7 +79,10 @@ export async function extractChapterHere(rescan = false): Promise<ChapterExtract
     const ctx: ExtractContext = { url, document, fetchDocument, log: (message) => logs.push(message) };
 
     let extract = await extractor.extract(ctx);
-    if (rescan || extract.images.length === 0) {
+    // A reader that adds pages as you scroll answers the first read with however many exist so far, which is
+    // indistinguishable from a complete answer. A site with its own extractor knows where its pages live, so only
+    // the generic guess pays the scroll; the cost is seconds on an import, against silently importing half a chapter.
+    if (rescan || extract.images.length === 0 || extractor.id === "generic") {
       await scrollThroughPage((message) => logs.push(message));
       extract = await extractor.extract(ctx);
     }

@@ -115,9 +115,12 @@ class Transient extends Error {}
 
 /** One attempt at one image. Throws `Transient` when trying again might work. */
 async function fetchPage(url: string, minIntervalMs: number): Promise<File> {
-  const wait = lastRequestAt + minIntervalMs - Date.now();
-  if (wait > 0) await delay(wait);
-  lastRequestAt = Date.now();
+  // The slot is taken before waiting for it: two callers arriving together would otherwise compute the same wait
+  // and start at the same moment, which is the one thing the interval exists to prevent
+  const now = Date.now();
+  const startAt = Math.max(now, lastRequestAt + minIntervalMs);
+  lastRequestAt = startAt;
+  if (startAt > now) await delay(startAt - now);
 
   // No spoofed headers: rawkuma's CDN serves without a Referer, and anything that needs one gets its own rule later
   let response: Response;
@@ -252,13 +255,14 @@ async function processJob(): Promise<void> {
       showBadge(job);
     }
   } catch (err) {
+    // Left unfinished on purpose: the pages already downloaded are still pending, and the job is written down, so
+    // the next wake — or the popup's "Try again" — carries on rather than abandoning a half-imported chapter
     const job = await loadJob();
     if (job) {
       job.error = err instanceof Error ? err.message : String(err);
-      job.finishedAt = Date.now();
       await saveJob(job);
+      showBadge(job);
     }
-    showBadge(null);
   } finally {
     working = false;
   }
@@ -297,7 +301,15 @@ export async function startChapterImport(request: ImportRequest): Promise<Import
   // Adding to an earlier import: whatever it already holds is left alone, so the same chapter twice extends it
   // rather than appending a second copy of every page
   const already = reusing ? await workspacePageSources(access.serverUrl, access.apiKey, workspace.id).catch(() => new Set<string>()) : new Set<string>();
-  const images = request.images.filter((url) => !already.has(url));
+  // Deduplicated in reading order: an extractor can hand back the same address twice (a noscript fallback listing
+  // it again, a reader repeating a page), and each copy would otherwise become its own page of the chapter
+  const seen = new Set<string>();
+  const images: string[] = [];
+  for (const url of request.images) {
+    if (already.has(url) || seen.has(url)) continue;
+    seen.add(url);
+    images.push(url);
+  }
   if (images.length === 0) throw new Error("every page of this chapter is already in that workspace");
 
   const job: ImportJob = {
@@ -315,6 +327,15 @@ export async function startChapterImport(request: ImportRequest): Promise<Import
   showBadge(job);
   void processJob();
   return job;
+}
+
+/** Tries a stalled import again, after the network or the server came back. */
+export async function retryChapterImport(): Promise<void> {
+  const job = await loadJob();
+  if (!job || job.finishedAt) return;
+  delete job.error;
+  await saveJob(job);
+  void processJob();
 }
 
 /** Picks up an import the worker was in the middle of when it went to sleep. */

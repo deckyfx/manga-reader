@@ -13,7 +13,7 @@ import type {
 import { DEFAULT_SETTINGS } from "./types";
 import { loadSettings, usableApiKey } from "./settings-store";
 import { errorMessage, serverApi } from "./api";
-import { clearImport, currentImport, resumeChapterImport, startChapterImport } from "./import-queue";
+import { clearImport, currentImport, resumeChapterImport, retryChapterImport, startChapterImport } from "./import-queue";
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -81,6 +81,12 @@ chrome.runtime.onMessage.addListener((
   }
   if (msg.type === "import-status") {
     currentImport().then((status) => sendResponse(status)).catch(() => sendResponse(null));
+    return true;
+  }
+  if (msg.type === "retry-import") {
+    retryChapterImport()
+      .then(() => sendResponse({ ok: true }))
+      .catch((err: unknown) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
     return true;
   }
   if (msg.type === "clear-import") {

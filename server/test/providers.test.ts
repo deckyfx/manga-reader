@@ -80,6 +80,16 @@ describe("the generic extractor", () => {
     ]);
   });
 
+  test("prefers a lazy srcset over the placeholder in src", async () => {
+    const ctx = contextFor(
+      `<img src="/pages/blank.gif" data-srcset="/pages/1-small.jpg 480w, /pages/1.jpg 1600w">
+       <img src="/pages/blank.gif" data-lazy-srcset="/pages/2.jpg 1600w">`,
+      "https://reader.test/manga/x/chapter-9/",
+    );
+    const result = await genericExtractor.extract(ctx);
+    expect(result.images).toEqual(["https://reader.test/pages/1.jpg", "https://reader.test/pages/2.jpg"]);
+  });
+
   test("falls back to the noscript markup when every image was a placeholder", async () => {
     const ctx = contextFor(
       `<img src="data:image/gif;base64,R0lGOD" width="10" height="10">
@@ -88,6 +98,17 @@ describe("the generic extractor", () => {
     );
     const result = await genericExtractor.extract(ctx);
     expect(result.images).toEqual(["https://cdn.test/ch3/001.jpg", "https://cdn.test/ch3/002.jpg"]);
+  });
+
+  test("doesn't repeat an address the noscript markup lists twice", async () => {
+    const ctx = contextFor(
+      `<img src="data:image/gif;base64,R0lGOD" width="10" height="10">
+       <noscript><img src="https://cdn.test/ch4/001.jpg"><img src="https://cdn.test/ch4/001.jpg"></noscript>`,
+      "https://reader.test/manga/x/chapter-4/",
+    );
+    const result = await genericExtractor.extract(ctx);
+    // Twice in the markup would otherwise become two pages of the chapter
+    expect(result.images).toEqual(["https://cdn.test/ch4/001.jpg"]);
   });
 
   test("takes the title from og:title and the chapter from the address", async () => {

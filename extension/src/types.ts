@@ -139,6 +139,8 @@ export interface StartChapterImportMsg { type: "start-chapter-import"; request: 
 export interface ImportStatusMsg       { type: "import-status" }
 /** Forgets a finished import so the popup offers a fresh one. */
 export interface ClearImportMsg        { type: "clear-import" }
+/** Carries on an import that stopped on an error (the server went away, the network dropped). */
+export interface RetryImportMsg        { type: "retry-import" }
 export interface FetchImageMsg        { type: "fetch-image"; url: string }
 
 export type FromContentMsg =
@@ -150,7 +152,8 @@ export type FromContentMsg =
   | FetchImageMsg
   | StartChapterImportMsg
   | ImportStatusMsg
-  | ClearImportMsg;
+  | ClearImportMsg
+  | RetryImportMsg;
 
 // ── Messages: engine iframe ↔ content (window.postMessage) ───────────────────
 

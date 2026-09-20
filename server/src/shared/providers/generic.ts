@@ -12,6 +12,9 @@ import type { ChapterExtract, ExtractContext, Extractor } from "./types";
 /** Attributes a lazy-loading reader may keep the real address in, in the order we trust them. */
 const SRC_ATTRIBUTES = ["data-src", "data-lazy-src", "data-original", "data-url", "src"] as const;
 
+/** The same, for `srcset`: a lazy reader keeps the real candidates here and leaves a placeholder in `srcset`. */
+const SRCSET_ATTRIBUTES = ["data-srcset", "data-lazy-srcset", "srcset"] as const;
+
 /** Addresses that are page furniture wherever they appear. */
 const FURNITURE = /(?:^|[/_-])(?:logo|icon|avatar|banner|sprite|favicon|ads?|button|arrow|loading|spinner|placeholder)s?(?:[/_.-]|$)/i;
 
@@ -77,15 +80,16 @@ function groupOf(url: string): string {
 
 /** Addresses inside `<noscript>`, which is where a lazy reader keeps its no-JavaScript fallback. */
 function fromNoscript(document: Document, base: URL): string[] {
-  const found: string[] = [];
+  // Deduplicated like the main pass: the same address twice would otherwise become two pages of the chapter
+  const found = new Set<string>();
   for (const block of Array.from(document.querySelectorAll("noscript"))) {
     // With scripts enabled the contents are text, not elements, so they are read as markup
     for (const match of (block.textContent ?? "").matchAll(/<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi)) {
       const url = absolute(match[1], base);
-      if (url) found.push(url);
+      if (url) found.add(url);
     }
   }
-  return found;
+  return [...found];
 }
 
 /**
@@ -104,7 +108,8 @@ export function collectCandidates(root: ParentNode, base: URL): Candidate[] {
 
   for (const image of Array.from(root.querySelectorAll("img"))) {
     if (knownTooSmall(image)) continue;
-    const srcset = absolute(fromSrcset(image.getAttribute("srcset")), base);
+    const lazySrcset = SRCSET_ATTRIBUTES.map((attribute) => image.getAttribute(attribute)).find((value) => value);
+    const srcset = absolute(fromSrcset(lazySrcset ?? null), base);
     if (srcset) {
       add(srcset);
       continue;
