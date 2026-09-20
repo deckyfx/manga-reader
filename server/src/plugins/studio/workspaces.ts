@@ -300,30 +300,35 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
   .post(
     "/:id/publish",
     async ({ params, status }) => {
-      if (!(await WorkspaceStore.findById(params.id))) return status(404, { error: "workspace not found" });
-      const pages = await WorkspaceStore.pages(params.id);
-      let published = 0;
-      const skipped: { pageId: string; reason: string }[] = [];
-      for (const page of pages) {
-        // Nothing new to show readers: leave it alone rather than bumping a revision for the same image
-        const summary = toSummary(page);
-        if (!summary.has_edits) continue;
-        const outcome = await withPageLock(page.id, async () => {
-          // Re-read inside the lock: an edit landing since the list was taken changes both of these answers
-          const current = await PageStore.findById(page.id);
-          if (!current) return { ok: false as const, code: 404 as const, error: "the page is gone" };
-          if (!toSummary(current).has_edits) return { ok: false as const, code: 409 as const, error: "nothing new to publish" };
-          const blocker = publishBlocker(current, await PageStore.listStages(current.id));
-          if (blocker) return { ok: false as const, code: 409 as const, error: blocker };
-          return publishDraft(current);
-        });
-        if (outcome.ok) published++;
-        // Something that changed under us is not worth reporting as a failure; a real blocker is
-        else if (outcome.error !== "nothing new to publish") skipped.push({ pageId: page.id, reason: outcome.error });
-      }
+      // The whole run holds the workspace's lock, in the order filing takes them too (workspace, then page, then the
+      // origin a draft publishes over), so closing the workspace can't detach pages halfway through publishing them
+      const result = await withWorkspaceLock(params.id, async () => {
+        if (!(await WorkspaceStore.findById(params.id))) return null;
+        const pages = await WorkspaceStore.pages(params.id);
+        let published = 0;
+        const skipped: { pageId: string; reason: string }[] = [];
+        for (const page of pages) {
+          // Nothing new to show readers: leave it alone rather than bumping a revision for the same image
+          if (!toSummary(page).has_edits) continue;
+          const outcome = await withPageLock(page.id, async () => {
+            // Re-read inside the lock: an edit landing since the list was taken changes both of these answers
+            const current = await PageStore.findById(page.id);
+            if (!current) return { ok: false as const, code: 404 as const, error: "the page is gone" };
+            if (!toSummary(current).has_edits) return { ok: false as const, code: 409 as const, error: "nothing new to publish" };
+            const blocker = publishBlocker(current, await PageStore.listStages(current.id));
+            if (blocker) return { ok: false as const, code: 409 as const, error: blocker };
+            return publishDraft(current);
+          });
+          if (outcome.ok) published++;
+          // Something that changed under us is not worth reporting as a failure; a real blocker is
+          else if (outcome.error !== "nothing new to publish") skipped.push({ pageId: page.id, reason: outcome.error });
+        }
+        return { published, skipped };
+      });
+      if (!result) return status(404, { error: "workspace not found" });
       const detail = await workspaceDetail(params.id);
       if (!detail) return status(404, { error: "workspace not found" });
-      return { ...detail, published, skipped };
+      return { ...detail, ...result };
     },
     {
       params: WorkspaceParams,
