@@ -91,6 +91,8 @@ export interface ExplainResultMsg   { type: "explain-result"; tokens: TokenInfo[
 export interface ExplainErrorMsg    { type: "explain-error"; message: string }
 
 export interface StartImageModeMsg  { type: "start-image-mode" }
+/** Asks the content script to read this page's chapter images; `rescan` forces the scroll pass. */
+export interface ExtractChapterMsg  { type: "extract-chapter"; rescan?: boolean }
 /** Sent to content tabs when Studio burns text and the result image is updated. */
 export interface ImageUpdatedMsg    { type: "image-updated"; jobId: string; resultUrl: string }
 
@@ -102,6 +104,7 @@ export type ToContentMsg =
   | ExplainResultMsg
   | ExplainErrorMsg
   | StartImageModeMsg
+  | ExtractChapterMsg
   | ImageUpdatedMsg;
 
 // ── Messages: content → background ───────────────────────────────────────────
