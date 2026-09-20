@@ -29,9 +29,9 @@ Cloudflare. The server doesn't scrape, doesn't hold site accounts and doesn't ne
 | P0 | Settings areas: sub-menus, full width | S | **Done** — PR #26 |
 | P1 | Add pages by URL (Studio and chapter, many at once) | S | After P4, same session |
 | P2 | Region scan log | S–M | **Done** — PR #26 |
-| P6a | Publish backfill | S | Done, branch `feat/publish-backfill` |
-| P6b | Several cover arts | M | Done, branch `feat/series-covers` |
-| P6c | Reviews and ratings | M | This PR |
+| P6a | Publish backfill | S | **Done** — this PR |
+| P6b | Several cover arts | M | **Done** — this PR |
+| P6c | Reviews and ratings | M | **Done** — this PR |
 
 Two sessions are working through this in parallel: one on P4 → P1 → P5 (the extension side), one on P6 (the library
 side). Migrations are not reserved ahead — generate at push time, and whoever merges second rebases and re-runs
