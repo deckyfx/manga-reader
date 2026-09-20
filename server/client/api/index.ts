@@ -131,6 +131,14 @@ export const getServerPolicy = () => unwrap(api.manage.api.settings.get());
 export const updateServerPolicy = (body: { registration_enabled?: boolean; default_role?: RegistrationRole; scan_log_days?: number }) =>
   unwrap(api.manage.api.settings.put(body));
 
+// ── Publish backfill (admin) ─────────────────────────────────────────────────
+
+/** How many chapter pages hold a burn that was never published. */
+export const publishBackfillPending = () => unwrap(api.manage.api["publish-backfill"].get());
+
+/** Publishes those pages, so the reader never has to fall back to a burn. */
+export const runPublishBackfill = () => unwrap(api.manage.api["publish-backfill"].post());
+
 // ── Region scans (your own; everyone's for an admin) ─────────────────────────
 
 /** A page of scans, newest first. `beforeId` is the id of the last row already shown. */

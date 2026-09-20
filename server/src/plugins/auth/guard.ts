@@ -45,6 +45,8 @@ const POLICY: { prefix: string; needs: UserRole | "public"; sessionOnly?: boolea
   { prefix: "/manage/api/users", needs: "admin", sessionOnly: true },
   { prefix: "/manage/api/settings", needs: "admin", sessionOnly: true },
   { prefix: "/manage/api/sessions", needs: "admin", sessionOnly: true },
+  // Republishing the whole library is maintenance, not library work: an admin, in a browser
+  { prefix: "/manage/api/publish-backfill", needs: "admin", sessionOnly: true },
 
   // Building the library and editing pages
   { prefix: "/manage/api", needs: "contributor" },

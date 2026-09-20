@@ -21,15 +21,21 @@ Cloudflare. The server doesn't scrape, doesn't hold site accounts and doesn't ne
 
 ## 1. Phases (suggested order: the main goal first)
 
-| # | Phase | Size | Why here |
+| # | Phase | Size | State |
 |---|---|---|---|
-| P3 | Workspaces (+ Send chapter to Studio, File into chapter) | M | The container the chapter import lands in. |
-| P4 | **Extension: import a chapter as a workspace** (generic extractor + rawkuma) | M–L | The main goal. |
-| P5 | exhentai extractor + adult flag | S–M | Needs P4. |
-| P0 | Settings areas: sub-menus, full width | S | Pure UI; independent. |
-| P1 | Add pages by URL (Studio and chapter, many at once) | S | Web-UI path for direct image links; independent. |
-| P2 | Region scan log | S–M | Independent; small schema + a page. |
-| P6 | Library backlog: several covers, reviews/ratings, publish backfill | M | |
+| P3 | Workspaces (+ Send chapter to Studio, File into chapter) | M | **Done** — PR #25 |
+| P4 | **Extension: import a chapter as a workspace** (generic extractor + rawkuma) | M–L | In progress, branch `feat/extension-chapter-import` |
+| P5 | exhentai extractor + adult flag | S–M | Next after P4, same session |
+| P0 | Settings areas: sub-menus, full width | S | **Done** — PR #26 |
+| P1 | Add pages by URL (Studio and chapter, many at once) | S | After P4, same session |
+| P2 | Region scan log | S–M | **Done** — PR #26 |
+| P6a | Publish backfill | S | This PR |
+| P6b | Several cover arts | M | Next |
+| P6c | Reviews and ratings | M | After covers |
+
+Two sessions are working through this in parallel: one on P4 → P1 → P5 (the extension side), one on P6 (the library
+side). Migrations are not reserved ahead — generate at push time, and whoever merges second rebases and re-runs
+`bun run db:generate`.
 
 P0–P2 can be picked up whenever. They don't block P3 and P4, and P3 and P4 don't block them.
 
@@ -312,8 +318,14 @@ opens the new series in the web UI to review.
 - **Reviews and ratings**: `series_reviews` / `chapter_reviews {userId, targetId, rating 1–5, body?, createdAt,
   updatedAt}`, unique on (user, target). An average and count are shown on the series page. Any signed-in user can
   review; admins can remove reviews.
-- **Publish backfill**: a one-time admin action (or a boot migration step) that finds chapter pages with a burn but no
-  published snapshot and publishes them. That removes the reader's legacy fallback, which can then be deleted.
+- **Publish backfill** (done): finds chapter pages with a burn but no published snapshot and publishes them, so the
+  reader's fallback to `result.png` could be deleted. It runs **both** at boot and from `/admin/maintenance` — the boot
+  pass is what makes deleting the fallback safe in the same change, since a library whose admin hadn't pressed the
+  button would otherwise serve originals in place of finished pages. It changes nothing a reader can see: it publishes
+  exactly the image the fallback was already serving.
+  The snapshot keeps the burn's own modification time rather than "now". Whether a Studio draft still has work to
+  publish is decided by comparing its render against its chapter page's newest snapshot, so dating an old burn "now"
+  would silently stop offering a draft's edits (found in review by the session building P4, before it shipped).
 
 ## 9. Cross-cutting
 

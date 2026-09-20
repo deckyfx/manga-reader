@@ -174,6 +174,14 @@ export class PageStore {
     return db.select().from(pages).where(and(isNull(pages.chapterId), isNull(pages.workspaceId))).orderBy(desc(pages.createdAt));
   }
 
+  /**
+   * Every page that belongs to a chapter, oldest first and with no limit. Only the publish backfill wants this: it
+   * has to consider the whole library once, rather than a page of it.
+   */
+  static async listAllInChapters(): Promise<Page[]> {
+    return db.select().from(pages).where(isNotNull(pages.chapterId)).orderBy(pages.createdAt, pages.id);
+  }
+
   /** How many pages each of these chapters holds. */
   static async countsByChapter(chapterIds: number[]): Promise<Map<number, number>> {
     if (chapterIds.length === 0) return new Map();

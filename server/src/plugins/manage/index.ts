@@ -22,6 +22,9 @@
  * POST   /manage/api/chapters/:id/publish       publish every page of the chapter that has unpublished edits
  * POST   /manage/api/chapters/:id/to-studio     work on it in the Studio: a workspace of draft copies
  * POST   /manage/api/pages/:id/publish          publish one page, so readers get its current result
+ * GET    /manage/api/publish-backfill           how many pages were burnt before the publish gate (admin)
+ * POST   /manage/api/publish-backfill           publish those, so the reader never falls back to a burn (admin)
+ * GET    /manage/api/scans                      region scans: your own, or everyone's for an admin
  * GET    /manage/api/settings                   server policy: registration, default role (admin)
  * PUT    /manage/api/settings                   change it (admin)
  * GET    /manage/api/sessions                   every signed-in session (admin)
@@ -52,6 +55,7 @@ import { hashSecret, SESSION_COOKIE } from "@/services/auth";
 import { hashPassword } from "@/services/auth";
 import { MAX_SCAN_LOG_DAYS, REGISTRATION_ROLES, serverPolicy, updateServerPolicy } from "@/services/server-settings";
 import { ScanStore } from "@/stores/scan-store";
+import { backfillPublishes, pagesNeedingPublish } from "@/services/publish-backfill";
 import { authContext, SessionSchema, toUser, UserSchema } from "@/plugins/auth/index";
 import { USER_ROLES } from "@/db/schema";
 import { PageStore } from "@/stores/page-store";
@@ -746,6 +750,30 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       return updated ? toPage(updated) : status(404, { error: "page not found" });
     },
     { params: t.Object({ id: PageIdParam }), response: { 200: ReadPageSchema, 404: ErrBody } },
+  )
+
+  // ── Publish backfill (admin) ───────────────────────────────────────────────
+
+  .get(
+    "/publish-backfill",
+    async () => ({ pending: (await pagesNeedingPublish()).length }),
+    { response: { 200: t.Object({ pending: t.Integer() }) } },
+  )
+
+  .post(
+    "/publish-backfill",
+    async () => {
+      const report = await backfillPublishes();
+      return { published: report.published.length, failed: report.failed };
+    },
+    {
+      response: {
+        200: t.Object({
+          published: t.Integer(),
+          failed: t.Array(t.Object({ pageId: t.String(), error: t.String() })),
+        }),
+      },
+    },
   )
 
   // ── Region scans (your own; everyone's for an admin) ───────────────────────

@@ -199,19 +199,18 @@ export async function chapterDetail(id: number) {
   };
 }
 
-/** The image a page shows: its published result when it has one, else the original it was imported from. */
 /**
- * The image a reader gets: the newest published snapshot, else — for pages that predate publishing, or were never
- * published — the current burn, else the original. Editing a published page in the Studio therefore changes nothing
- * for readers until it is published again.
+ * The image a reader gets: the newest published snapshot, else the original it was imported from. A burnt
+ * `result.png` is deliberately not offered — work reaches readers by being published and no other way, so editing a
+ * page in the Studio changes nothing for them until somebody publishes it.
+ *
+ * Pages burnt before publishing existed were once served from their burn here. `services/publish-backfill.ts`
+ * publishes those once, at boot and from the admin area, so this no longer has to guess.
  */
 export function pageImagePath(pageId: string): string | null {
   const published = publishedFile(pageId);
   if (published) return published;
-  const dir = pageDir(pageId);
-  const result = join(dir, "result.png");
-  if (existsSync(result)) return result;
-  const original = join(dir, "original.png");
+  const original = join(pageDir(pageId), "original.png");
   return existsSync(original) ? original : null;
 }
 

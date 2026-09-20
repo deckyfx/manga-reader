@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, stat, utimes } from "node:fs/promises";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pageDir } from "@/stores/page-store";
@@ -36,10 +36,23 @@ export async function listHistory(pageId: string): Promise<HistoryEntry[]> {
   })));
 }
 
-/** Copies result.png as the snapshot of `revision`. Pruning is separate, so a publish that fails loses nothing. */
-export async function snapshotResult(pageId: string, revision: number): Promise<void> {
+/**
+ * Copies result.png as the snapshot of `revision`. Pruning is separate, so a publish that fails loses nothing.
+ *
+ * `keepTime` gives the snapshot the burn's own modification time instead of now. Whether a draft has work its
+ * chapter page hasn't published is decided by comparing those times (see `hasUnpublishedEditsAgainst`), so a publish
+ * that records an *old* burn — the backfill — has to say when that burn was made. Stamping it "now" would date a
+ * two-week-old result later than a draft rendered yesterday, and that draft's edits would stop being offered.
+ */
+export async function snapshotResult(pageId: string, revision: number, { keepTime = false } = {}): Promise<void> {
   await mkdir(historyDir(pageId), { recursive: true });
-  await copyFile(join(pageDir(pageId), "result.png"), historyFile(pageId, revision));
+  const source = join(pageDir(pageId), "result.png");
+  const target = historyFile(pageId, revision);
+  await copyFile(source, target);
+  if (keepTime) {
+    const { atime, mtime } = await stat(source);
+    await utimes(target, atime, mtime);
+  }
 }
 
 /** Drops snapshots beyond HISTORY_LIMIT. Call once the revision they belong to is committed. */
