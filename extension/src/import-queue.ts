@@ -113,6 +113,32 @@ export async function clearImport(): Promise<void> {
 /** A failure worth another go: the network dropped, or the CDN is rate-limiting or briefly broken. */
 class Transient extends Error {}
 
+/** Addresses a cover may never come from: the machine itself, the link-local range, and private networks. */
+const PRIVATE_HOST = /^(?:localhost|127\.|0\.0\.0\.0|\[?::1\]?|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|\[?f[cd][0-9a-f]{2}:)/i;
+
+/**
+ * Refuses a cover address that points inside the network the browser sits on.
+ *
+ * The address comes from `og:image` on whatever page the user is looking at, and the worker fetches it with the
+ * extension's own reach — which includes the user's machine and their LAN. A page can already make a browser
+ * *request* those, but it cannot read the answer; this would, and would then upload it to the server. So a cover is
+ * only ever fetched from a public address.
+ *
+ * Only literal hosts can be checked here: a name that resolves to a private address gets through, because the
+ * extension has no resolver. That is the same limit the server's own image fetch works around with DNS pinning, and
+ * it is worth saying rather than implying this is airtight.
+ */
+function coverMustBePublic(cover: string): void {
+  let url: URL;
+  try {
+    url = new URL(cover);
+  } catch {
+    throw new Error("that isn't an address a cover can be fetched from");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`a cover can't be fetched over ${url.protocol}`);
+  if (PRIVATE_HOST.test(url.hostname)) throw new Error("the cover points inside your own network, so it wasn't fetched");
+}
+
 /**
  * Makes a series out of what a page says about itself, and puts its cover on when it has one.
  *
@@ -132,6 +158,7 @@ export async function createSeriesFromPage(request: CreateSeriesRequest): Promis
 
   if (!request.cover) return series;
   try {
+    coverMustBePublic(request.cover);
     const file = await fetchPage(request.cover, 0);
     await addSeriesCover(serverUrl, apiKey, series.id, file);
     return series;

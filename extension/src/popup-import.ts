@@ -198,6 +198,10 @@ function renderSeries(info: SeriesInfo): void {
       done.addEventListener("click", () => void start());
       nodes.push(done);
       show(...nodes);
+    }).catch((err: unknown) => {
+      // A worker that went away mid-click would otherwise leave a dead button and no explanation
+      create.removeAttribute("disabled");
+      message(err instanceof Error ? err.message : String(err), "error");
     });
   });
 
