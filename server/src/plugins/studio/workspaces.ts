@@ -19,6 +19,7 @@ import { authContext } from "@/plugins/auth/index";
 import { PageSummary, toSummary } from "@/plugins/studio/page-summary";
 import { publishBlocker, publishDraft } from "@/services/draft-publish";
 import { batchRun, pagesNeedingRun, startBatchRun } from "@/services/page-batch";
+import { discardPage } from "@/services/page-discard";
 import { fileWorkspaceIntoChapter } from "@/services/workspace-file";
 import { importIntoWorkspace, type WorkspaceUpload } from "@/services/workspace-import";
 import { importUrlsIntoWorkspace, MAX_URLS_PER_IMPORT, tidyUrls } from "@/services/url-import";
@@ -196,19 +197,49 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
 
   .delete(
     "/:id",
-    async ({ params, status }) => {
+    async ({ params, query, status }) => {
       // Under the lock, where a run can neither be going nor start: closing a workspace mid-run would leave the run
       // translating pages that no longer belong to anything
       const outcome = await withWorkspaceLock(params.id, async () => {
         if (batchRun(runKey(params.id))?.running) return "running" as const;
-        // The pages aren't touched: the foreign key leaves them loose in the Studio
-        return (await WorkspaceStore.delete(params.id)) ? "deleted" as const : "missing" as const;
+        if (!(await WorkspaceStore.findById(params.id))) return "missing" as const;
+
+        let pagesDeleted = 0;
+        let pagesKept = 0;
+        if (!query.keep_pages) {
+          const pages = await WorkspaceStore.pages(params.id);
+          // A page still in the pipeline can't go: refuse the whole close rather than leave half a workspace behind
+          if (pages.some((page) => page.status === "queued" || page.status === "running")) return "busy" as const;
+          for (const page of pages) {
+            // A page filed into a chapter is one readers are served: closing the workspace detaches it, never deletes
+            // it. Loose pages and drafts belong to the workspace alone, and go with it.
+            if (page.chapterId !== null) {
+              pagesKept++;
+              continue;
+            }
+            const discarded = await withPageLock(page.id, () => discardPage(page.id));
+            if (discarded.ok) pagesDeleted++;
+          }
+        }
+        // Whatever is left falls back to loose (the foreign key clears it): kept pages, or everything with keep_pages
+        await WorkspaceStore.delete(params.id);
+        return { pagesDeleted, pagesKept };
       });
       if (outcome === "running") return status(409, { error: "this workspace is being translated — wait for the run to finish" });
+      if (outcome === "busy") return status(409, { error: "a page is still being translated — wait for it, or keep the pages" });
       if (outcome === "missing") return status(404, { error: "workspace not found" });
-      return { deleted: params.id };
+      return { deleted: params.id, pages_deleted: outcome.pagesDeleted, pages_kept: outcome.pagesKept };
     },
-    { params: WorkspaceParams, response: { 200: t.Object({ deleted: t.Integer() }), 404: ErrBody, 409: ErrBody } },
+    {
+      params: WorkspaceParams,
+      /** Keep the workspace's pages as loose drafts instead of deleting them with it. */
+      query: t.Object({ keep_pages: t.Optional(t.Boolean()) }),
+      response: {
+        200: t.Object({ deleted: t.Integer(), pages_deleted: t.Integer(), pages_kept: t.Integer() }),
+        404: ErrBody,
+        409: ErrBody,
+      },
+    },
   )
 
   .post(
@@ -356,7 +387,11 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
       // The whole run holds the workspace's lock, in the order filing takes them too (workspace, then page, then the
       // origin a draft publishes over), so closing the workspace can't detach pages halfway through publishing them
       const result = await withWorkspaceLock(params.id, async () => {
-        if (!(await WorkspaceStore.findById(params.id))) return null;
+        const workspace = await WorkspaceStore.findById(params.id);
+        if (!workspace) return null;
+        // Publishing a workspace means putting its pages in front of readers, which only a chapter does: an import
+        // not yet filed has no chapter, so there is nowhere for them to go
+        if (workspace.chapterId === null) return "unbound" as const;
         // A run works outside this lock once it has started, and replaces results as it goes: publishing now would
         // hand readers a page the run is about to redo
         if (batchRun(runKey(params.id))?.running) return "running" as const;
@@ -386,6 +421,7 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
       });
       if (!result) return status(404, { error: "workspace not found" });
       if (result === "running") return status(409, { error: "this workspace is being translated — wait for the run to finish" });
+      if (result === "unbound") return status(409, { error: "file this workspace into a chapter before publishing it" });
       return result;
     },
     {

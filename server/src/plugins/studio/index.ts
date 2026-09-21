@@ -28,8 +28,8 @@
  */
 import Elysia, { t } from "elysia";
 import { existsSync } from "node:fs";
-import { rename, rm } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import type { Page, PageStageRow } from "@/db/schema";
 import { childLogger } from "@/lib/logger";
 import { ErrBody, optionalEnum } from "@/lib/schemas";
@@ -39,13 +39,14 @@ import { enginesNotReady, pageEngines } from "@/services/page-engines";
 import { historyFile, listHistory, restoreResult } from "@/services/page-history";
 import { pageLocation, pageLocations } from "@/services/page-location";
 import { publishBlocker, publishDraft } from "@/services/draft-publish";
+import { discardPage } from "@/services/page-discard";
 import { publishPage } from "@/services/page-publish";
 import { decodeBase64Image, runStoredPage, submitPageJob } from "@/services/page-jobs";
 import { MASK_LAYER_FILES, PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
 import { FONT_FILES } from "@/services/typeset-service";
 import { FONT_VARIANTS, TEXT_ALIGNS } from "@/shared/typeset";
 import { imageSize, maskFromImage, maskToPng } from "@/lib/mask";
-import { PAGE_JOBS_DIR, pageDir, PageStore, type StageName } from "@/stores/page-store";
+import { pageDir, PageStore, type StageName } from "@/stores/page-store";
 import { PageSummary, toSummary } from "@/plugins/studio/page-summary";
 import { workspacesPlugin } from "@/plugins/studio/workspaces";
 
@@ -285,26 +286,8 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       if (check.page.chapterId !== null && !query.force) {
         return status(409, { error: "this page belongs to a chapter — remove it from the chapter, or delete it with force" });
       }
-      // Only ever this page's own folder: the resolved path must be exactly <jobs dir>/<id>
-      const jobsDir = resolve(PAGE_JOBS_DIR);
-      const dir = resolve(pageDir(params.id));
-      if (dirname(dir) !== jobsDir || basename(dir) !== params.id) return status(409, { error: "refusing to delete an unexpected path" });
-      // Failure-safe order: move the folder aside, delete the row, then remove the moved folder.
-      // If the row delete fails, the folder is put back so the page stays complete.
-      const parked = existsSync(dir) ? join(jobsDir, `${params.id}.deleting-${Date.now()}`) : null;
-      if (parked) await rename(dir, parked);
-      try {
-        await PageStore.deletePage(params.id);
-      } catch (err) {
-        if (parked) await rename(parked, dir).catch((restoreErr: unknown) => log.error({ err: restoreErr, pageId: params.id, parked }, "Couldn't restore the page folder"));
-        throw err;
-      }
-      // The page is already deleted: cleanup is best-effort, and leftovers are swept at the next server start
-      if (parked) {
-        await rm(parked, { recursive: true, force: true }).catch((err: unknown) =>
-          log.warn({ err, pageId: params.id, parked }, "Couldn't remove the deleted page's folder; it will be swept at next start"));
-      }
-      log.info({ pageId: params.id }, "Page deleted");
+      const discarded = await discardPage(params.id);
+      if (!discarded.ok) return status(409, { error: discarded.error });
       return { deleted: params.id };
     }),
     {
