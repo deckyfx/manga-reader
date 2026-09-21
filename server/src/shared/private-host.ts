@@ -44,12 +44,20 @@ function privateIpv4(parts: number[]): boolean {
 function privateIpv6(host: string): boolean {
   const address = host.toLowerCase();
   if (address === "::" || address === "::1") return true;
-  // ::ffff:192.168.1.1 and ::192.168.1.1 both address the IPv4 host at the end
-  const mapped = /^::(?:ffff:(?:0{1,4}:)?)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(address);
-  if (mapped) {
-    const parts = ipv4Parts(mapped[1] ?? "");
-    // An address that looks mapped but isn't a valid IPv4 is not something to fetch from either
+  // An IPv4 address carried inside an IPv6 one reaches exactly that IPv4 host, in either of the two spellings:
+  // the dotted tail somebody types, and the hex pairs `URL.hostname` normalises it to — `::ffff:192.168.1.1`
+  // arrives here as `::ffff:c0a8:101`, which is the form that actually has to be caught
+  const dotted = /^::(?:ffff:(?:0{1,4}:)?)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(address);
+  if (dotted) {
+    const parts = ipv4Parts(dotted[1] ?? "");
+    // Something shaped like a mapped address but holding no valid IPv4 is not worth fetching from either
     return parts === null || privateIpv4(parts);
+  }
+  const hex = /^::(?:ffff:(?:0{1,4}:)?)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(address);
+  if (hex) {
+    const high = Number.parseInt(hex[1] ?? "", 16);
+    const low = Number.parseInt(hex[2] ?? "", 16);
+    return privateIpv4([high >> 8, high & 0xff, low >> 8, low & 0xff]);
   }
   if (/^f[cd][0-9a-f]{0,2}:/.test(address)) return true;       // fc00::/7, unique local
   if (/^fe[89ab][0-9a-f]?:/.test(address)) return true;        // fe80::/10, link-local

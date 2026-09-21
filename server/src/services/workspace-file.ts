@@ -46,6 +46,14 @@ export function fileWorkspaceIntoChapter(workspaceId: number, chapterId: number)
     if (batchRun(`workspace:${workspaceId}`)?.running) {
       return { ok: false as const, error: "this workspace is being translated — wait for the run to finish" };
     }
+    // Before a single page moves: an adult import makes its series adult, and a reader asking for the series while
+    // the pages were arriving would otherwise be handed them — the series still reading as ordinary. Set first,
+    // and the window doesn't exist. Never cleared here: a series marked adult stays marked, whatever is filed later
+    if (workspace.adult) {
+      const chapter = await ChapterStore.findById(chapterId);
+      if (chapter) await SeriesStore.update(chapter.seriesId, { adult: true });
+    }
+
     const report: FileReport = { filed: 0, published: 0, skipped: [] };
     const pages = await WorkspaceStore.pages(workspaceId);
     let order = await PageStore.maxSortOrder(chapterId);
@@ -79,13 +87,6 @@ export function fileWorkspaceIntoChapter(workspaceId: number, chapterId: number)
     }
 
     await WorkspaceStore.update(workspaceId, { chapterId });
-    // An adult import makes its series adult: the flag rides in with the pages, so nobody has to remember to set it
-    // by hand for a site that is adult by definition. Never cleared here — a series marked adult stays that way,
-    // whatever is filed into it afterwards
-    if (workspace.adult) {
-      const chapter = await ChapterStore.findById(chapterId);
-      if (chapter) await SeriesStore.update(chapter.seriesId, { adult: true });
-    }
     log.info({ workspaceId, chapterId, ...report, skipped: report.skipped.length }, "Filed a workspace into a chapter");
     return { ok: true as const, report };
   });

@@ -153,4 +153,40 @@ describe("an adult import", () => {
     expect((await call("POST", `/studio/api/workspaces/${workspace.id}/file`, { chapter_id: chapterId }, { cookie })).status).toBe(200);
     expect((await SeriesStore.findById(seriesId))?.adult).toBe(true);
   });
+
+  test("marks the series before its pages arrive, not after", async () => {
+    const { cookie, id: userId } = await signedIn("contributor");
+    const series = await call<{ series: { id: number } }>("POST", "/manage/api/series", { title: `Timing ${crypto.randomUUID()}` }, { cookie });
+    const seriesId = series.body.series.id;
+    const chapter = await call<{ unsorted: { id: number }[] }>("POST", "/manage/api/chapters", { series_id: seriesId, title: "One" }, { cookie });
+    const chapterId = chapter.body.unsorted[0]!.id;
+
+    const workspace = await WorkspaceStore.create({
+      name: "Adult", createdBy: userId, sourceUrl: null, sourceProvider: "exhentai", adult: true, chapterId: null,
+    });
+    const form = new FormData();
+    form.append("files", new File([await png()], "1.png", { type: "image/png" }));
+    form.append("start_index", "0");
+    await call("POST", `/studio/api/workspaces/${workspace.id}/pages`, form, { cookie });
+
+    // Watched at the one moment that matters: as each page moves into the chapter. A reader asking then must not
+    // find the series still reading as ordinary while its adult pages are already in it. Polling alongside would
+    // prove nothing — the window is a few milliseconds and a poll can simply miss it — so the move itself reports
+    const movePage = PageStore.filePage.bind(PageStore);
+    const adultWhenPageMoved: (boolean | undefined)[] = [];
+    PageStore.filePage = async (id, fields) => {
+      if (fields.chapterId === chapterId) adultWhenPageMoved.push((await SeriesStore.findById(seriesId))?.adult);
+      return movePage(id, fields);
+    };
+
+    try {
+      expect((await call("POST", `/studio/api/workspaces/${workspace.id}/file`, { chapter_id: chapterId }, { cookie })).status).toBe(200);
+    } finally {
+      PageStore.filePage = movePage;
+    }
+
+    expect(adultWhenPageMoved).toHaveLength(1);
+    expect(adultWhenPageMoved[0]).toBe(true);
+    expect((await SeriesStore.findById(seriesId))?.adult).toBe(true);
+  });
 });

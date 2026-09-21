@@ -161,13 +161,23 @@ function renderSeries(info: SeriesInfo): void {
   const create = el("button", "menu-btn primary", "Create series");
   const back = el("button", "link-btn", "Back");
   back.addEventListener("click", () => void start());
+  // Inside the form, not in place of it: `message()` replaces the whole panel, which would take the fields — and
+  // whatever the person had corrected in them — along with the failure it was reporting
+  const failure = el("p", "error");
+  failure.hidden = true;
+  const failed = (text: string): void => {
+    failure.textContent = text;
+    failure.hidden = false;
+    create.removeAttribute("disabled");
+  };
 
   create.addEventListener("click", () => {
     const name = title.value.trim();
     if (!name) {
-      message("Give the series a title.", "error");
+      failed("Give the series a title.");
       return;
     }
+    failure.hidden = true;
     create.setAttribute("disabled", "true");
     void send<{ ok: boolean; error?: string; series?: { id: number; title: string; coverError?: string } }>({
       type: "create-series",
@@ -179,8 +189,7 @@ function renderSeries(info: SeriesInfo): void {
       },
     }).then(async (answer) => {
       if (!answer?.ok || !answer.series) {
-        create.removeAttribute("disabled");
-        message(answer?.error ?? "The series couldn't be made.", "error");
+        failed(answer?.error ?? "The series couldn't be made.");
         return;
       }
       const nodes: Node[] = [el("p", "import-name", answer.series.title), el("p", "muted", "Series created.")];
@@ -200,8 +209,7 @@ function renderSeries(info: SeriesInfo): void {
       show(...nodes);
     }).catch((err: unknown) => {
       // A worker that went away mid-click would otherwise leave a dead button and no explanation
-      create.removeAttribute("disabled");
-      message(err instanceof Error ? err.message : String(err), "error");
+      failed(err instanceof Error ? err.message : String(err));
     });
   });
 
@@ -212,7 +220,7 @@ function renderSeries(info: SeriesInfo): void {
     adultRow,
   ];
   if (info.cover) nodes.push(el("p", "muted", "Its cover comes across too."));
-  nodes.push(create, back);
+  nodes.push(failure, create, back);
   show(...nodes);
 }
 

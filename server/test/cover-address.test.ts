@@ -4,9 +4,16 @@
  * The extension imports this same module, so these cases are the rule itself rather than a copy of it. The cover
  * address comes from `og:image` on whatever page the user is looking at: a page can already make a browser request
  * a LAN address, but it cannot read the answer, and the worker could — then upload it here.
+ *
+ * Addresses go through `new URL()` wherever the real caller would, because that is where they change shape:
+ * `::ffff:192.168.1.1` arrives at the check as `::ffff:c0a8:101`. Testing the raw string is how that was missed
+ * the first time.
  */
 import { describe, expect, test } from "bun:test";
 import { isPrivateHost } from "@/shared/private-host";
+
+/** The host as the worker sees it: whatever `URL` made of what the page supplied. */
+const hostOf = (host: string): string => new URL(`http://${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}/x`).hostname;
 
 describe("addresses on the client's own network", () => {
   test("the machine itself", () => {
@@ -37,6 +44,17 @@ describe("addresses on the client's own network", () => {
       expect(isPrivateHost(host)).toBe(true);
     }
   });
+
+  test("and the same addresses after a URL has normalised them", () => {
+    // `URL` rewrites the dotted tail as hex pairs: ::ffff:192.168.1.1 becomes ::ffff:c0a8:101. The check runs on
+    // `URL.hostname`, so this is the shape that actually has to be caught
+    for (const host of ["::ffff:192.168.1.1", "::ffff:127.0.0.1", "::ffff:10.0.0.1", "::ffff:169.254.169.254", "fe80::1"]) {
+      expect(isPrivateHost(hostOf(host))).toBe(true);
+    }
+    // The hex spelling written out by hand reaches the same place
+    expect(isPrivateHost("::ffff:c0a8:101")).toBe(true);
+    expect(isPrivateHost("::ffff:7f00:1")).toBe(true);
+  });
 });
 
 describe("addresses out on the internet", () => {
@@ -54,6 +72,9 @@ describe("addresses out on the internet", () => {
     ]) {
       expect(isPrivateHost(host)).toBe(false);
     }
+    // Normalised too: 8.8.8.8 becomes ::ffff:808:808, which must stay allowed
+    expect(isPrivateHost(hostOf("::ffff:8.8.8.8"))).toBe(false);
+    expect(isPrivateHost(hostOf("2606:4700::1111"))).toBe(false);
   });
 
   test("a name is treated as public, because deciding otherwise needs a resolver", () => {
