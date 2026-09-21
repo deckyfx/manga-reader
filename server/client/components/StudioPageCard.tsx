@@ -54,7 +54,7 @@ export function StudioPageCard({ page, caption, actions }: StudioPageCardProps) 
           ) : null}
         </div>
         <div className="truncate px-3 pt-1 text-xs text-gray-300" title={page.source}>{pageLabel(page)}</div>
-        <div className="truncate px-3 pb-2 text-[11px] text-gray-500">
+        <div className="truncate px-3 pb-2 text-[11px] text-gray-500" title={page.location ? page.location.chapter_title : undefined}>
           {caption ?? (page.location
             ? `${page.location.chapter_title} · page ${page.location.index}/${page.location.total}`
             : `${page.width}×${page.height} · draft`)}

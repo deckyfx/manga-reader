@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FolderMinus, Loader2, RotateCcw, Trash2 } from "lucide-react";
 import { deletePage, rollbackPage, unfilePage } from "../api";
+import { forgetPage, type Restore } from "../lib/optimistic";
 import { Modal } from "./Modal";
 
 interface DiscardPageDialogProps {
@@ -35,7 +36,20 @@ export function DiscardPageDialog({ page, onClose, onDone }: DiscardPageDialogPr
 
   const rollbackM = useMutation({ mutationFn: () => rollbackPage(page.id, page.revision), onSuccess: () => refresh(false) });
   const unfileM = useMutation({ mutationFn: () => unfilePage(page.id), onSuccess: () => refresh(false) });
-  const deleteM = useMutation({ mutationFn: () => deletePage(page.id, filed !== null), onSuccess: () => refresh(true) });
+  const deleteM = useMutation({
+    mutationFn: () => deletePage(page.id, filed !== null),
+    // Gone from every list at once rather than after the next fetch; put back if the server refuses
+    onMutate: async (): Promise<Restore> => {
+      await qc.cancelQueries({ queryKey: ["studio-pages"] });
+      await qc.cancelQueries({ queryKey: ["workspace"] });
+      return forgetPage(qc, page.id);
+    },
+    onError: (_error, _vars, restore) => restore?.(),
+    onSuccess: () => {
+      for (const key of ["workspace", "workspaces"]) void qc.invalidateQueries({ queryKey: [key] });
+      refresh(true);
+    },
+  });
   const busy = rollbackM.isPending || unfileM.isPending || deleteM.isPending;
   const error = rollbackM.error ?? unfileM.error ?? deleteM.error;
 

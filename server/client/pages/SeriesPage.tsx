@@ -24,7 +24,7 @@ export function SeriesPage() {
         <Link to="/read" className="text-gray-400 hover:text-white" title="Library">
           <ArrowLeft size={18} />
         </Link>
-        <h1 className="text-base font-semibold truncate">{series.title}</h1>
+        <h1 className="max-w-[min(36rem,60vw)] truncate text-base font-semibold" title={series.title}>{series.title}</h1>
         <span className="text-xs text-gray-500">{series.chapters} chapter{series.chapters === 1 ? "" : "s"}</span>
         <Link
           to={`/manage/series/${series.id}`}
@@ -109,7 +109,7 @@ function ChapterList({ chapters }: { chapters: ChapterSummary[] }) {
             to={chapter.pages > 0 ? chapterLink(chapter.id, chapter.pages) : `/manage/chapters/${chapter.id}`}
             className="flex items-center gap-2 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 hover:border-indigo-500/60 transition-colors"
           >
-            <span className="text-sm truncate">
+            <span className="min-w-0 text-sm truncate" title={chapter.title}>
               {chapter.number ? `${chapter.number}. ` : ""}
               {chapter.title}
             </span>

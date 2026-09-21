@@ -168,11 +168,11 @@ export function ManageChapterPage() {
         <Link to={`/manage/series/${series.id}`} className="text-gray-400 hover:text-white" title="Back to the series">
           <ArrowLeft size={18} />
         </Link>
-        <h1 className="truncate text-base font-semibold">
+        <h1 className="max-w-[min(36rem,60vw)] truncate text-base font-semibold" title={chapter.title}>
           {chapter.number ? `${chapter.number}. ` : ""}
           {chapter.title}
         </h1>
-        <span className="truncate text-xs text-gray-500">{series.title}</span>
+        <span className="max-w-[min(20rem,40vw)] truncate text-xs text-gray-500" title={series.title}>{series.title}</span>
         <span className="text-xs text-gray-500">{pages.length} page{pages.length === 1 ? "" : "s"}</span>
         {error && <span className="truncate text-xs text-red-400">{error.message}</span>}
 

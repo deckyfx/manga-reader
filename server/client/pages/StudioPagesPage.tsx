@@ -150,25 +150,30 @@ export function StudioPagesPage() {
             <h2 className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-gray-500">
               <Layers size={13} /> Workspaces
             </h2>
-            <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]">
+            <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(320px,1fr))]">
               {workspaces.map((workspace) => (
                 <Link
                   key={workspace.id}
                   to={`/studio/w/${workspace.id}`}
-                  className="flex gap-3 overflow-hidden rounded-xl border border-gray-800 bg-gray-900 p-2 transition-colors hover:border-indigo-500"
+                  className="flex gap-4 overflow-hidden rounded-xl border border-gray-800 bg-gray-900 p-3 transition-colors hover:border-indigo-500"
                 >
-                  <div className="h-20 w-14 shrink-0 overflow-hidden rounded-lg bg-gray-950">
+                  <div className="h-36 w-24 shrink-0 overflow-hidden rounded-lg bg-gray-950">
                     {workspace.first_page_id && (
                       <img src={pageFileUrl(workspace.first_page_id, "original.png", workspace.updated_at)} alt="" loading="lazy" className="h-full w-full object-cover" />
                     )}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm text-gray-200" title={workspace.name}>{workspace.name}</div>
-                    <div className="text-[11px] text-gray-500">
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <div className="line-clamp-2 break-words text-sm font-medium leading-snug text-gray-200" title={workspace.name}>{workspace.name}</div>
+                    <div className="text-xs text-gray-500">
                       {workspace.pages} page{workspace.pages === 1 ? "" : "s"}
                       {workspace.running > 0 && <span className="text-indigo-400"> · {workspace.running} running</span>}
                     </div>
-                    <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                    <div className="flex flex-wrap gap-1 text-[11px] text-gray-500">
+                      {workspace.source_provider && <span className="truncate" title={workspace.source_url ?? undefined}>{workspace.source_provider}</span>}
+                      {workspace.chapter_id !== null && <span className="rounded-full bg-indigo-900/50 px-1.5 text-indigo-300">in a chapter</span>}
+                      {workspace.adult && <span className="rounded-full bg-rose-900/50 px-1.5 text-rose-300">adult</span>}
+                    </div>
+                    <div className="mt-auto flex flex-wrap gap-1 text-[11px]">
                       {workspace.done > 0 && <span className="rounded-full bg-emerald-900/50 px-1.5 text-emerald-300">{workspace.done} done</span>}
                       {workspace.idle > 0 && <span className="rounded-full bg-gray-800 px-1.5 text-gray-400">{workspace.idle} to do</span>}
                       {workspace.stale > 0 && <span className="rounded-full bg-amber-900/50 px-1.5 text-amber-300">{workspace.stale} stale</span>}
