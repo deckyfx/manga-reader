@@ -36,16 +36,17 @@ export function StudioWorkspacePage() {
   const [uploading, setUploading] = useState(false);
   const [importingUrls, setImportingUrls] = useState(false);
   // Where the address list's first send started, so sending the same list again fills the same positions
-  const urlStart = useRef<number | null>(null);
+  const urlStart = useRef<{ workspaceId: number; index: number } | null>(null);
   // Where the next batch goes (files or addresses), from the last import's own answer: the cached workspace may not
   // have refetched yet, and a batch started at a filled position is skipped as a retry
-  // Tagged with its workspace: this page stays mounted when the route moves to another one
-  const nextIndex = useRef<{ workspaceId: number; index: number } | null>(null);
+  // One per workspace: this page stays mounted when the route moves to another, and a batch still going in the one
+  // left behind must not move the new one's cursor
+  const nextIndex = useRef(new Map<number, number>());
   /** The first free position: the last import's answer, or the workspace's if pages arrived some other way since. */
   const startIndex = () =>
-    Math.max(nextIndex.current?.workspaceId === id ? nextIndex.current.index : 0, workspaceQ.data?.workspace.next_index ?? 0);
+    Math.max(nextIndex.current.get(id) ?? 0, workspaceQ.data?.workspace.next_index ?? 0);
   const noteNextIndex = (index: number) => {
-    nextIndex.current = { workspaceId: id, index: Math.max(startIndex(), index) };
+    nextIndex.current.set(id, Math.max(startIndex(), index));
   };
   // Uploads and address imports take turns: each picks its start only after the one before has answered, so two
   // batches can never claim the same positions (the later one would be skipped as a retry)
@@ -343,8 +344,10 @@ export function StudioWorkspacePage() {
           onImport={async (urls, { resend }) => {
             // A resend reuses the first send's positions, so pages that already landed are skipped, not doubled
             const report = await inTurn(async () => {
-              const start = resend && urlStart.current !== null ? urlStart.current : startIndex();
-              urlStart.current = start;
+              // Only this workspace's first send: the dialog can outlive a route change (browser back with it open)
+              const first = urlStart.current?.workspaceId === id ? urlStart.current.index : null;
+              const start = resend && first !== null ? first : startIndex();
+              urlStart.current = { workspaceId: id, index: start };
               const answer = await importWorkspacePageUrls(id, urls, start);
               noteNextIndex(answer.workspace.next_index);
               return answer;
