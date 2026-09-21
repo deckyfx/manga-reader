@@ -67,6 +67,11 @@ export const series = sqliteTable("series", {
   author: text("author"),
   /** ongoing | completed | hiatus */
   status: text("status").notNull().default("ongoing"),
+  /**
+   * Adult work, hidden from readers who haven't asked to see it. Set by hand, or carried over from a workspace
+   * whose extractor said so (exhentai and the like).
+   */
+  adult: integer("adult", { mode: "boolean" }).notNull().default(false),
   /** How the reader pages through this series: rtl (manga, default) | ltr */
   readingDirection: text("reading_direction").notNull().default("rtl"),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
@@ -345,6 +350,8 @@ export const users = sqliteTable("users", {
   /** From Google sign-in, or set by an admin; unique when present. */
   email: text("email"),
   role: text("role").notNull().default("reader"),
+  /** Whether this account wants adult series in the reader. Off until somebody turns it on; guests never see them. */
+  showAdult: integer("show_adult", { mode: "boolean" }).notNull().default(false),
   /** Set when the account is suspended: it keeps its work but can't sign in. */
   disabledAt: text("disabled_at"),
   lastSeenAt: text("last_seen_at"),

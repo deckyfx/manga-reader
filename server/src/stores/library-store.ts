@@ -22,6 +22,11 @@ export interface SeriesFilter {
   hasChapters?: boolean;
   status?: SeriesStatus;
   sort?: "title" | "recent";
+  /**
+   * Leave adult series out. The reader passes this for anybody who hasn't asked to see them — including guests —
+   * and the management side never passes it, because a contributor curating the library has to see what is in it.
+   */
+  hideAdult?: boolean;
 }
 
 /** A series with everything the library card shows. */
@@ -77,6 +82,7 @@ export class SeriesStore {
     const conditions = [];
     if (filter.search?.trim()) conditions.push(like(series.title, `%${filter.search.trim()}%`));
     if (filter.status) conditions.push(eq(series.status, filter.status));
+    if (filter.hideAdult) conditions.push(eq(series.adult, false));
 
     const required = normaliseTags(filter.withTags ?? []);
     if (required.length > 0) {

@@ -85,6 +85,9 @@ export const loginWithPasskey = (body: { challenge: string; response: unknown })
 
 export const logout = () => unwrap(api.auth.api.logout.post());
 
+/** Whether the reader shows this account adult series. */
+export const setShowAdult = (show: boolean) => unwrap(api.auth.api.me.patch({ show_adult: show }));
+
 /** Changes your own password; every other session is signed out. */
 export const changePassword = (body: { current: string; next: string }) => unwrap(api.auth.api.password.post(body));
 
@@ -398,6 +401,8 @@ export const createSeries = (body: {
   author?: string | null;
   status?: SeriesStatus;
   reading_direction?: ReadingDirection;
+  /** Adult work: hidden from readers who haven't asked for it. */
+  adult?: boolean;
   tags?: string[];
 }) => unwrap(api.manage.api.series.post(body));
 

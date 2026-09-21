@@ -74,6 +74,8 @@ export const UserSchema = t.Object({
   username: t.String(),
   display_name: t.Nullable(t.String()),
   role: t.UnionEnum([...USER_ROLES]),
+  /** Whether the reader shows this account adult series. */
+  show_adult: t.Boolean(),
   disabled: t.Boolean(),
   email: t.Nullable(t.String()),
   last_seen_at: t.Nullable(t.String()),
@@ -87,6 +89,7 @@ export const toUser = (user: User) => ({
   role: (USER_ROLES as readonly string[]).includes(user.role) ? (user.role as UserRole) : ("reader" as const),
   disabled: user.disabledAt !== null,
   email: user.email,
+  show_adult: user.showAdult,
   last_seen_at: user.lastSeenAt,
   created_at: user.createdAt,
 });
@@ -237,6 +240,23 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     if (peer && env.TRUSTED_PROXIES.includes(peer)) viaTrustedProxy.add(request);
   })
   .use(authContext)
+
+  .patch(
+    "/me",
+    async ({ body, principal, status }) => {
+      if (!principal) return status(401, { error: AUTH_FAILED });
+      await UserStore.update(principal.user.id, { showAdult: body.show_adult });
+      const updated = await UserStore.findById(principal.user.id);
+      return { user: updated ? toUser(updated) : toUser(principal.user) };
+    },
+    {
+      body: t.Object({
+        /** Whether the reader shows adult series to this account. Off by default, and never on for a guest. */
+        show_adult: t.Boolean(),
+      }),
+      response: { 200: t.Object({ user: UserSchema }), 401: ErrBody },
+    },
+  )
 
   .get(
     "/me",

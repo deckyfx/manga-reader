@@ -120,6 +120,13 @@
       "when": 1789892510390,
       "tag": "0016_cloudy_yellow_claw",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1789955014743,
+      "tag": "0017_handy_adam_warlock",
+      "breakpoints": true
     }
   ]
 }

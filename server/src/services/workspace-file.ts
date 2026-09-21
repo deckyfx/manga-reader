@@ -11,6 +11,7 @@ import { batchRun } from "@/services/page-batch";
 import { publishBlocker } from "@/services/draft-publish";
 import { publishPage } from "@/services/page-publish";
 import { pageDir, PageStore } from "@/stores/page-store";
+import { ChapterStore, SeriesStore } from "@/stores/library-store";
 import { WorkspaceStore } from "@/stores/workspace-store";
 
 const log = childLogger("workspace-file");
@@ -78,6 +79,13 @@ export function fileWorkspaceIntoChapter(workspaceId: number, chapterId: number)
     }
 
     await WorkspaceStore.update(workspaceId, { chapterId });
+    // An adult import makes its series adult: the flag rides in with the pages, so nobody has to remember to set it
+    // by hand for a site that is adult by definition. Never cleared here — a series marked adult stays that way,
+    // whatever is filed into it afterwards
+    if (workspace.adult) {
+      const chapter = await ChapterStore.findById(chapterId);
+      if (chapter) await SeriesStore.update(chapter.seriesId, { adult: true });
+    }
     log.info({ workspaceId, chapterId, ...report, skipped: report.skipped.length }, "Filed a workspace into a chapter");
     return { ok: true as const, report };
   });
