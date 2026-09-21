@@ -37,8 +37,16 @@ export function StudioWorkspacePage() {
   const [importingUrls, setImportingUrls] = useState(false);
   // Where the address list's first send started, so sending the same list again fills the same positions
   const urlStart = useRef<number | null>(null);
-  // Where the next list goes, from the last import's own answer: the cached workspace may not have refetched yet
-  const urlNext = useRef<number | null>(null);
+  // Where the next batch goes (files or addresses), from the last import's own answer: the cached workspace may not
+  // have refetched yet, and a batch started at a filled position is skipped as a retry
+  // Tagged with its workspace: this page stays mounted when the route moves to another one
+  const nextIndex = useRef<{ workspaceId: number; index: number } | null>(null);
+  /** The first free position: the last import's answer, or the workspace's if pages arrived some other way since. */
+  const startIndex = () =>
+    Math.max(nextIndex.current?.workspaceId === id ? nextIndex.current.index : 0, workspaceQ.data?.workspace.next_index ?? 0);
+  const noteNextIndex = (index: number) => {
+    nextIndex.current = { workspaceId: id, index: Math.max(startIndex(), index) };
+  };
   // The close dialog, holding whether the loose pages stay; null while it's shut
   const [closing, setClosing] = useState<{ keepPages: boolean } | null>(null);
 
@@ -115,7 +123,8 @@ export function StudioWorkspacePage() {
     try {
       // Past every position in use, not the page count: a deleted page leaves a gap, and a batch landing on a
       // position that already has a page is skipped as a retry
-      const report = await uploadWorkspacePages(id, Array.from(files), workspace.next_index);
+      const report = await uploadWorkspacePages(id, Array.from(files), startIndex());
+      noteNextIndex(report.workspace.next_index);
       refresh();
       const skipped = report.skipped.length;
       toast.info(`Added ${report.imported} page${report.imported === 1 ? "" : "s"}${skipped > 0 ? `, skipped ${skipped}` : ""}`);
@@ -209,7 +218,6 @@ export function StudioWorkspacePage() {
           <button
             onClick={() => {
               urlStart.current = null;
-              urlNext.current = null;
               setImportingUrls(true);
             }}
             title="Download pages from their addresses"
@@ -322,10 +330,10 @@ export function StudioWorkspacePage() {
           }}
           onImport={async (urls, { resend }) => {
             // A resend reuses the first send's positions, so pages that already landed are skipped, not doubled
-            const start = resend && urlStart.current !== null ? urlStart.current : (urlNext.current ?? workspace.next_index);
+            const start = resend && urlStart.current !== null ? urlStart.current : startIndex();
             urlStart.current = start;
             const report = await importWorkspacePageUrls(id, urls, start);
-            urlNext.current = report.workspace.next_index;
+            noteNextIndex(report.workspace.next_index);
             refresh();
             return {
               imported: report.imported,
