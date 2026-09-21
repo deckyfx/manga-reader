@@ -87,6 +87,26 @@ function imagePageLinks(document: Document, base: URL): string[] {
   return links;
 }
 
+/** Tags offered at most, so a gallery tagged exhaustively doesn't bury the suggestions. */
+const MAX_TAGS = 60;
+
+/**
+ * The gallery's tags as the site shows them, `namespace:tag` — `parody:azur lane`, `character:…`. Checked against a
+ * live gallery on 2026-09-21: each tag is a cell `#td_<namespace>:<tag_with_underscores>` under `#taglist`. The
+ * namespace is kept: it is what tells a parody from a character, and the tags are suggestions the user edits anyway.
+ */
+export function galleryTags(document: Document): string[] {
+  const tags = new Set<string>();
+  for (const cell of Array.from(document.querySelectorAll('#taglist [id^="td_"]'))) {
+    const id = cell.getAttribute("id")?.slice("td_".length) ?? "";
+    // The id spells spaces as underscores; the library keeps tags lower case and short
+    const tag = id.replace(/_/g, " ").trim().toLowerCase().slice(0, 40);
+    if (tag.includes(":") && tag.length > 2) tags.add(tag);
+    if (tags.size >= MAX_TAGS) break;
+  }
+  return [...tags];
+}
+
 /** Whether this document is the gallery it should be, rather than the "no access" or an error page. */
 function looksLikeGallery(document: Document): boolean {
   return document.querySelector("#gn") !== null || document.querySelector("a[href*='/s/']") !== null;
@@ -158,9 +178,11 @@ export function createExhentaiExtractor(intervalMs = MIN_INTERVAL_MS): Extractor
       ctx.log(`${pageLinks.length} page(s) in the gallery`);
       // The image pages, not the images: each is resolved as the import reaches it (see `resolve`), so a long gallery
       // starts importing at once instead of after a second per page of reading first
+      const tags = galleryTags(ctx.document);
       return {
         images: pageLinks,
         ...(title ? { title } : {}),
+        ...(tags.length > 0 ? { tags } : {}),
         // Every gallery here is adult; a series filed from this import inherits it
         adult: true,
       };

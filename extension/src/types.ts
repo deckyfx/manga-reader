@@ -141,6 +141,8 @@ export interface ImportRequest {
   workspaceId?: number;
   /** Translate the pages as they land, one at a time. */
   runAfter: boolean;
+  /** The site's tags for it, kept on the workspace as suggestions for a series made from it later. */
+  tags?: string[];
   /** The listed items are pages whose images the tab resolves, one at a time, as the import reaches them. */
   resolves: boolean;
   /** The tab that holds the user's cookies for resolving; it has to stay open until every page is resolved. */
@@ -154,6 +156,8 @@ export interface CreateSeriesRequest {
   /** Address of the cover to fetch and upload; the worker does both, as it does for chapter images. */
   cover?: string;
   adult: boolean;
+  /** Tags to start the series with — the page's own suggestions, as the person left them. */
+  tags?: string[];
 }
 
 export interface CreateSeriesMsg       { type: "create-series"; request: CreateSeriesRequest }

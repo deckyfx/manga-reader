@@ -206,6 +206,22 @@ describe("the exhentai extractor", () => {
       expect(result).toMatchObject({ title: "日本語の題", adult: true });
     });
 
+    test("reads the gallery's tags as the site shows them, namespace and all", async () => {
+      const ctx = galleryContext(
+        `<h1 id="gn">A Gallery</h1><a href="/s/aaa111/123456-1">1</a>
+         <div id="taglist"><table>
+           <tr><td class="tc">parody:</td><td><div id="td_parody:azur_lane"><a id="ta_parody:azur_lane">azur lane</a></div></td></tr>
+           <tr><td class="tc">character:</td><td><div id="td_character:some_name"><a>some name</a></div>
+             <div id="td_character:some_name"><a>some name</a></div></td></tr>
+         </table></div>`,
+        {},
+        GALLERY,
+      );
+      const result = await extractor.extract(ctx);
+      // Underscores back to spaces, the namespace kept, a tag listed twice offered once
+      expect(result.tags).toEqual(["parody:azur lane", "character:some name"]);
+    });
+
     test("includes the pages before the open one, and each exactly once", async () => {
       const ctx = galleryContext(
         // The reader is on page 2 of 2 and presses Import there

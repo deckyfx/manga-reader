@@ -98,7 +98,7 @@ export async function findWorkspaceBySource(serverUrl: string, apiKey: string, s
 export async function createWorkspace(
   serverUrl: string,
   apiKey: string,
-  body: { name: string; source_url: string; source_provider: string; adult?: boolean },
+  body: { name: string; source_url: string; source_provider: string; adult?: boolean; tags?: string[] },
 ): Promise<WorkspaceRef> {
   const { data, error } = await studioApi(serverUrl, apiKey).studio.api.workspaces.post(body);
   if (error) throw new Error(errorMessage(error));
@@ -157,7 +157,7 @@ const manageApi = (serverUrl: string, apiKey: string) =>
 export async function createSeries(
   serverUrl: string,
   apiKey: string,
-  body: { title: string; synopsis?: string; adult?: boolean },
+  body: { title: string; synopsis?: string; adult?: boolean; tags?: string[] },
 ): Promise<{ id: number; title: string }> {
   const { data, error } = await manageApi(serverUrl, apiKey).manage.api.series.post(body);
   if (error) throw new Error(errorMessage(error));

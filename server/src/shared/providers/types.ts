@@ -29,6 +29,8 @@ export interface ChapterExtract {
   chapter?: string;
   /** Set by extractors for adult sites, and carried into a series filed from the import. */
   adult?: boolean;
+  /** The site's own tags for it (`parody:azur lane`), offered as suggestions when a series is made from the import. */
+  tags?: string[];
 }
 
 /** One listed page turned into the image to download, or why it couldn't be. */

@@ -176,6 +176,12 @@ function renderSeries(info: SeriesInfo): void {
   synopsis.maxLength = 4000;
   synopsis.setAttribute("aria-label", "Synopsis");
 
+  // The page's own tags, as suggestions the person edits — comma-separated, since that is how anyone types a list
+  const tags = el("input", "import-input") as HTMLInputElement;
+  tags.value = (info.tags ?? []).join(", ");
+  tags.placeholder = "Tags, comma-separated";
+  tags.setAttribute("aria-label", "Tags");
+
   const adultRow = el("label", "import-row");
   const adult = el("input") as HTMLInputElement;
   adult.type = "checkbox";
@@ -203,6 +209,7 @@ function renderSeries(info: SeriesInfo): void {
     }
     failure.hidden = true;
     create.setAttribute("disabled", "true");
+    const tagList = tags.value.split(",").map((tag) => tag.trim()).filter(Boolean);
     void send<{ ok: boolean; error?: string; series?: { id: number; title: string; coverError?: string } }>({
       type: "create-series",
       request: {
@@ -210,6 +217,7 @@ function renderSeries(info: SeriesInfo): void {
         ...(synopsis.value.trim() ? { synopsis: synopsis.value.trim() } : {}),
         ...(info.cover ? { cover: info.cover } : {}),
         adult: adult.checked,
+        ...(tagList.length > 0 ? { tags: tagList } : {}),
       },
     }).then(async (answer) => {
       if (!answer?.ok || !answer.series) {
@@ -241,6 +249,7 @@ function renderSeries(info: SeriesInfo): void {
     el("p", "import-found", "What this page says about itself"),
     title,
     synopsis,
+    tags,
     adultRow,
   ];
   if (info.cover) nodes.push(el("p", "muted", "Its cover comes across too."));
@@ -323,6 +332,7 @@ function renderFound(found: Extract<ChapterExtractResult, { ok: true }>, sourceU
       runAfter: translateTick.checked,
       resolves: found.resolves,
       tabId,
+      ...(found.tags && found.tags.length > 0 ? { tags: found.tags } : {}),
       ...(found.adult !== undefined ? { adult: found.adult } : {}),
       ...(earlier && addToEarlier?.checked ? { workspaceId: earlier.id } : {}),
     };

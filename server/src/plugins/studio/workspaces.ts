@@ -23,7 +23,7 @@ import { fileWorkspaceIntoChapter } from "@/services/workspace-file";
 import { importIntoWorkspace, type WorkspaceUpload } from "@/services/workspace-import";
 import { importUrlsIntoWorkspace, MAX_URLS_PER_IMPORT, tidyUrls } from "@/services/url-import";
 import { withPageLock, withWorkspaceLock } from "@/queue/page-queue";
-import { ChapterStore } from "@/stores/library-store";
+import { ChapterStore, normaliseTags } from "@/stores/library-store";
 import { PageStore } from "@/stores/page-store";
 import { WorkspaceStore, type WorkspaceCounts } from "@/stores/workspace-store";
 
@@ -38,6 +38,8 @@ const WorkspaceSummary = t.Object({
   source_url: t.Nullable(t.String()),
   source_provider: t.Nullable(t.String()),
   adult: t.Boolean(),
+  /** The site's tags for what was imported, suggested when a series is made from this workspace. */
+  tags: t.Array(t.String()),
   created_at: t.String(),
   updated_at: t.String(),
   pages: t.Integer(),
@@ -76,6 +78,16 @@ const runKey = (id: number): string => `workspace:${id}`;
 /** The workspace's pages a run would translate now. */
 const pagesToRun = async (id: number, force: boolean) => pagesNeedingRun(await WorkspaceStore.pages(id), force);
 
+/** Stored tags, read back. A value that isn't a list of strings (hand-edited, say) reads as none rather than failing. */
+function parseTags(json: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed.filter((tag): tag is string => typeof tag === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 /** A workspace name: trimmed, and not blank. */
 const Name = t.String({ minLength: 1, maxLength: 200 });
 
@@ -89,6 +101,7 @@ function toWorkspace(workspace: Workspace, counts: WorkspaceCounts | undefined) 
     source_url: workspace.sourceUrl,
     source_provider: workspace.sourceProvider,
     adult: workspace.adult,
+    tags: parseTags(workspace.tagsJson),
     created_at: workspace.createdAt,
     updated_at: workspace.updatedAt,
     pages: c.pages,
@@ -138,6 +151,7 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         sourceUrl: body.source_url ?? null,
         sourceProvider: body.source_provider ?? null,
         adult: body.adult ?? false,
+        tagsJson: JSON.stringify(normaliseTags(body.tags ?? [])),
       });
       return status(201, toWorkspace(workspace, undefined));
     },
@@ -148,6 +162,8 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         source_url: t.Optional(t.String({ maxLength: 4096 })),
         source_provider: t.Optional(t.String({ maxLength: 64 })),
         adult: t.Optional(t.Boolean()),
+        /** The site's own tags, kept as suggestions for a series made from this workspace later. */
+        tags: t.Optional(t.Array(t.String({ maxLength: 80 }), { maxItems: 100 })),
       }),
       response: { 201: WorkspaceSummary, 422: ErrBody },
     },

@@ -24,6 +24,19 @@ describe("what a page says about itself", () => {
     expect(info).toEqual({ title: "Kagurabachi", synopsis: "A swordsmith's son.", cover: "https://cdn.test/cover.jpg" });
   });
 
+  test("a gallery's own tags come along as suggestions", () => {
+    const info = read("<title>A Gallery</title>", "https://exhentai.org/g/1/abc/", `<div id="taglist"><table>
+           <tr><td class="tc">parody:</td><td><div id="td_parody:azur_lane"><a id="ta_parody:azur_lane">azur lane</a></div></td></tr>
+           <tr><td class="tc">character:</td><td><div id="td_character:some_name"><a>some name</a></div>
+             <div id="td_character:some_name"><a>some name</a></div></td></tr>
+         </table></div>`);
+    expect(info?.tags).toEqual(["parody:azur lane", "character:some name"]);
+  });
+
+  test("a page with no tag list offers none, rather than an empty list", () => {
+    expect(read("<title>Plain series page</title>")).not.toHaveProperty("tags");
+  });
+
   test("a relative cover is resolved against the page", () => {
     const info = read('<meta property="og:image" content="/img/cover.png"><title>Some series</title>');
     expect(info?.cover).toBe("https://host.test/img/cover.png");

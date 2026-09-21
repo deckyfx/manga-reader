@@ -172,6 +172,7 @@ export async function createSeriesFromPage(request: CreateSeriesRequest): Promis
     title: request.title,
     ...(request.synopsis ? { synopsis: request.synopsis } : {}),
     adult: request.adult,
+    ...(request.tags && request.tags.length > 0 ? { tags: request.tags } : {}),
   });
 
   if (!request.cover) return series;
@@ -386,6 +387,7 @@ export async function startChapterImport(request: ImportRequest): Promise<Import
         source_url: request.sourceUrl,
         source_provider: request.provider,
         ...(request.adult !== undefined ? { adult: request.adult } : {}),
+        ...(request.tags && request.tags.length > 0 ? { tags: request.tags } : {}),
       });
 
   // Adding to an earlier import: whatever it already holds is left alone, so the same chapter twice extends it

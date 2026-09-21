@@ -48,6 +48,18 @@ describe("workspaces", () => {
     expect(renamed.body.workspace).toMatchObject({ name: "Ch. 12", adult: true });
   });
 
+  test("keep an import's tags as suggestions, normalised like series tags", async () => {
+    const created = await call<{ id: number; tags: string[] }>(
+      "POST", "/studio/api/workspaces",
+      { name: "Tagged", tags: ["Parody:Azur Lane", "character:some name", "parody:azur lane "] },
+      { cookie },
+    );
+    // Lower case, trimmed, each once — the same rule series tags follow, so they drop straight into a new series
+    expect(created.body.tags).toEqual(["character:some name", "parody:azur lane"]);
+    const listed = await call<{ id: number; tags: string[] }[]>("GET", "/studio/api/workspaces", undefined, { cookie });
+    expect(listed.body.find((w) => w.id === created.body.id)?.tags).toEqual(["character:some name", "parody:azur lane"]);
+  });
+
   test("need a name, a contributor, and an existing id", async () => {
     expect((await call("POST", "/studio/api/workspaces", { name: "   " }, { cookie })).status).toBe(422);
     const reader = await signedIn("reader");

@@ -270,6 +270,11 @@ export const workspaces = sqliteTable("workspaces", {
   sourceProvider: text("source_provider"),
   /** Set by extractors for adult sites, and carried into a series filed from it. */
   adult: integer("adult", { mode: "boolean" }).notNull().default(false),
+  /**
+   * The site's own tags for what was imported (a JSON array of `namespace:tag`), offered as suggestions when a series
+   * is made from the workspace. Suggestions only: nothing is tagged until someone saves a series with them.
+   */
+  tagsJson: text("tags_json").notNull().default("[]"),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 }, (table) => ({

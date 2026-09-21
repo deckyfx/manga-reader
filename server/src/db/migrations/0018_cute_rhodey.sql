@@ -1,0 +1,1 @@
+ALTER TABLE `workspaces` ADD `tags_json` text DEFAULT '[]' NOT NULL;

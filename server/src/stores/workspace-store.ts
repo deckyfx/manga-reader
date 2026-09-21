@@ -55,7 +55,7 @@ export class WorkspaceStore {
     return new Set(rows.flatMap((row) => (row.originPageId === null ? [] : [row.originPageId])));
   }
 
-  static async create(data: Pick<NewWorkspace, "name" | "createdBy" | "sourceUrl" | "sourceProvider" | "adult" | "chapterId">): Promise<Workspace> {
+  static async create(data: Pick<NewWorkspace, "name" | "createdBy" | "sourceUrl" | "sourceProvider" | "adult" | "chapterId" | "tagsJson">): Promise<Workspace> {
     const [row] = await db.insert(workspaces).values(data).returning();
     if (!row) throw new Error("failed to create workspace");
     return row;

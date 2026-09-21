@@ -39,6 +39,8 @@ export type ChapterExtractResult =
       minIntervalMs: number;
       /** The list holds pages rather than images, each resolved by this tab when the import reaches it. */
       resolves: boolean;
+      /** The site's own tags, for suggesting when a series is made from the import. */
+      tags?: string[];
       images: string[];
       title?: string;
       chapter?: string;
@@ -129,6 +131,7 @@ export async function extractChapterHere(rescan = false): Promise<ChapterExtract
       ...(extract.title !== undefined ? { title: extract.title } : {}),
       ...(extract.chapter !== undefined ? { chapter: extract.chapter } : {}),
       ...(extract.adult !== undefined ? { adult: extract.adult } : {}),
+      ...(extract.tags !== undefined ? { tags: extract.tags } : {}),
       logs,
     };
   } catch (err) {
