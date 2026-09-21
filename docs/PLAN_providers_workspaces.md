@@ -25,13 +25,13 @@ Cloudflare. The server doesn't scrape, doesn't hold site accounts and doesn't ne
 |---|---|---|---|
 | P3 | Workspaces (+ Send chapter to Studio, File into chapter) | M | **Done** — PR #25 |
 | P4 | **Extension: import a chapter as a workspace** (generic extractor + rawkuma) | M–L | **Done** — PR #27 |
-| P5 | exhentai extractor + adult flag | S–M | In progress, branch `feat/exhentai-adult` |
+| P5 | exhentai extractor + adult flag | S–M | Adult flag **done** (this PR); extractor with the extension session |
 | P0 | Settings areas: sub-menus, full width | S | **Done** — PR #26 |
-| P1 | Add pages by URL (Studio and chapter, many at once) | S | **Done** — this PR |
+| P1 | Add pages by URL (Studio and chapter, many at once) | S | **Done** — PR #28 |
 | P2 | Region scan log | S–M | **Done** — PR #26 |
-| P6a | Publish backfill | S | **Done** — this PR |
-| P6b | Several cover arts | M | **Done** — this PR |
-| P6c | Reviews and ratings | M | **Done** — this PR |
+| P6a | Publish backfill | S | **Done** — PR #28 |
+| P6b | Several cover arts | M | **Done** — PR #28 |
+| P6c | Reviews and ratings | M | **Done** — PR #28 |
 
 Two sessions are working through this in parallel: one on P4 → P1 → P5 (the extension side), one on P6 (the library
 side). Migrations are not reserved ahead — generate at push time, and whoever merges second rebases and re-runs
@@ -284,9 +284,11 @@ interface Extractor {
 
 ### 6.6 Series info
 
-On a series page, the popup offers **New series from this page**. It sends `og:title`, `og:description` and the
-`og:image` cover (downloaded by the extension, as for chapter images) to the existing `/manage/api` series routes, and
-opens the new series in the web UI to review.
+**Done.** The popup offers **New series from this page** where a page holds no chapter images — usually a series page.
+`shared/providers/series-info.ts` reads `og:title`, `og:description`, `og:image` and the two conventions a site uses to
+call itself adult; the fields are shown editable before anything is made, since the text came off somebody else's page.
+The cover is downloaded and uploaded by the background worker, not the popup, and a cover that won't download is
+reported rather than failing the series.
 
 ## 7. P5: exhentai extractor (in the extension)
 
@@ -304,13 +306,16 @@ opens the new series in the web UI to review.
 - **Quota:** a 509 image ("bandwidth exceeded") or an error page stops the import with "image limit reached". Pages
   already imported stay, and a retry later continues from the next page.
 
-### Adult flag (lands with P5)
+### Adult flag (done)
 
-- `series.adult` boolean (default false). It's editable in the series form, and pre-set from `workspaces.adult` when a
-  workspace imported by an adult extractor is filed into a new series.
-- `users.showAdult` boolean (default false), toggled under `/user/profile`. Guests never see adult series.
-- The filter applies server-side in every `/read/api` list, search and series/chapter/page fetch. A hidden series
-  returns 404, not 403, so its existence doesn't leak. Contributors still see everything in `/manage` and the Studio.
+- `series.adult` and `users.show_adult`, migration 0017. Filing an adult workspace marks its series adult; the flag is
+  never cleared automatically, because a series marked by hand stays marked.
+- The filter applies server-side to the library listing and to the series, its covers, its reviews, its chapters,
+  their reviews and its pages' images. All answer **404**, not 403: a 403 confirms the thing exists. The page-image
+  route matters most — page ids appear all over the reader, so a different answer there would leak what the rest
+  hides.
+- A checkbox on the series form, a switch under `/user/profile`, and contributors still see everything through
+  `/manage` and the Studio.
 
 ## 8. P6: library backlog
 
