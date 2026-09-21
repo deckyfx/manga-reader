@@ -6,6 +6,7 @@
  * comes from whatever site the user happens to be on.
  */
 import { findWorkspaceBySource, type WorkspaceRef } from "./api";
+import { ensureContentScript } from "./inject";
 import type { ChapterExtractResult, SeriesExtractResult } from "./chapter-extract";
 import type { SeriesInfo } from "../../server/src/shared/providers/series-info";
 import { loadServerAccess } from "./settings-store";
@@ -129,6 +130,12 @@ function pollProgress(): void {
 
 /** The button, when this page says enough about itself to start a series from. */
 async function seriesButton(tabId: number): Promise<HTMLElement | null> {
+  // Self-contained on purpose: relying on the caller to have injected first is how this read broke before
+  try {
+    await ensureContentScript(tabId);
+  } catch {
+    return null;
+  }
   const read = await chrome.tabs.sendMessage(tabId, { type: "extract-series" }) as SeriesExtractResult | undefined;
   if (!read?.ok) return null;
   const button = el("button", "menu-btn", "New series from this page");
@@ -336,10 +343,17 @@ export async function start(rescan = false): Promise<void> {
     }
 
     message(rescan ? "Scanning the page…" : "Looking at this page…");
+    try {
+      await ensureContentScript(tab.id);
+    } catch {
+      // The browser keeps every extension out of some pages: the Web Store, the new-tab page, a PDF viewer
+      message("The browser doesn't let extensions read this page.");
+      return;
+    }
     const found = await chrome.tabs.sendMessage(tab.id, { type: "extract-chapter", rescan }) as ChapterExtractResult | undefined;
     if (!found) {
-      // No content script here: a page loaded before the extension, or one it isn't allowed on
-      message("This page can't be read — reload it and try again.");
+      // Injected, yet nothing answered: most likely the page navigated away while it was being read
+      message("The page didn't answer — try again once it has finished loading.");
       return;
     }
     if (!found.ok) {

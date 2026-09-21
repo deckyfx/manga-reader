@@ -14,6 +14,7 @@ import { DEFAULT_SETTINGS } from "./types";
 import { loadSettings, usableApiKey } from "./settings-store";
 import { errorMessage, serverApi } from "./api";
 import { clearImport, createSeriesFromPage, currentImport, resumeChapterImport, retryChapterImport, startChapterImport } from "./import-queue";
+import { ensureContentScript } from "./inject";
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -44,16 +45,7 @@ async function handlePopupMode(mode: "region" | "image"): Promise<void> {
   }
 
   try {
-    const checkResult = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => Boolean((window as unknown as Record<string, unknown>)["__socrLoaded"]),
-    });
-
-    if (!checkResult[0]?.result) {
-      await chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] });
-      await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
-      await sleep(40);
-    }
+    await ensureContentScript(tabId);
 
     if (mode === "region") {
       sendToTab(tabId, { type: "start-selection" } satisfies ToContentMsg);
@@ -332,10 +324,6 @@ async function fetchImageAsBase64(url: string): Promise<{ base64: string } | { e
 
 function sendToTab(tabId: number, msg: ToContentMsg): void {
   chrome.tabs.sendMessage(tabId, msg).catch(console.error);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 function errMsg(e: unknown): string {
