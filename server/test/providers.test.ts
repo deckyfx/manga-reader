@@ -11,7 +11,7 @@ import { genericExtractor } from "@/shared/providers/generic";
 import { createExhentaiExtractor } from "@/shared/providers/exhentai";
 import { rawkumaExtractor } from "@/shared/providers/rawkuma";
 import { extractorById, extractorFor } from "@/shared/providers/registry";
-import type { ChapterExtract, ExtractContext } from "@/shared/providers/types";
+import { FetchStatusError, type ChapterExtract, type ExtractContext } from "@/shared/providers/types";
 
 /** An extract context over fixture HTML; `fetchDocument` throws, since no fixture needs a second page yet. */
 function contextFor(html: string, href: string): ExtractContext & { logs: string[] } {
@@ -311,6 +311,29 @@ describe("the exhentai extractor", () => {
       const result = await extractor.resolve!(PAGE("aaa111", 1), ctx);
       expect(result).toMatchObject({ ok: false });
       // No `stop`: one odd page shouldn't halt the rest of the gallery
+      expect("stop" in result && result.stop).toBeFalsy();
+    });
+
+    /** A context whose page fetch fails the given way. */
+    const failing = (error: Error) => ({
+      ...galleryContext(`<h1 id="gn">A Gallery</h1>`, {}, GALLERY),
+      fetchDocument: () => Promise.reject(error),
+    });
+
+    test("pauses the import when the site can't be reached or is struggling, keeping the page for later", async () => {
+      for (const error of [
+        new TypeError("Failed to fetch"),
+        new DOMException("The operation timed out.", "TimeoutError"),
+        new FetchStatusError("answered 429", 429),
+        new FetchStatusError("answered 503", 503),
+      ]) {
+        expect(await extractor.resolve!(PAGE("aaa111", 1), failing(error))).toMatchObject({ ok: false, stop: true });
+      }
+    });
+
+    test("fails only its own page when the site says that page isn't there", async () => {
+      const result = await extractor.resolve!(PAGE("aaa111", 1), failing(new FetchStatusError("answered 404", 404)));
+      expect(result).toMatchObject({ ok: false });
       expect("stop" in result && result.stop).toBeFalsy();
     });
   });

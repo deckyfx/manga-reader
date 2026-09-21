@@ -4,6 +4,26 @@
  * attributes resolved, scripts done) and the tests can run it against saved fixture HTML.
  */
 
+/** A page fetch the site answered with an error status; anything else thrown by a fetch never reached the site. */
+export class FetchStatusError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "FetchStatusError";
+  }
+}
+
+/**
+ * Whether a failed fetch says nothing about the page itself: a timeout or dropped network (never answered), rate
+ * limiting, or the site's own trouble. Worth trying the same page again later, unlike a 404.
+ */
+export function isTransientFetchError(err: unknown): boolean {
+  if (!(err instanceof FetchStatusError)) return true;
+  return err.status === 408 || err.status === 429 || err.status >= 500;
+}
+
 /** The pieces an extractor may use; the extension supplies them (live DOM, same-origin fetch). */
 export interface ExtractContext {
   /** Address of the page `document` was loaded from; relative image addresses resolve against it. */

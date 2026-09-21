@@ -7,7 +7,7 @@
  */
 import { extractorById, extractorFor } from "../../server/src/shared/providers/registry";
 import { seriesInfoFrom, type SeriesInfo } from "../../server/src/shared/providers/series-info";
-import type { ExtractContext, Resolved } from "../../server/src/shared/providers/types";
+import { FetchStatusError, type ExtractContext, type Resolved } from "../../server/src/shared/providers/types";
 import type { ExtractProgressMsg } from "./types";
 
 /** What a series page says about itself, for "New series from this page". */
@@ -63,7 +63,7 @@ const FETCH_TIMEOUT_MS = 20_000;
 
 async function fetchDocument(url: string): Promise<Document> {
   const response = await fetch(url, { credentials: "include", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  if (!response.ok) throw new Error(`${url} answered ${response.status}`);
+  if (!response.ok) throw new FetchStatusError(`${url} answered ${response.status}`, response.status);
   return new DOMParser().parseFromString(await response.text(), "text/html");
 }
 

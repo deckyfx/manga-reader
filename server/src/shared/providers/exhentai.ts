@@ -14,7 +14,7 @@
  * pager, and `#img` holding an absolute H@H address — was checked against live e-hentai galleries on 2026-09-21 (same
  * markup as exhentai, which needs a signed-in browser to fetch). The fixtures pin it, so a redesign fails loudly.
  */
-import type { ChapterExtract, ExtractContext, Extractor, Resolved } from "./types";
+import { isTransientFetchError, type ChapterExtract, type ExtractContext, type Extractor, type Resolved } from "./types";
 
 /** exhentai has asked for a second between requests for years; the walk is slow by design. */
 const MIN_INTERVAL_MS = 1000;
@@ -195,7 +195,11 @@ export function createExhentaiExtractor(intervalMs = MIN_INTERVAL_MS): Extractor
       try {
         page = await ctx.fetchDocument(link);
       } catch (err) {
-        return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+        const reason = err instanceof Error ? err.message : String(err);
+        // A timeout, a dropped network or the site struggling would fail every page after this one too: pause with
+        // the page still pending, so "Try again" picks it up, instead of marking the rest failed one by one
+        if (isTransientFetchError(err)) return { ok: false, reason: `couldn't reach the gallery (${reason}) — try again shortly`, stop: true };
+        return { ok: false, reason };
       }
       const { url, limited } = imageOn(page);
       // The daily allowance is spent: every page after this one would say the same, so stop rather than burn them
