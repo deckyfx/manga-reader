@@ -14,6 +14,7 @@
  */
 import Elysia, { t } from "elysia";
 import type { Workspace } from "@/db/schema";
+import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
 import { authContext } from "@/plugins/auth/index";
 import { PageSummary, toSummary } from "@/plugins/studio/page-summary";
@@ -27,6 +28,8 @@ import { withPageLock, withWorkspaceLock } from "@/queue/page-queue";
 import { ChapterStore, normaliseTags } from "@/stores/library-store";
 import { PageStore } from "@/stores/page-store";
 import { WorkspaceStore, type WorkspaceCounts } from "@/stores/workspace-store";
+
+const log = childLogger("workspaces");
 
 const WorkspaceParams = t.Object({ id: t.Integer({ minimum: 1 }) });
 
@@ -219,14 +222,20 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
             }
             // Checked again under the page's own lock: a single-page rerun can be queued after the check above, and a
             // page that started running since is kept (loose) rather than deleted under its job
+            // A page that can't be deleted (it started running, or the disk refused) stays loose rather than failing
+            // the close half way: every page is either gone or kept, and the workspace closes either way, so the
+            // answer always matches what happened
             const discarded = await withPageLock(page.id, async () => {
               const now = await PageStore.findById(page.id);
               if (!now) return { ok: false as const, error: "already gone" };
               if (now.status === "queued" || now.status === "running") return { ok: false as const, error: "busy" };
               return discardPage(page.id);
-            });
+            }).catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }));
             if (discarded.ok) pagesDeleted++;
-            else pagesKept++;
+            else {
+              pagesKept++;
+              log.warn({ workspaceId: params.id, pageId: page.id, error: discarded.error }, "Closing a workspace kept a page it couldn't delete");
+            }
           }
         }
         // Whatever is left falls back to loose (the foreign key clears it): kept pages, or everything with keep_pages
