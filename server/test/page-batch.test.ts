@@ -37,6 +37,27 @@ describe("a following run", () => {
     expect(state.failed).toBe(2);
   });
 
+  test("a start refused during its last look makes it look again", async () => {
+    const key = `race:${crypto.randomUUID()}`;
+    let looks = 0;
+    const loadPages = async (): Promise<Page[]> => {
+      looks++;
+      if (looks === 1) return [page("a")];
+      if (looks === 2) {
+        // A page lands and asks for a run while this very look is under way — the running run refuses the start
+        expect(await startBatchRun(key, loadPages, { cleanSfx: false, publish: false, follow: true })).toBeNull();
+        // ...and this look was already too far along to see it
+        return [page("a")];
+      }
+      return [page("a"), page("late")];
+    };
+
+    await startBatchRun(key, loadPages, { cleanSfx: false, publish: false, follow: true });
+    const state = await finished(key);
+    // Without the refused start being remembered, the run would have ended after the second look and missed it
+    expect(state.total).toBe(2);
+  });
+
   test("without follow, a run is exactly the pages it started with", async () => {
     const snapshots = [[page("a")], [page("a"), page("b")]];
     let looks = 0;

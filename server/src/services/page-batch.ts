@@ -29,6 +29,13 @@ export interface BatchRunState {
 
 const runs = new Map<string, BatchRunState>();
 
+/**
+ * Runs asked for while they were already going. A following run only ends when a look for new pages finds none — but
+ * a page can land, and its start be refused, during that very look, after the look has already missed it. A refused
+ * start leaves its key here, and the run doesn't end while one is waiting.
+ */
+const rescanRequested = new Set<string>();
+
 /** Whether a page still needs the pipeline: never translated, failed, missing its result, or a stage went stale. */
 export async function needsRun(page: Page): Promise<boolean> {
   if (page.status !== "done") return true;
@@ -71,7 +78,11 @@ export async function startBatchRun(
     follow?: boolean;
   },
 ): Promise<BatchRunState | null> {
-  if (runs.get(key)?.running) return null;
+  if (runs.get(key)?.running) {
+    // Refused, but noted: a following run takes it as "look again" (a run that doesn't follow ignores it)
+    rescanRequested.add(key);
+    return null;
+  }
 
   // Registered before the first await: a second request now sees a running state and is refused
   const state: BatchRunState = {
@@ -132,12 +143,15 @@ export async function startBatchRun(
     // following run would loop on it for as long as it keeps failing
     const attempted = new Set<string>();
     let batch = pages;
-    while (batch.length > 0) {
+    // Carries on while there is work, or while a start was refused since the last look — see rescanRequested
+    while (batch.length > 0 || (options.follow && rescanRequested.has(key))) {
       for (const page of batch) {
         attempted.add(page.id);
         await runPage(page);
       }
       if (!options.follow) break;
+      // Taken before looking, so a request arriving during the look is still there afterwards and forces another
+      rescanRequested.delete(key);
       try {
         batch = (await loadPages()).filter((page) => !attempted.has(page.id));
       } catch (err) {
@@ -149,6 +163,8 @@ export async function startBatchRun(
     state.currentPageId = null;
     state.running = false;
     state.finishedAt = new Date().toISOString();
+    // A request left over from a run that didn't follow means nothing to the next run
+    rescanRequested.delete(key);
     log.info({ key, done: state.done, failed: state.failed }, "Run finished");
   })();
 
