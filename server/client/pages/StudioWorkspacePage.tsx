@@ -47,6 +47,15 @@ export function StudioWorkspacePage() {
   const noteNextIndex = (index: number) => {
     nextIndex.current = { workspaceId: id, index: Math.max(startIndex(), index) };
   };
+  // Uploads and address imports take turns: each picks its start only after the one before has answered, so two
+  // batches can never claim the same positions (the later one would be skipped as a retry)
+  // One queue per workspace: moving to another workspace doesn't wait behind this one's imports
+  const importQueues = useRef(new Map<number, Promise<unknown>>());
+  const inTurn = <T,>(task: () => Promise<T>): Promise<T> => {
+    const run = (importQueues.current.get(id) ?? Promise.resolve()).then(task, task);
+    importQueues.current.set(id, run.catch(() => undefined));
+    return run;
+  };
   // The close dialog, holding whether the loose pages stay; null while it's shut
   const [closing, setClosing] = useState<{ keepPages: boolean } | null>(null);
 
@@ -123,8 +132,11 @@ export function StudioWorkspacePage() {
     try {
       // Past every position in use, not the page count: a deleted page leaves a gap, and a batch landing on a
       // position that already has a page is skipped as a retry
-      const report = await uploadWorkspacePages(id, Array.from(files), startIndex());
-      noteNextIndex(report.workspace.next_index);
+      const report = await inTurn(async () => {
+        const answer = await uploadWorkspacePages(id, Array.from(files), startIndex());
+        noteNextIndex(answer.workspace.next_index);
+        return answer;
+      });
       refresh();
       const skipped = report.skipped.length;
       toast.info(`Added ${report.imported} page${report.imported === 1 ? "" : "s"}${skipped > 0 ? `, skipped ${skipped}` : ""}`);
@@ -330,10 +342,13 @@ export function StudioWorkspacePage() {
           }}
           onImport={async (urls, { resend }) => {
             // A resend reuses the first send's positions, so pages that already landed are skipped, not doubled
-            const start = resend && urlStart.current !== null ? urlStart.current : startIndex();
-            urlStart.current = start;
-            const report = await importWorkspacePageUrls(id, urls, start);
-            noteNextIndex(report.workspace.next_index);
+            const report = await inTurn(async () => {
+              const start = resend && urlStart.current !== null ? urlStart.current : startIndex();
+              urlStart.current = start;
+              const answer = await importWorkspacePageUrls(id, urls, start);
+              noteNextIndex(answer.workspace.next_index);
+              return answer;
+            });
             refresh();
             return {
               imported: report.imported,
