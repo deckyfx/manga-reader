@@ -137,8 +137,10 @@ describe("an adult import", () => {
     const { cookie, id: userId } = await signedIn("contributor");
     const series = await call<{ series: { id: number } }>("POST", "/manage/api/series", { title: `Plain ${crypto.randomUUID()}` }, { cookie });
     const seriesId = series.body.series.id;
-    const chapter = await call<{ unsorted: { id: number }[] }>("POST", "/manage/api/chapters", { series_id: seriesId, title: "One" }, { cookie });
+    const chapter = await call<{ unsorted: { id: number }[]; chapter_id: number }>("POST", "/manage/api/chapters", { series_id: seriesId, title: "One" }, { cookie });
     const chapterId = chapter.body.unsorted[0]!.id;
+    // The answer names the chapter it made, so a caller never has to guess it from the list
+    expect(chapter.body.chapter_id).toBe(chapterId);
     expect((await SeriesStore.findById(seriesId))?.adult).toBe(false);
 
     // A workspace an adult extractor made, with one page in it

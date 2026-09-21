@@ -91,13 +91,13 @@ export function ChapterPicker({
 
   const chapterM = useMutation({
     mutationFn: async (form: { number: string; title: string }) => {
-      const known = new Set(chapters.map((chapter) => chapter.id));
-      const detail = await createChapter({ series_id: seriesId ?? 0, title: form.title.trim(), number: form.number.trim() || null });
+      const { chapter_id: chapterId, ...detail } = await createChapter({
+        series_id: seriesId ?? 0,
+        title: form.title.trim(),
+        number: form.number.trim() || null,
+      });
       qc.setQueryData(["series", detail.series.id], detail);
-      // The route answers with the whole series; the chapter that wasn't there before is the one just made
-      const made = [...detail.volumes.flatMap((volume) => volume.chapters), ...detail.unsorted].find((chapter) => !known.has(chapter.id));
-      if (!made) throw new Error("The chapter was made but couldn't be found again; pick it from the list");
-      return made.id;
+      return chapterId;
     },
     onSuccess: (chapterId) => {
       setNewChapter(null);

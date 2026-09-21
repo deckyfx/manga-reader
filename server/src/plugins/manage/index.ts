@@ -338,14 +338,17 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         const volume = await VolumeStore.findById(body.volume_id);
         if (!volume || volume.seriesId !== body.series_id) return status(404, { error: "volume not found in this series" });
       }
-      await ChapterStore.insert({
+      const chapter = await ChapterStore.insert({
         seriesId: body.series_id,
         volumeId: body.volume_id ?? null,
         title: body.title,
         number: body.number ?? null,
         sortOrder: body.sort_order ?? (await ChapterStore.nextOrder(body.series_id)),
       });
-      return (await seriesDetail(body.series_id)) ?? status(404, { error: "series not found" });
+      const detail = await seriesDetail(body.series_id);
+      // The whole series, as every other edit answers, plus which chapter this request made — another made at the
+      // same moment is in the list too, so the caller can't tell by looking
+      return detail ? { ...detail, chapter_id: chapter.id } : status(404, { error: "series not found" });
     },
     {
       body: t.Object({
@@ -355,7 +358,7 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         number: t.Optional(t.Nullable(t.String({ maxLength: 20 }))),
         sort_order: t.Optional(t.Integer({ minimum: 0 })),
       }),
-      response: { 200: SeriesDetail, 404: ErrBody },
+      response: { 200: t.Composite([SeriesDetail, t.Object({ chapter_id: t.Integer() })]), 404: ErrBody },
     },
   )
 
