@@ -32,6 +32,7 @@ import { pageStatus, StatusBadge } from "../components/StatusBadge";
 import { usePageJobEvents } from "../hooks/usePageJobEvents";
 import { PageCanvas, type PageCanvasHandle } from "../studio/canvas/PageCanvas";
 import { buildLettering, relayoutBlock, useTypesetter } from "../studio/text/typesetter";
+import { readToolset, saveToolset, toolsetScope } from "../studio/toolset";
 
 const isBusy = (status: string | undefined) => status === "queued" || status === "running";
 
@@ -45,6 +46,16 @@ function readPanelCollapsed(): boolean {
     return false;
   }
 }
+
+/** The stage that writes each page image; the original is always there. */
+const IMAGE_STAGE: Partial<Record<PageImage, string>> = {
+  "overlay.png": "detect",
+  "mask.png": "detect",
+  "clean-text.png": "clean_text",
+  "clean-sfx.png": "clean_sfx",
+  "render-overlay.png": "render",
+  "result.png": "render",
+};
 
 /** Studio editor for one page: compare stage images, edit and re-run blocks, re-render, publish and roll back. */
 export function StudioPageEditor() {
@@ -137,6 +148,29 @@ export function StudioPageEditor() {
     enabled: workspaceId !== null,
   });
   const neighbours = workspaceId !== null ? (workspaceQ.data?.pages ?? []) : (chapterQ.data?.pages ?? []);
+
+  // The toolset is shared by the pages of a workspace (or chapter): this page opens with the view and stage image the
+  // last one was left on, and the canvas restores its zoom, tool and brush the same way
+  const toolScope = pageQ.data ? toolsetScope(workspaceId, chapterId) : null;
+  const restoredScope = useRef<string | null>(null);
+  useEffect(() => {
+    if (toolScope === null || restoredScope.current === toolScope) return;
+    restoredScope.current = toolScope;
+    const saved = readToolset(toolScope);
+    if (saved.view) setView(saved.view);
+    const image = PAGE_IMAGES.find((img) => img.file === saved.canvasImage)?.file;
+    // Only an image this page has: the next page may not have reached the stage that made it yet
+    const stage = image ? IMAGE_STAGE[image] : undefined;
+    if (image && (stage === undefined || pageQ.data?.stages.some((s) => s.stage === stage && s.status !== "error"))) setCanvasImage(image);
+  }, [toolScope, pageQ.data]);
+  const chooseView = (next: "canvas" | "compare") => {
+    setView(next);
+    saveToolset(toolScope, { view: next });
+  };
+  const chooseImage = (next: PageImage) => {
+    setCanvasImage(next);
+    saveToolset(toolScope, { canvasImage: next });
+  };
   const here = neighbours.findIndex((neighbour) => neighbour.id === id);
   const previousPage = here > 0 ? neighbours[here - 1] : undefined;
   const nextPage = here >= 0 ? neighbours[here + 1] : undefined;
@@ -344,10 +378,10 @@ export function StudioPageEditor() {
         </Link>
         {workspaceId === null && page.location ? (
           <>
-            <h1 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
-              <Link to={`/read/series/${page.location.series_id}`} className="truncate text-gray-400 hover:text-white">{page.location.series_title}</Link>
+            <h1 className="flex min-w-0 max-w-[min(36rem,60vw)] items-center gap-1.5 text-base font-semibold">
+              <Link to={`/read/series/${page.location.series_id}`} title={page.location.series_title} className="min-w-0 max-w-[50%] truncate text-gray-400 hover:text-white">{page.location.series_title}</Link>
               <span className="text-gray-600">›</span>
-              <Link to={`/manage/chapters/${page.location.chapter_id}`} className="truncate hover:text-indigo-300">{page.location.chapter_title}</Link>
+              <Link to={`/manage/chapters/${page.location.chapter_id}`} title={page.location.chapter_title} className="min-w-0 truncate hover:text-indigo-300">{page.location.chapter_title}</Link>
             </h1>
             <div className="flex items-center gap-1 text-xs text-gray-500">
               <Link
@@ -373,12 +407,12 @@ export function StudioPageEditor() {
           </>
         ) : workspaceId !== null ? (
           <>
-            <h1 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
-              <Link to={`/studio/w/${workspaceId}`} className="truncate text-gray-400 hover:text-white">
+            <h1 className="flex min-w-0 max-w-[min(36rem,60vw)] items-center gap-1.5 text-base font-semibold">
+              <Link to={`/studio/w/${workspaceId}`} title={workspaceQ.data?.workspace.name} className="min-w-0 max-w-[60%] truncate text-gray-400 hover:text-white">
                 {workspaceQ.data?.workspace.name ?? "Workspace"}
               </Link>
               <span className="text-gray-600">›</span>
-              <span className="truncate">{page.name ?? `Page ${page.id.slice(-8)}`}</span>
+              <span className="min-w-0 truncate" title={page.name ?? undefined}>{page.name ?? `Page ${page.id.slice(-8)}`}</span>
             </h1>
             {here >= 0 && (
               <div className="flex items-center gap-1 text-xs text-gray-500">
@@ -405,7 +439,7 @@ export function StudioPageEditor() {
             )}
           </>
         ) : (
-          <h1 className="truncate text-base font-semibold">{page.name ?? `Page ${page.id.slice(-8)}`}</h1>
+          <h1 className="max-w-[min(36rem,60vw)] truncate text-base font-semibold" title={page.name ?? undefined}>{page.name ?? `Page ${page.id.slice(-8)}`}</h1>
         )}
         <StatusBadge status={pageStatus(page)} />
         {page.has_edits ? (
@@ -432,7 +466,7 @@ export function StudioPageEditor() {
           {(["canvas", "compare"] as const).map((value) => (
             <button
               key={value}
-              onClick={() => setView(value)}
+              onClick={() => chooseView(value)}
               aria-pressed={view === value}
               className={`px-2.5 py-1 ${view === value ? "bg-indigo-600 text-white" : "text-gray-400 hover:bg-gray-800"}`}
             >
@@ -473,12 +507,14 @@ export function StudioPageEditor() {
             textPreviewAvailable={canvasImage === "clean-text.png" || canvasImage === "clean-sfx.png"}
             onStylePreview={setBlockStyle}
             relayout={relayout}
+            initialToolset={readToolset(toolScope)}
+            onToolsetChange={(patch) => saveToolset(toolScope, patch)}
             onModeChange={(mode) => {
               // Lettering is judged against the cleaned page, where it will be burned; a page not cleaned yet keeps its
               // background rather than pointing at an image that doesn't exist
               if (mode === "lettering" && canvasImage !== "clean-text.png" && canvasImage !== "clean-sfx.png") {
-                if (stageStatus("clean_sfx") === "fresh") setCanvasImage("clean-sfx.png");
-                else if (stageStatus("clean_text") !== undefined) setCanvasImage("clean-text.png");
+                if (stageStatus("clean_sfx") === "fresh") chooseImage("clean-sfx.png");
+                else if (stageStatus("clean_text") !== undefined) chooseImage("clean-text.png");
               }
             }}
             renderLetteringPanel={(blockId) => {
@@ -502,7 +538,7 @@ export function StudioPageEditor() {
                 aria-label="Canvas background image"
                 value={canvasImage}
                 onChange={(e) => {
-                  setCanvasImage(PAGE_IMAGES.find((img) => img.file === e.target.value)?.file ?? canvasImage);
+                  chooseImage(PAGE_IMAGES.find((img) => img.file === e.target.value)?.file ?? canvasImage);
                   // Hand the keyboard back to the canvas so Delete and the tool keys work right away
                   e.currentTarget.blur();
                 }}
