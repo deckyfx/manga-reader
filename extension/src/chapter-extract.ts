@@ -6,7 +6,27 @@
  * (`shared/providers/`), so the same code the fixtures test is the code that runs here.
  */
 import { extractorFor } from "../../server/src/shared/providers/registry";
+import { seriesInfoFrom, type SeriesInfo } from "../../server/src/shared/providers/series-info";
 import type { ExtractContext } from "../../server/src/shared/providers/types";
+
+/** What a series page says about itself, for "New series from this page". */
+export type SeriesExtractResult =
+  | { ok: true; info: SeriesInfo }
+  | { ok: false; error: string };
+
+/**
+ * Reads the open page's own description of itself. No scrolling and no fetching: the metadata sits in the head from
+ * the first paint, and a series page has nothing to build up the way a reader's image list does.
+ */
+export function extractSeriesHere(): SeriesExtractResult {
+  try {
+    const info = seriesInfoFrom(document, new URL(location.href));
+    if (!info) return { ok: false, error: "this page doesn't say what it is — there's no title to start a series from" };
+    return { ok: true, info };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 /** What the popup gets back: enough to show the find and to start an import from it. */
 export type ChapterExtractResult =

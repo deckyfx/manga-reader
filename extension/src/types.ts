@@ -93,6 +93,8 @@ export interface ExplainErrorMsg    { type: "explain-error"; message: string }
 export interface StartImageModeMsg  { type: "start-image-mode" }
 /** Asks the content script to read this page's chapter images; `rescan` forces the scroll pass. */
 export interface ExtractChapterMsg  { type: "extract-chapter"; rescan?: boolean }
+/** Asks the content script what this page says about itself, for "New series from this page". */
+export interface ExtractSeriesMsg   { type: "extract-series" }
 /** Sent to content tabs when Studio burns text and the result image is updated. */
 export interface ImageUpdatedMsg    { type: "image-updated"; jobId: string; resultUrl: string }
 
@@ -105,6 +107,7 @@ export type ToContentMsg =
   | ExplainErrorMsg
   | StartImageModeMsg
   | ExtractChapterMsg
+  | ExtractSeriesMsg
   | ImageUpdatedMsg;
 
 // ── Messages: content → background ───────────────────────────────────────────
@@ -135,6 +138,17 @@ export interface ImportRequest {
   runAfter: boolean;
 }
 
+/** What the popup hands over to make a series: what the page said, as the user left it. */
+export interface CreateSeriesRequest {
+  title: string;
+  synopsis?: string;
+  /** Address of the cover to fetch and upload; the worker does both, as it does for chapter images. */
+  cover?: string;
+  adult: boolean;
+}
+
+export interface CreateSeriesMsg       { type: "create-series"; request: CreateSeriesRequest }
+
 export interface StartChapterImportMsg { type: "start-chapter-import"; request: ImportRequest }
 export interface ImportStatusMsg       { type: "import-status" }
 /** Forgets a finished import so the popup offers a fresh one. */
@@ -151,6 +165,7 @@ export type FromContentMsg =
   | PopupModeMsg
   | FetchImageMsg
   | StartChapterImportMsg
+  | CreateSeriesMsg
   | ImportStatusMsg
   | ClearImportMsg
   | RetryImportMsg;

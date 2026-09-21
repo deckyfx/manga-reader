@@ -9,9 +9,10 @@
  * Downloads are paced by the provider's `minIntervalMs` and run two at a time; pages are uploaded in small batches as
  * they arrive, so the Studio shows progress early and the worker never holds a whole chapter in memory.
  */
-import { createWorkspace, findWorkspaceBySource, serverHasWorkspaces, startWorkspaceRun, uploadWorkspacePages, workspacePageSources } from "./api";
+import { addSeriesCover, createSeries, createWorkspace, findWorkspaceBySource, serverHasWorkspaces, startWorkspaceRun, uploadWorkspacePages, workspacePageSources } from "./api";
+import { isPrivateHost } from "../../server/src/shared/private-host";
 import { loadServerAccess } from "./settings-store";
-import type { ImportRequest } from "./types";
+import type { CreateSeriesRequest, ImportRequest } from "./types";
 
 /** Where one page of the chapter got to. */
 export interface ImportPage {
@@ -112,6 +113,57 @@ export async function clearImport(): Promise<void> {
 
 /** A failure worth another go: the network dropped, or the CDN is rate-limiting or briefly broken. */
 class Transient extends Error {}
+
+/**
+ * Refuses a cover address that points inside the network the browser sits on.
+ *
+ * The address comes from `og:image` on whatever page the user is looking at, and the worker fetches it with the
+ * extension's own reach — which includes the user's machine and their LAN. A page can already make a browser
+ * *request* those, but it cannot read the answer; this would, and would then upload it to the server. So a cover is
+ * only ever fetched from a public address.
+ *
+ * Only literal addresses can be checked here: a name that resolves to a private one gets through, because the
+ * extension has no resolver. That is the limit the server's own image fetch closes with DNS pinning, and it is
+ * worth saying rather than implying this is airtight.
+ */
+function coverMustBePublic(cover: string): void {
+  let url: URL;
+  try {
+    url = new URL(cover);
+  } catch {
+    throw new Error("that isn't an address a cover can be fetched from");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`a cover can't be fetched over ${url.protocol}`);
+  if (isPrivateHost(url.hostname)) throw new Error("the cover points inside your own network, so it wasn't fetched");
+}
+
+/**
+ * Makes a series out of what a page says about itself, and puts its cover on when it has one.
+ *
+ * The cover is downloaded here rather than in the popup for the reason every other download lives here: the popup
+ * closes as soon as the user looks away, and a half-finished upload would go with it. A cover that won't download
+ * is not worth failing over — the series is made either way, and a cover can be added by hand afterwards.
+ */
+export async function createSeriesFromPage(request: CreateSeriesRequest): Promise<{ id: number; title: string; coverError?: string }> {
+  const { serverUrl, apiKey } = await loadServerAccess();
+  if (!serverUrl) throw new Error("no server address is set — open the options page");
+
+  const series = await createSeries(serverUrl, apiKey, {
+    title: request.title,
+    ...(request.synopsis ? { synopsis: request.synopsis } : {}),
+    adult: request.adult,
+  });
+
+  if (!request.cover) return series;
+  try {
+    coverMustBePublic(request.cover);
+    const file = await fetchPage(request.cover, 0);
+    await addSeriesCover(serverUrl, apiKey, series.id, file);
+    return series;
+  } catch (err) {
+    return { ...series, coverError: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 /** One attempt at one image. Throws `Transient` when trying again might work. */
 async function fetchPage(url: string, minIntervalMs: number): Promise<File> {

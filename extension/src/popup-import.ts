@@ -6,7 +6,8 @@
  * comes from whatever site the user happens to be on.
  */
 import { findWorkspaceBySource, type WorkspaceRef } from "./api";
-import type { ChapterExtractResult } from "./chapter-extract";
+import type { ChapterExtractResult, SeriesExtractResult } from "./chapter-extract";
+import type { SeriesInfo } from "../../server/src/shared/providers/series-info";
 import { loadServerAccess } from "./settings-store";
 import type { ImportRequest } from "./types";
 
@@ -122,6 +123,105 @@ function pollProgress(): void {
       if (status.job.finishedAt !== undefined) window.clearInterval(pollTimer);
     });
   }, POLL_MS);
+}
+
+// ── New series from this page ────────────────────────────────────────────────
+
+/** The button, when this page says enough about itself to start a series from. */
+async function seriesButton(tabId: number): Promise<HTMLElement | null> {
+  const read = await chrome.tabs.sendMessage(tabId, { type: "extract-series" }) as SeriesExtractResult | undefined;
+  if (!read?.ok) return null;
+  const button = el("button", "menu-btn", "New series from this page");
+  button.addEventListener("click", () => renderSeries(read.info));
+  return button;
+}
+
+/**
+ * What the page said, for the user to correct before it becomes a series. Everything here came off somebody else's
+ * page, so it goes on screen as text and into inputs — never as markup.
+ */
+function renderSeries(info: SeriesInfo): void {
+  const title = el("input", "import-input") as HTMLInputElement;
+  title.value = info.title;
+  title.maxLength = 200;
+  title.setAttribute("aria-label", "Series title");
+
+  const synopsis = el("textarea", "import-input") as HTMLTextAreaElement;
+  synopsis.value = info.synopsis ?? "";
+  synopsis.rows = 4;
+  synopsis.maxLength = 4000;
+  synopsis.setAttribute("aria-label", "Synopsis");
+
+  const adultRow = el("label", "import-row");
+  const adult = el("input") as HTMLInputElement;
+  adult.type = "checkbox";
+  adult.checked = info.adult === true;
+  adultRow.append(adult, el("span", undefined, "Adult — hidden from readers who haven't asked for it"));
+
+  const create = el("button", "menu-btn primary", "Create series");
+  const back = el("button", "link-btn", "Back");
+  back.addEventListener("click", () => void start());
+  // Inside the form, not in place of it: `message()` replaces the whole panel, which would take the fields — and
+  // whatever the person had corrected in them — along with the failure it was reporting
+  const failure = el("p", "error");
+  failure.hidden = true;
+  const failed = (text: string): void => {
+    failure.textContent = text;
+    failure.hidden = false;
+    create.removeAttribute("disabled");
+  };
+
+  create.addEventListener("click", () => {
+    const name = title.value.trim();
+    if (!name) {
+      failed("Give the series a title.");
+      return;
+    }
+    failure.hidden = true;
+    create.setAttribute("disabled", "true");
+    void send<{ ok: boolean; error?: string; series?: { id: number; title: string; coverError?: string } }>({
+      type: "create-series",
+      request: {
+        title: name,
+        ...(synopsis.value.trim() ? { synopsis: synopsis.value.trim() } : {}),
+        ...(info.cover ? { cover: info.cover } : {}),
+        adult: adult.checked,
+      },
+    }).then(async (answer) => {
+      if (!answer?.ok || !answer.series) {
+        failed(answer?.error ?? "The series couldn't be made.");
+        return;
+      }
+      const nodes: Node[] = [el("p", "import-name", answer.series.title), el("p", "muted", "Series created.")];
+      // A cover that wouldn't download is worth saying, and worth nothing more: the series is there either way
+      if (answer.series.coverError) nodes.push(el("p", "muted", `The cover didn't come across: ${answer.series.coverError}`));
+      const { serverUrl } = await loadServerAccess();
+      if (serverUrl) {
+        const open = el("a", "menu-btn", "Open it") as HTMLAnchorElement;
+        open.href = `${serverUrl}/manage/series/${answer.series.id}`;
+        open.target = "_blank";
+        open.rel = "noreferrer";
+        nodes.push(open);
+      }
+      const done = el("button", "link-btn", "Done");
+      done.addEventListener("click", () => void start());
+      nodes.push(done);
+      show(...nodes);
+    }).catch((err: unknown) => {
+      // A worker that went away mid-click would otherwise leave a dead button and no explanation
+      failed(err instanceof Error ? err.message : String(err));
+    });
+  });
+
+  const nodes: Node[] = [
+    el("p", "import-found", "What this page says about itself"),
+    title,
+    synopsis,
+    adultRow,
+  ];
+  if (info.cover) nodes.push(el("p", "muted", "Its cover comes across too."));
+  nodes.push(failure, create, back);
+  show(...nodes);
 }
 
 // ── What the page holds ──────────────────────────────────────────────────────
@@ -247,10 +347,14 @@ export async function start(rescan = false): Promise<void> {
       return;
     }
     if (found.images.length === 0) {
+      // A page with no chapter images is very often a series page, so offer what it is good for instead
       const none = el("p", "muted", "No chapter images found on this page.");
       const again = el("button", "link-btn", "Scan again");
       again.addEventListener("click", () => void start(true));
-      show(none, again);
+      const nodes: Node[] = [none, again];
+      const series = await seriesButton(tab.id);
+      if (series) nodes.push(series);
+      show(...nodes);
       return;
     }
 

@@ -40,6 +40,7 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
   const [status, setStatus] = useState<SeriesStatus>((series?.status as SeriesStatus) ?? "ongoing");
   const [direction, setDirection] = useState<ReadingDirection>(series?.reading_direction ?? "rtl");
   const [tags, setTags] = useState<string[]>(series?.tags ?? []);
+  const [adult, setAdult] = useState(series?.adult ?? false);
   const [tagDraft, setTagDraft] = useState("");
   const [cover, setCover] = useState<File | null>(null);
   const coverRef = useRef<HTMLInputElement>(null);
@@ -68,6 +69,7 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
         synopsis: synopsis.trim() || null,
         status,
         reading_direction: direction,
+        adult,
         tags,
       };
       const existingId = series?.id ?? createdId.current;
@@ -188,6 +190,12 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
           <label className="block space-y-1">
             <span className="text-xs text-gray-400">Synopsis</span>
             <textarea value={synopsis} onChange={(e) => setSynopsis(e.target.value)} rows={4} maxLength={4000} className={`${inputClass} resize-y`} />
+          </label>
+
+          <label className="flex items-center gap-2 text-sm text-gray-300">
+            <input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} className="accent-indigo-500" />
+            Adult
+            <span className="text-xs text-gray-500">— only shown to readers who ask for it in their profile</span>
           </label>
 
           <div className="space-y-1">

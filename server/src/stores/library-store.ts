@@ -22,6 +22,11 @@ export interface SeriesFilter {
   hasChapters?: boolean;
   status?: SeriesStatus;
   sort?: "title" | "recent";
+  /**
+   * Leave adult series out. The reader passes this for anybody who hasn't asked to see them — including guests —
+   * and the management side never passes it, because a contributor curating the library has to see what is in it.
+   */
+  hideAdult?: boolean;
 }
 
 /** A series with everything the library card shows. */
@@ -63,10 +68,14 @@ export class SeriesStore {
   }
 
   /** Every tag in use, with how many series carry it (for the search panel). */
-  static async allTags(): Promise<{ tag: string; count: number }[]> {
+  static async allTags({ hideAdult = false } = {}): Promise<{ tag: string; count: number }[]> {
+    // Joined to the series so a hidden one can be left out: a tag only an adult series carries would otherwise be
+    // listed, which says it exists — and the counts on shared tags would be a headcount of what a reader can't see
     const rows = await db
       .select({ tag: seriesTags.tag, count: sql<number>`count(*)` })
       .from(seriesTags)
+      .innerJoin(series, eq(series.id, seriesTags.seriesId))
+      .where(hideAdult ? eq(series.adult, false) : undefined)
       .groupBy(seriesTags.tag)
       .orderBy(asc(seriesTags.tag));
     return rows.map((row) => ({ tag: row.tag, count: Number(row.count) }));
@@ -77,6 +86,7 @@ export class SeriesStore {
     const conditions = [];
     if (filter.search?.trim()) conditions.push(like(series.title, `%${filter.search.trim()}%`));
     if (filter.status) conditions.push(eq(series.status, filter.status));
+    if (filter.hideAdult) conditions.push(eq(series.adult, false));
 
     const required = normaliseTags(filter.withTags ?? []);
     if (required.length > 0) {

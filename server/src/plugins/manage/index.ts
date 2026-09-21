@@ -137,6 +137,7 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
           author: body.author ?? null,
           status: body.status ?? "ongoing",
           readingDirection: body.reading_direction ?? "rtl",
+          adult: body.adult ?? false,
         },
         body.tags ?? [],
       );
@@ -149,6 +150,8 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         author: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
         status: optionalEnum(SERIES_STATUSES),
         reading_direction: optionalEnum(READING_DIRECTIONS),
+        /** Hidden from readers who haven't asked for adult series. */
+        adult: t.Optional(t.Boolean()),
         tags: t.Optional(Tags),
       }),
       response: { 200: SeriesDetail, 404: ErrBody },
@@ -166,6 +169,7 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
           ...(body.author !== undefined ? { author: body.author } : {}),
           ...(body.status !== undefined ? { status: body.status } : {}),
           ...(body.reading_direction !== undefined ? { readingDirection: body.reading_direction } : {}),
+          ...(body.adult !== undefined ? { adult: body.adult } : {}),
         },
         body.tags,
       );
@@ -180,6 +184,8 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         author: t.Optional(t.Nullable(t.String({ maxLength: 200 }))),
         status: optionalEnum(SERIES_STATUSES),
         reading_direction: optionalEnum(READING_DIRECTIONS),
+        /** Hidden from readers who haven't asked for adult series. */
+        adult: t.Optional(t.Boolean()),
         /** Replaces the series' whole tag set. */
         tags: t.Optional(Tags),
       }),

@@ -11,6 +11,7 @@ import { batchRun } from "@/services/page-batch";
 import { publishBlocker } from "@/services/draft-publish";
 import { publishPage } from "@/services/page-publish";
 import { pageDir, PageStore } from "@/stores/page-store";
+import { ChapterStore, SeriesStore } from "@/stores/library-store";
 import { WorkspaceStore } from "@/stores/workspace-store";
 
 const log = childLogger("workspace-file");
@@ -45,6 +46,14 @@ export function fileWorkspaceIntoChapter(workspaceId: number, chapterId: number)
     if (batchRun(`workspace:${workspaceId}`)?.running) {
       return { ok: false as const, error: "this workspace is being translated — wait for the run to finish" };
     }
+    // Before a single page moves: an adult import makes its series adult, and a reader asking for the series while
+    // the pages were arriving would otherwise be handed them — the series still reading as ordinary. Set first,
+    // and the window doesn't exist. Never cleared here: a series marked adult stays marked, whatever is filed later
+    if (workspace.adult) {
+      const chapter = await ChapterStore.findById(chapterId);
+      if (chapter) await SeriesStore.update(chapter.seriesId, { adult: true });
+    }
+
     const report: FileReport = { filed: 0, published: 0, skipped: [] };
     const pages = await WorkspaceStore.pages(workspaceId);
     let order = await PageStore.maxSortOrder(chapterId);
