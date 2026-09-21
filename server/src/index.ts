@@ -42,6 +42,20 @@ async function migrateDb(): Promise<void> {
     purgeExpired().catch((err: unknown) => bootLog.error({ err }, "Purging expired sessions failed"));
   }, 15 * 60_000).unref();
 
+  // Pages burnt before the publish gate existed: publish what they are already serving, so the reader no longer has
+  // to fall back to a burn. Once per server, not once per boot — afterwards, an unpublished render means somebody
+  // chose not to publish it yet, and republishing it behind them is exactly what the gate exists to prevent
+  const { backfillOnce } = await import("@/services/publish-backfill");
+  const backfilled = await backfillOnce();
+  if (backfilled === null) {
+    bootLog.debug("The publish backfill has already run on this server");
+  } else {
+    if (backfilled.published.length > 0) bootLog.info(`Published ${backfilled.published.length} page(s) burnt before the publish gate`);
+    if (backfilled.failed.length > 0) {
+      bootLog.warn(`${backfilled.failed.length} page(s) couldn't be published — see Maintenance in the admin area`);
+    }
+  }
+
   // The scan log keeps only what the admin's retention allows, swept now and once a day after that
   const { ScanStore } = await import("@/stores/scan-store");
   const { serverPolicy } = await import("@/services/server-settings");

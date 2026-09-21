@@ -14,7 +14,7 @@ import { routeSettings } from "@/plugins/route-settings";
 import { routeTools } from "@/plugins/route-tools";
 import { SESSION_COOKIE } from "@/services/auth";
 import { UserStore } from "@/stores/user-store";
-import { hashPassword } from "@/services/auth";
+import { hashPassword, startSession } from "@/services/auth";
 import type { UserRole } from "@/db/schema";
 
 export const app = new Elysia().use(authGuard).use(authPlugin).use(readPlugin).use(managePlugin).use(studioPlugin).use(routeSettings).use(routeTools);
@@ -49,8 +49,6 @@ export async function call<T = any>(method: string, path: string, body?: unknown
   };
 }
 
-const tokenFrom = (setCookie: string): string => new RegExp(`${SESSION_COOKIE}=([^;]+)`).exec(setCookie)?.[1] ?? "";
-
 let counter = 0;
 
 /**
@@ -59,10 +57,12 @@ let counter = 0;
  */
 export async function signedIn(role: UserRole = "contributor"): Promise<{ id: number; username: string; cookie: string }> {
   const username = `${role}-${process.pid}-${++counter}`;
-  const password = "a long enough password";
-  const user = await UserStore.insert({ username, passwordHash: await hashPassword(password), role });
-  const login = await call("POST", "/auth/api/login", { username, password });
-  return { id: user.id, username, cookie: tokenFrom(login.setCookie) };
+  const user = await UserStore.insert({ username, passwordHash: await hashPassword("a long enough password"), role });
+  // The session is started directly rather than through /auth/api/login: a file needing a dozen accounts would
+  // otherwise trip the sign-in rate limiter, and what these tests are about is what a signed-in account may do.
+  // Signing in itself is covered by auth.test.ts, which goes through the route.
+  const { token } = await startSession(user.id, "bun test");
+  return { id: user.id, username, cookie: token };
 }
 
 /** A small valid PNG of one colour, for uploads. */

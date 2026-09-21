@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, Maximize, Minimize, MoveHorizontal, MoveVertical, Scan } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, Maximize, Minimize, MoveHorizontal, MoveVertical, Scan, MessageSquare } from "lucide-react";
 import { getChapter, readPageImageUrl, type ReadPage } from "../api";
+import { Reviews } from "../components/Reviews";
 import { clearProgress, saveProgress } from "../lib/read-progress";
 
 type FitMode = "height" | "width" | "original";
@@ -48,6 +49,7 @@ export function ReaderPage() {
     }
   };
   const [immersive, setImmersive] = useState(false);
+  const [showReviews, setShowReviews] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
 
   const pages = chapterQ.data?.pages ?? [];
@@ -213,6 +215,12 @@ export function ReaderPage() {
         </button>
       </div>
 
+      {showReviews && (
+        <div className="max-h-72 overflow-y-auto border-t border-gray-800 bg-gray-950/60 px-4 py-3">
+          <Reviews target="chapter" id={chapterId} />
+        </div>
+      )}
+
       <div className="flex items-center gap-3 px-4 py-2 border-t border-gray-800 text-xs text-gray-500">
         <button onClick={previous} disabled={pageNumber === 1 && !previousChapter} className="px-2 py-1 rounded-md hover:bg-gray-800 disabled:opacity-40">
           {pageNumber === 1 && previousChapter ? `← ${previousChapter.title}` : "← Previous"}
@@ -230,6 +238,14 @@ export function ReaderPage() {
           className="w-16 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-center text-gray-200 tabular-nums"
         />
         <span>{page.has_result ? "translated" : "original"}</span>
+        <button
+          onClick={() => setShowReviews((open) => !open)}
+          className={`flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-gray-800 ${showReviews ? "text-gray-200" : ""}`}
+          title="What readers made of this chapter"
+        >
+          <MessageSquare size={13} />
+          Reviews
+        </button>
         <button
           onClick={next}
           disabled={pageNumber === pages.length && !nextChapter}

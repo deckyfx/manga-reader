@@ -5,24 +5,37 @@
  * GET /read/api/series             the library, filtered by title, tags and status; sorted by title or recency
  * GET /read/api/series/tags        every tag in use, with how many series carry it
  * GET /read/api/series/:id         one series with its volumes, their chapters, and any unsorted chapters
- * GET /read/api/series/:id/cover   the series cover (uploaded, else its first page)
+ * GET /read/api/series/:id/cover   the series cover (pinned, else newest, else its first page)
+ * GET /read/api/series/:id/covers  every cover of the series
+ * GET /read/api/series/:id/covers/:coverId  one of them
  * GET /read/api/chapters/:id       one chapter with its pages, in reading order
+ * GET /read/api/series/:id/reviews what readers made of it, with the average
+ * GET /read/api/chapters/:id/reviews  the same for one chapter
  * GET /read/api/pages/:id/image    a page image: the published result, else the original
  */
 import Elysia, { t } from "elysia";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { ErrBody } from "@/lib/schemas";
+import { authContext } from "@/plugins/auth/index";
 import { coverFilePath } from "@/services/library-covers";
+import { CoverStore } from "@/stores/cover-store";
+import { ReviewStore } from "@/stores/review-store";
 import { hasUnpublishedEdits, publishedFile } from "@/services/page-history";
 import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore, type SeriesWithCounts } from "@/stores/library-store";
 import { pageDir, PageStore } from "@/stores/page-store";
-import type { Chapter, Page, Series, Volume } from "@/db/schema";
+import type { Chapter, Page, ReviewTarget, Series, Volume } from "@/db/schema";
 
 export const READING_DIRECTIONS = ["rtl", "ltr"] as const;
 
 export const IdParam = t.Integer({ minimum: 1 });
 export const PageIdParam = t.String({ pattern: "^[A-Za-z0-9-]+$" });
+
+export const RatingSchema = t.Object({
+  /** Mean rating to one decimal place, or null when nobody has rated it. */
+  average: t.Nullable(t.Number()),
+  count: t.Integer(),
+});
 
 export const SeriesSchema = t.Object({
   id: t.Integer(),
@@ -36,8 +49,39 @@ export const SeriesSchema = t.Object({
   volumes: t.Integer(),
   /** True when a cover image can be fetched (uploaded, or a first page to fall back on). */
   has_cover: t.Boolean(),
+  /** What readers made of it: the mean rating and how many gave one. */
+  rating: RatingSchema,
   created_at: t.String(),
   updated_at: t.String(),
+});
+
+export const ReviewSchema = t.Object({
+  id: t.Integer(),
+  username: t.String(),
+  display_name: t.Nullable(t.String()),
+  rating: t.Integer(),
+  body: t.Nullable(t.String()),
+  /** Whether this is the reader's own, so the page can offer to change or remove it. */
+  mine: t.Boolean(),
+  created_at: t.String(),
+  updated_at: t.String(),
+});
+
+/** Everything a page needs to show what people made of something: the average, and the reviews themselves. */
+export const ReviewPage = t.Object({
+  rating: RatingSchema,
+  reviews: t.Array(ReviewSchema),
+});
+
+/** One piece of a series' cover art. */
+export const CoverSchema = t.Object({
+  id: t.Integer(),
+  label: t.Nullable(t.String()),
+  /** The one being shown right now: the pinned cover, or the newest when nothing is pinned. */
+  current: t.Boolean(),
+  /** Whether somebody chose this one, as opposed to it simply being the newest. */
+  pinned: t.Boolean(),
+  created_at: t.String(),
 });
 
 export const VolumeSchema = t.Object({
@@ -140,10 +184,14 @@ export const toChapter = (chapter: Chapter, pages: number) => ({
   updated_at: chapter.updatedAt,
 });
 
-/** The file the cover route would serve: the uploaded cover, else the series' first page, else nothing. */
+/**
+ * The file the cover route would serve: the series' cover art — the pinned one, else the newest — and failing that
+ * the first page of its first chapter. A cover row whose file has gone falls through to the page, so a half-deleted
+ * cover leaves a series looking bare rather than broken.
+ */
 export function coverFile(entry: SeriesWithCounts): string | null {
-  const uploaded = entry.series.coverPath ? coverFilePath(entry.series.coverPath) : null;
-  if (uploaded && existsSync(uploaded)) return uploaded;
+  const art = entry.coverArt ? coverFilePath(entry.coverArt) : null;
+  if (art && existsSync(art)) return art;
   return entry.firstPageId ? pageImagePath(entry.firstPageId) : null;
 }
 
@@ -158,9 +206,50 @@ export const toSeries = (entry: SeriesWithCounts) => ({
   chapters: entry.chapters,
   volumes: entry.volumes,
   has_cover: coverFile(entry) !== null,
+  rating: entry.rating,
   created_at: entry.series.createdAt,
   updated_at: entry.series.updatedAt,
 });
+
+/**
+ * Every cover of a series, newest first, as both areas return them. `current` is the one a reader is being shown,
+ * which is the pinned cover when there is one and the newest otherwise — so the gallery and the cover route can
+ * never disagree about which is on display.
+ */
+export async function coverList(seriesId: number) {
+  const [entry, covers] = await Promise.all([SeriesStore.withCounts(seriesId), CoverStore.list(seriesId)]);
+  return covers.map((cover) => ({
+    id: cover.id,
+    label: cover.label,
+    current: cover.path === entry?.coverArt,
+    pinned: entry?.series.coverId === cover.id,
+    created_at: cover.createdAt,
+  }));
+}
+
+/**
+ * The reviews of one thing with their average, as both areas return them. `viewerId` marks the reader's own review,
+ * so the page can offer to change or remove it without a second request.
+ */
+export async function reviewPage(target: ReviewTarget, targetId: number, viewerId?: number) {
+  const [list, rating] = await Promise.all([
+    ReviewStore.list(target, targetId),
+    ReviewStore.summary(target, targetId),
+  ]);
+  return {
+    rating,
+    reviews: list.map(({ review, username, displayName }) => ({
+      id: review.id,
+      username,
+      display_name: displayName,
+      rating: review.rating,
+      body: review.body,
+      mine: review.userId === viewerId,
+      created_at: review.createdAt,
+      updated_at: review.updatedAt,
+    })),
+  };
+}
 
 /** One series with its tags, counts and cover state, as both areas return it. */
 export async function seriesSummary(id: number): Promise<ReturnType<typeof toSeries> | null> {
@@ -199,23 +288,24 @@ export async function chapterDetail(id: number) {
   };
 }
 
-/** The image a page shows: its published result when it has one, else the original it was imported from. */
 /**
- * The image a reader gets: the newest published snapshot, else — for pages that predate publishing, or were never
- * published — the current burn, else the original. Editing a published page in the Studio therefore changes nothing
- * for readers until it is published again.
+ * The image a reader gets: the newest published snapshot, else the original it was imported from. A burnt
+ * `result.png` is deliberately not offered — work reaches readers by being published and no other way, so editing a
+ * page in the Studio changes nothing for them until somebody publishes it.
+ *
+ * Pages burnt before publishing existed were once served from their burn here. `services/publish-backfill.ts`
+ * publishes those once, at boot and from the admin area, so this no longer has to guess.
  */
 export function pageImagePath(pageId: string): string | null {
   const published = publishedFile(pageId);
   if (published) return published;
-  const dir = pageDir(pageId);
-  const result = join(dir, "result.png");
-  if (existsSync(result)) return result;
-  const original = join(dir, "original.png");
+  const original = join(pageDir(pageId), "original.png");
   return existsSync(original) ? original : null;
 }
 
 export const readPlugin = new Elysia({ prefix: "/read/api" })
+  // Reading is open to everyone; `principal` is only used to mark a reader's own review
+  .use(authContext)
 
   .get(
     "/series",
@@ -266,6 +356,45 @@ export const readPlugin = new Elysia({ prefix: "/read/api" })
       return new Response(Bun.file(file), { headers: { "content-type": "image/png", "cache-control": "no-cache" } });
     },
     { params: t.Object({ id: IdParam }) },
+  )
+
+  .get(
+    "/series/:id/covers",
+    async ({ params, status }) => {
+      if (!(await SeriesStore.findById(params.id))) return status(404, { error: "series not found" });
+      return coverList(params.id);
+    },
+    { params: t.Object({ id: IdParam }), response: { 200: t.Array(CoverSchema), 404: ErrBody } },
+  )
+
+  .get(
+    "/series/:id/covers/:coverId",
+    async ({ params, status }) => {
+      const cover = await CoverStore.find(params.id, params.coverId);
+      if (!cover) return status(404, { error: "no such cover" });
+      const file = coverFilePath(cover.path);
+      if (!existsSync(file)) return status(404, { error: "that cover's image is missing" });
+      return new Response(Bun.file(file), { headers: { "content-type": "image/png", "cache-control": "no-cache" } });
+    },
+    { params: t.Object({ id: IdParam, coverId: IdParam }) },
+  )
+
+  .get(
+    "/series/:id/reviews",
+    async ({ params, principal, status }) => {
+      if (!(await SeriesStore.findById(params.id))) return status(404, { error: "series not found" });
+      return reviewPage("series", params.id, principal?.user.id);
+    },
+    { params: t.Object({ id: IdParam }), response: { 200: ReviewPage, 404: ErrBody } },
+  )
+
+  .get(
+    "/chapters/:id/reviews",
+    async ({ params, principal, status }) => {
+      if (!(await ChapterStore.findById(params.id))) return status(404, { error: "chapter not found" });
+      return reviewPage("chapter", params.id, principal?.user.id);
+    },
+    { params: t.Object({ id: IdParam }), response: { 200: ReviewPage, 404: ErrBody } },
   )
 
   .get(

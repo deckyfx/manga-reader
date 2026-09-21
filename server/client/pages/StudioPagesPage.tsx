@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, FolderInput, FolderPlus, Layers, Loader2, Plus, Search, Trash2, X } from "lucide-react";
-import { createWorkspace, listPages, listWorkspaces, pageFileUrl, type PageScope, type StudioPageSummary } from "../api";
+import { BookOpen, FolderInput, FolderPlus, Layers, Loader2, Plus, Search, Trash2, X, Link2 } from "lucide-react";
+import { createWorkspace, importWorkspacePageUrls, listPages, listWorkspaces, pageFileUrl, type PageScope, type StudioPageSummary } from "../api";
 import { ChapterPicker } from "../components/ChapterPicker";
 import { DiscardPageDialog } from "../components/DiscardPageDialog";
 import { Modal } from "../components/Modal";
+import { AddPageUrlsDialog } from "../components/AddPageUrlsDialog";
 import { NewPageDialog } from "../components/NewPageDialog";
 import { StudioPageCard, pageLabel } from "../components/StudioPageCard";
 import { useToast } from "../components/Toast";
@@ -16,6 +17,18 @@ const SCOPES: { value: PageScope; label: string; hint: string }[] = [
   { value: "chapter", label: "In chapters", hint: "Pages that belong to a chapter — editing one changes what people read once you publish" },
   { value: "all", label: "All", hint: "Every page" },
 ];
+
+/** A name for a workspace made from pasted addresses: the folder they share, else the day. */
+function workspaceName(urls: string[]): string {
+  try {
+    const segments = new URL(urls[0]).pathname.split("/").filter(Boolean);
+    const folder = segments.at(-2);
+    if (folder) return decodeURIComponent(folder).slice(0, 80);
+  } catch {
+    // Not an address we can read a folder out of; the date will do
+  }
+  return `Imported ${new Date().toLocaleDateString()}`;
+}
 
 function readScope(): PageScope {
   try {
@@ -36,6 +49,10 @@ export function StudioPagesPage() {
   const [discarding, setDiscarding] = useState<StudioPageSummary | null>(null);
   const [scope, setScopeState] = useState<PageScope>(readScope);
   const [newWorkspace, setNewWorkspace] = useState<string | null>(null);
+  const [importingUrls, setImportingUrls] = useState(false);
+  // The workspace an address import made, kept across retries: a second attempt fills the gaps in that workspace
+  // rather than leaving a trail of half-filled ones
+  const importWorkspace = useRef<number | null>(null);
   const toast = useToast();
 
   const setScope = (next: PageScope) => {
@@ -105,6 +122,13 @@ export function StudioPagesPage() {
           className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-800"
         >
           <FolderPlus size={14} /> New workspace
+        </button>
+        <button
+          onClick={() => setImportingUrls(true)}
+          className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-800"
+          title="Paste a list of image addresses; they are downloaded into a new workspace"
+        >
+          <Link2 size={14} /> From addresses
         </button>
         <button
           onClick={() => setCreating(true)}
@@ -217,6 +241,36 @@ export function StudioPagesPage() {
           })}
         </div>
       </div>
+
+      {importingUrls && (
+        <AddPageUrlsDialog
+          title="Download pages into a new workspace"
+          // A workspace keeps each page at its position, so resending the same list fills the gaps a failure left
+          resendable
+          onClose={() => {
+            setImportingUrls(false);
+            void qc.invalidateQueries({ queryKey: ["workspaces"] });
+            // Opened at the workspace once the report has been read, rather than mid-import over the top of it
+            const opened = importWorkspace.current;
+            importWorkspace.current = null;
+            if (opened !== null) navigate(`/studio/w/${opened}`);
+          }}
+          onImport={async (urls, { resend }) => {
+            // The same list goes back into the same workspace, where the pages already there hold their positions and
+            // only the gaps fill. An edited list gets its own workspace: positions come from the order given, so
+            // pouring a different order into the same places would shuffle what is already stored
+            const reuse = resend ? importWorkspace.current : null;
+            const workspaceId = reuse ?? (await createWorkspace({ name: workspaceName(urls) })).id;
+            importWorkspace.current = workspaceId;
+            const detail = await importWorkspacePageUrls(workspaceId, urls, 0);
+            void qc.invalidateQueries({ queryKey: ["workspaces"] });
+            return {
+              imported: detail.imported,
+              skipped: detail.skipped.map((entry) => ({ url: entry.url, name: entry.name, reason: entry.reason })),
+            };
+          }}
+        />
+      )}
 
       {creating && (
         <NewPageDialog

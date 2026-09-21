@@ -21,15 +21,21 @@ Cloudflare. The server doesn't scrape, doesn't hold site accounts and doesn't ne
 
 ## 1. Phases (suggested order: the main goal first)
 
-| # | Phase | Size | Why here |
+| # | Phase | Size | State |
 |---|---|---|---|
-| P3 | Workspaces (+ Send chapter to Studio, File into chapter) | M | The container the chapter import lands in. |
-| P4 | **Extension: import a chapter as a workspace** (generic extractor + rawkuma) | M–L | The main goal. |
-| P5 | exhentai extractor + adult flag | S–M | Needs P4. |
-| P0 | Settings areas: sub-menus, full width | S | Pure UI; independent. |
-| P1 | Add pages by URL (Studio and chapter, many at once) | S | Web-UI path for direct image links; independent. |
-| P2 | Region scan log | S–M | Independent; small schema + a page. |
-| P6 | Library backlog: several covers, reviews/ratings, publish backfill | M | |
+| P3 | Workspaces (+ Send chapter to Studio, File into chapter) | M | **Done** — PR #25 |
+| P4 | **Extension: import a chapter as a workspace** (generic extractor + rawkuma) | M–L | **Done** — PR #27 |
+| P5 | exhentai extractor + adult flag | S–M | In progress, branch `feat/exhentai-adult` |
+| P0 | Settings areas: sub-menus, full width | S | **Done** — PR #26 |
+| P1 | Add pages by URL (Studio and chapter, many at once) | S | **Done** — this PR |
+| P2 | Region scan log | S–M | **Done** — PR #26 |
+| P6a | Publish backfill | S | **Done** — this PR |
+| P6b | Several cover arts | M | **Done** — this PR |
+| P6c | Reviews and ratings | M | **Done** — this PR |
+
+Two sessions are working through this in parallel: one on P4 → P1 → P5 (the extension side), one on P6 (the library
+side). Migrations are not reserved ahead — generate at push time, and whoever merges second rebases and re-runs
+`bun run db:generate`.
 
 P0–P2 can be picked up whenever. They don't block P3 and P4, and P3 and P4 don't block them.
 
@@ -55,17 +61,18 @@ pane. Each section gets its own URL, so it can be linked, refreshed, and back/fo
 
 ## 3. P1: add pages by URL
 
-- **Studio** New page dialog: the URL tab takes a textarea, one URL per line (max ~50). Each line becomes its own
-  `POST /studio/api/pages {url}`, so the endpoint stays unchanged. With more than one URL the pages can go into a new
-  workspace (P3); until then they go to the Inbox.
-- **Chapter**: `POST /manage/api/chapters/:id/pages/urls {urls: string[]}`. It downloads through `fetchImage` one at a
-  time (polite, bounded), then feeds the bytes into `importIntoChapter` as `ImportSource {name: <url basename>, bytes}`.
-  It returns the same report shape as the file import (`imported`, `skipped[] {name, reason}`).
+- **Studio** (done): a "From addresses" button on the pages list takes a list, makes a workspace and downloads into it
+  through `POST /studio/api/workspaces/:id/pages/urls`. That reuses P3's positions, so a retried list fills gaps
+  instead of adding pages twice — better than one page job per line, which is why the New page dialog was left alone
+  for the single-URL case (it follows one job live).
+- **Chapter** (done): `POST /manage/api/chapters/:id/pages/urls {urls}`, downloading one at a time through
+  `fetchImage` and feeding the bytes into `importIntoChapter`. Same report shape as the file import.
 - The "Add pages" panel on `ManageChapterPage` gets a "From URLs" tab next to the file upload.
 - `pages.source` records the URL (already a free-text field).
 - Limits: reuse `MAX_IMAGE_BYTES` and `MAX_PAGES_PER_IMPORT`. Per-URL errors are skipped entries, not a failed request.
-- Tests: in-process with `app.handle()` and a local `Bun.serve` image host. That needs the resolver injection
-  `fetchImage` already has, because localhost is blocked on purpose.
+- Tests: a local `Bun.serve` image host, reached through an injected `Download` rather than `fetchImage`'s resolver —
+  the SSRF guard refuses a loopback address whatever the resolver says, which is the guard working. A route-level test
+  goes through the real `fetchImage` to prove a private address is still refused.
 
 ## 4. P2: region scan log
 
@@ -307,13 +314,26 @@ opens the new series in the web UI to review.
 
 ## 8. P6: library backlog
 
-- **Several cover arts**: `series_covers {id, seriesId, path, label, sortOrder, createdAt}`. The default is the latest
-  unless one is pinned (`series.coverId`, nullable). Migrate the existing `coverPath` into the table.
-- **Reviews and ratings**: `series_reviews` / `chapter_reviews {userId, targetId, rating 1–5, body?, createdAt,
-  updatedAt}`, unique on (user, target). An average and count are shown on the series page. Any signed-in user can
-  review; admins can remove reviews.
-- **Publish backfill**: a one-time admin action (or a boot migration step) that finds chapter pages with a burn but no
-  published snapshot and publishes them. That removes the reader's legacy fallback, which can then be deleted.
+- **Several cover arts** (done): `series_covers {id, seriesId, path, label, createdAt}`, newest first. The newest shows
+  unless one is pinned (`series.coverId`). Migration 0015 copies each `series.cover_path` into a row and pins it, so
+  every library looks exactly as it did. `cover_id` has no foreign key — SQLite can't add one by ALTER TABLE — so
+  `CoverStore` clears the pin when that cover goes, and resolution falls back to the newest if it ever dangles.
+  `series.cover_path` stays behind, unread, rather than being dropped in the same change.
+- **Reviews and ratings** (done): one `reviews {target, targetId, userId, rating 1–5, body?, …}` table rather than two,
+  unique on (target, target id, user). The average and count ride along on the series payload, so the library cards
+  and the series header show them without another request.
+  Decided unattended on 2026-09-20, in the user's absence: any signed-in account may review, may rewrite or remove its
+  own, and an admin may remove anybody's. An API key may not review — a key runs OCR, it doesn't hold opinions.
+  Reviews point at their subject by id with no foreign key (a key can't span two tables), so deleting a series or a
+  chapter clears them by hand; deleting an account cascades them away.
+- **Publish backfill** (done): finds chapter pages with a burn but no published snapshot and publishes them, so the
+  reader's fallback to `result.png` could be deleted. It runs **both** at boot and from `/admin/maintenance` — the boot
+  pass is what makes deleting the fallback safe in the same change, since a library whose admin hadn't pressed the
+  button would otherwise serve originals in place of finished pages. It changes nothing a reader can see: it publishes
+  exactly the image the fallback was already serving.
+  The snapshot keeps the burn's own modification time rather than "now". Whether a Studio draft still has work to
+  publish is decided by comparing its render against its chapter page's newest snapshot, so dating an old burn "now"
+  would silently stop offering a draft's edits (found in review by the session building P4, before it shipped).
 
 ## 9. Cross-cutting
 

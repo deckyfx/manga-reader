@@ -131,6 +131,30 @@ export const getServerPolicy = () => unwrap(api.manage.api.settings.get());
 export const updateServerPolicy = (body: { registration_enabled?: boolean; default_role?: RegistrationRole; scan_log_days?: number }) =>
   unwrap(api.manage.api.settings.put(body));
 
+// ── Reviews: any signed-in account may rate a series or a chapter ────────────
+
+export const listSeriesReviews = (id: number) => unwrap(api.read.api.series({ id }).reviews.get());
+
+export const listChapterReviews = (id: number) => unwrap(api.read.api.chapters({ id }).reviews.get());
+
+/** Writes the reader's review, replacing their earlier one if they had written one. */
+export const putReview = (target: "series" | "chapter", id: number, body: { rating: number; body?: string | null }) =>
+  unwrap(api.manage.api.reviews({ target })({ id }).put(body));
+
+export const removeReview = (target: "series" | "chapter", id: number, reviewId: number) =>
+  unwrap(api.manage.api.reviews({ target })({ id })({ reviewId }).delete());
+
+export type ReviewPage = Awaited<ReturnType<typeof listSeriesReviews>>;
+export type Review = ReviewPage["reviews"][number];
+
+// ── Publish backfill (admin) ─────────────────────────────────────────────────
+
+/** How many chapter pages hold a burn that was never published. */
+export const publishBackfillPending = () => unwrap(api.manage.api["publish-backfill"].get());
+
+/** Publishes those pages, so the reader never has to fall back to a burn. */
+export const runPublishBackfill = () => unwrap(api.manage.api["publish-backfill"].post());
+
 // ── Region scans (your own; everyone's for an admin) ─────────────────────────
 
 /** A page of scans, newest first. `beforeId` is the id of the last row already shown. */
@@ -221,6 +245,10 @@ export const deleteWorkspace = (id: number) => unwrap(api.studio.api.workspaces(
  * Appends images at `startIndex` (0-based). A batch sent again skips the positions it already stored, so a retry
  * after a dropped connection can't duplicate pages.
  */
+/** The same into a Studio workspace: each address keeps its position, so a retried list fills gaps. */
+export const importWorkspacePageUrls = (id: number, urls: string[], startIndex: number) =>
+  unwrap(api.studio.api.workspaces({ id }).pages.urls.post({ urls, start_index: startIndex }));
+
 export const uploadWorkspacePages = (id: number, files: File[], startIndex: number, sources?: string[]) =>
   unwrap(api.studio.api.workspaces({ id }).pages.post({ files, start_index: startIndex, ...(sources ? { sources } : {}) }));
 
@@ -383,9 +411,25 @@ export const updateSeries = (id: number, body: {
   tags?: string[];
 }) => unwrap(api.manage.api.series({ id }).put(body));
 
-export const uploadSeriesCover = (id: number, cover: File) => unwrap(api.manage.api.series({ id }).cover.put({ cover }));
+// ── Cover art: a series may hold several; the pinned one shows, else the newest ──
 
-export const removeSeriesCover = (id: number) => unwrap(api.manage.api.series({ id }).cover.delete());
+export const listSeriesCovers = (id: number) => unwrap(api.read.api.series({ id }).covers.get());
+
+export const addSeriesCover = (id: number, cover: File, label?: string) =>
+  unwrap(api.manage.api.series({ id }).covers.post({ cover, ...(label ? { label } : {}) }));
+
+/** Shows this cover instead of the newest. */
+export const pinSeriesCover = (id: number, coverId: number) =>
+  unwrap(api.manage.api.series({ id }).covers({ coverId }).pin.put());
+
+/** Back to showing the newest. */
+export const unpinSeriesCover = (id: number) => unwrap(api.manage.api.series({ id }).covers.pin.delete());
+
+export const removeSeriesCover = (id: number, coverId: number) =>
+  unwrap(api.manage.api.series({ id }).covers({ coverId }).delete());
+
+/** One particular cover's image, rather than whichever the series currently shows. */
+export const coverArtUrl = (id: number, coverId: number) => `/read/api/series/${id}/covers/${coverId}`;
 
 export const deleteSeries = (id: number) => unwrap(api.manage.api.series({ id }).delete());
 
@@ -407,6 +451,10 @@ export const deleteChapter = (id: number) => unwrap(api.manage.api.chapters({ id
 
 /** Files images or ZIP / CBZ archives into a chapter. */
 export const importChapterPages = (id: number, files: File[]) => unwrap(api.manage.api.chapters({ id }).pages.post({ files }));
+
+/** Downloads image addresses into a chapter, in the order given. */
+export const importChapterPageUrls = (id: number, urls: string[]) =>
+  unwrap(api.manage.api.chapters({ id }).pages.urls.post({ urls }));
 
 export const reorderChapterPages = (id: number, ids: string[]) => unwrap(api.manage.api.chapters({ id }).pages.reorder.put({ ids }));
 

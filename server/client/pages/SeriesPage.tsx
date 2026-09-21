@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, Loader2, Settings2 } from "lucide-react";
+import { RatingBadge, Reviews } from "../components/Reviews";
 import { getSeries, seriesCoverUrl, type ChapterSummary } from "../api";
 import { chapterLink, savedPage } from "../lib/read-progress";
 
@@ -50,6 +51,7 @@ export function SeriesPage() {
               <span className="px-2 py-0.5 rounded bg-gray-800">{series.reading_direction === "rtl" ? "Right to left" : "Left to right"}</span>
               {series.author && <span>by {series.author}</span>}
             </div>
+            <RatingBadge rating={series.rating} />
             {series.synopsis && <p className="text-sm text-gray-300 whitespace-pre-wrap">{series.synopsis}</p>}
             {series.tags.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
@@ -84,6 +86,10 @@ export function SeriesPage() {
           {volumes.length === 0 && unsorted.length === 0 && (
             <p className="text-sm text-gray-500">No chapters yet — add them in Manage.</p>
           )}
+
+          <div className="border-t border-gray-800 pt-5">
+            <Reviews target="series" id={series.id} />
+          </div>
         </div>
       </div>
     </div>

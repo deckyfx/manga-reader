@@ -4,8 +4,10 @@
  *
  * POST   /manage/api/series                     create a series (title, synopsis, author, status, direction, tags)
  * PUT    /manage/api/series/:id                 edit it; `tags` replaces the whole set
- * PUT    /manage/api/series/:id/cover           upload a cover image (multipart)
- * DELETE /manage/api/series/:id/cover           drop the cover, falling back to the first page
+ * POST   /manage/api/series/:id/covers          add a cover image (multipart); the newest is what shows
+ * PUT    /manage/api/series/:id/covers/:coverId/pin  show this one instead of the newest
+ * DELETE /manage/api/series/:id/covers/pin      stop pinning, so the newest shows again
+ * DELETE /manage/api/series/:id/covers/:coverId  remove one cover
  * DELETE /manage/api/series/:id                 delete a series with its volumes and chapters (pages → Inbox)
  * POST   /manage/api/volumes                    add a volume to a series
  * PUT    /manage/api/volumes/:id                rename / renumber / reorder it
@@ -14,6 +16,7 @@
  * PUT    /manage/api/chapters/:id               rename / renumber / reorder / move between volumes
  * DELETE /manage/api/chapters/:id               delete it (its pages → Inbox)
  * POST   /manage/api/chapters/:id/pages         file images or ZIP / CBZ archives into a chapter (multipart)
+ * POST   /manage/api/chapters/:id/pages/urls    download image addresses into a chapter, in the order given
  * POST   /manage/api/chapters/:id/pages/:pageId copy an Inbox draft into the chapter (or move it, keep_draft=false)
  * PUT    /manage/api/chapters/:id/pages/reorder set the chapter's reading order
  * GET    /manage/api/chapters/:id/export        the chapter as a ZIP of published images
@@ -22,6 +25,11 @@
  * POST   /manage/api/chapters/:id/publish       publish every page of the chapter that has unpublished edits
  * POST   /manage/api/chapters/:id/to-studio     work on it in the Studio: a workspace of draft copies
  * POST   /manage/api/pages/:id/publish          publish one page, so readers get its current result
+ * GET    /manage/api/publish-backfill           what the one-time publish pass would do, and when it ran (admin)
+ * POST   /manage/api/publish-backfill           publish those, so the reader never falls back to a burn (admin)
+ * PUT    /manage/api/reviews/:target/:id        rate a series or chapter, with optional words (any account)
+ * DELETE /manage/api/reviews/:target/:id/:reviewId  remove your own review; an admin may remove anyone's
+ * GET    /manage/api/scans                      region scans: your own, or everyone's for an admin
  * GET    /manage/api/settings                   server policy: registration, default role (admin)
  * PUT    /manage/api/settings                   change it (admin)
  * GET    /manage/api/sessions                   every signed-in session (admin)
@@ -40,25 +48,33 @@ import { ErrBody, optionalEnum } from "@/lib/schemas";
 import { chapterRun, pagesToRun, startChapterRun } from "@/services/chapter-batch";
 import { exportChapter } from "@/services/chapter-export";
 import { importIntoChapter, type ImportSource } from "@/services/chapter-import";
+import { importUrlsIntoChapter, MAX_URLS_PER_IMPORT, tidyUrls } from "@/services/url-import";
 import { sendChapterToStudio } from "@/services/chapter-to-studio";
 import { hasUnpublishedEdits } from "@/services/page-history";
 import { publishPage } from "@/services/page-publish";
 import { withPageLock } from "@/queue/page-queue";
 import { CoverTooLargeError, deleteCover, saveCover } from "@/services/library-covers";
+import { CoverStore } from "@/stores/cover-store";
 import { copyPageIntoChapter } from "@/services/page-copy";
 import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore } from "@/stores/library-store";
 import { SessionStore, UserStore } from "@/stores/user-store";
 import { hashSecret, SESSION_COOKIE } from "@/services/auth";
 import { hashPassword } from "@/services/auth";
 import { MAX_SCAN_LOG_DAYS, REGISTRATION_ROLES, serverPolicy, updateServerPolicy } from "@/services/server-settings";
+import { ReviewStore } from "@/stores/review-store";
 import { ScanStore } from "@/stores/scan-store";
+import { backfillPublishes, backfillRanAt, pagesBlockedFromPublish, pagesNeedingPublish } from "@/services/publish-backfill";
 import { authContext, SessionSchema, toUser, UserSchema } from "@/plugins/auth/index";
-import { USER_ROLES } from "@/db/schema";
+import { REVIEW_TARGETS, USER_ROLES } from "@/db/schema";
 import { PageStore } from "@/stores/page-store";
 import {
   chapterDetail,
   ChapterDetail,
+  coverList,
+  CoverSchema,
   IdParam,
+  reviewPage,
+  ReviewPage,
   PageIdParam,
   ReadPageSchema,
   READING_DIRECTIONS,
@@ -171,11 +187,10 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     },
   )
 
-  .put(
-    "/series/:id/cover",
+  .post(
+    "/series/:id/covers",
     async ({ params, body, status }) => {
-      const series = await SeriesStore.findById(params.id);
-      if (!series) return status(404, { error: "series not found" });
+      if (!(await SeriesStore.findById(params.id))) return status(404, { error: "series not found" });
       let name: string;
       try {
         name = await saveCover(params.id, new Uint8Array(await body.cover.arrayBuffer()));
@@ -184,26 +199,48 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
         log.warn({ err, seriesId: params.id }, "Cover could not be stored");
         return status(422, { error: "cover image could not be read" });
       }
-      await SeriesStore.update(params.id, { coverPath: name });
-      return (await seriesDetail(params.id)) ?? status(404, { error: "series not found" });
+      // Newest is what a series shows unless one is pinned, so an upload becomes the cover without being told to
+      await CoverStore.add({ seriesId: params.id, path: name, label: body.label?.trim() || null });
+      return coverList(params.id);
     },
     {
       params: t.Object({ id: IdParam }),
-      body: t.Object({ cover: t.File() }),
-      response: { 200: SeriesDetail, 404: ErrBody, 422: ErrBody },
+      body: t.Object({ cover: t.File(), label: t.Optional(t.String({ maxLength: 80 })) }),
+      response: { 200: t.Array(CoverSchema), 404: ErrBody, 422: ErrBody },
     },
   )
 
-  .delete(
-    "/series/:id/cover",
+  .put(
+    "/series/:id/covers/:coverId/pin",
     async ({ params, status }) => {
-      const series = await SeriesStore.findById(params.id);
-      if (!series) return status(404, { error: "series not found" });
-      await deleteCover(series.coverPath);
-      await SeriesStore.update(params.id, { coverPath: null });
-      return (await seriesDetail(params.id)) ?? status(404, { error: "series not found" });
+      if (!(await SeriesStore.findById(params.id))) return status(404, { error: "series not found" });
+      if (!(await CoverStore.pin(params.id, params.coverId))) return status(404, { error: "no such cover" });
+      return coverList(params.id);
     },
-    { params: t.Object({ id: IdParam }), response: { 200: SeriesDetail, 404: ErrBody } },
+    { params: t.Object({ id: IdParam, coverId: IdParam }), response: { 200: t.Array(CoverSchema), 404: ErrBody } },
+  )
+
+  .delete(
+    "/series/:id/covers/pin",
+    async ({ params, status }) => {
+      if (!(await SeriesStore.findById(params.id))) return status(404, { error: "series not found" });
+      // Unpinned means "show the newest", which is the default a series starts with
+      await CoverStore.pin(params.id, null);
+      return coverList(params.id);
+    },
+    { params: t.Object({ id: IdParam }), response: { 200: t.Array(CoverSchema), 404: ErrBody } },
+  )
+
+  .delete(
+    "/series/:id/covers/:coverId",
+    async ({ params, status }) => {
+      if (!(await SeriesStore.findById(params.id))) return status(404, { error: "series not found" });
+      const removed = await CoverStore.remove(params.id, params.coverId);
+      if (removed === null) return status(404, { error: "no such cover" });
+      await deleteCover(removed);
+      return coverList(params.id);
+    },
+    { params: t.Object({ id: IdParam, coverId: IdParam }), response: { 200: t.Array(CoverSchema), 404: ErrBody } },
   )
 
   .delete(
@@ -211,9 +248,15 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
     async ({ params, status }) => {
       const series = await SeriesStore.findById(params.id);
       if (!series) return status(404, { error: "series not found" });
+      // The cover files and chapter ids are read before the rows go: deleting the series cascades them away
+      const covers = await CoverStore.paths(params.id);
+      const chapterIds = (await ChapterStore.listBySeries(params.id)).map((chapter) => chapter.id);
       // Volumes and chapters go with it; the pages keep their images and return to the Inbox
       await SeriesStore.delete(params.id);
-      await deleteCover(series.coverPath);
+      // Reviews point at a series or a chapter by id, with no foreign key to follow, so they are cleared by hand
+      await ReviewStore.forgetTarget("series", params.id);
+      for (const chapterId of chapterIds) await ReviewStore.forgetTarget("chapter", chapterId);
+      for (const cover of covers) await deleteCover(cover);
       return { deleted: true };
     },
     { params: t.Object({ id: IdParam }), response: { 200: t.Object({ deleted: t.Boolean() }), 404: ErrBody } },
@@ -347,6 +390,8 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       if (!chapter) return status(404, { error: "chapter not found" });
       // The pages keep their images and return to the Inbox
       await ChapterStore.delete(params.id);
+      // Nothing cascades a review away: it points at a chapter by id, with no foreign key to follow
+      await ReviewStore.forgetTarget("chapter", params.id);
       return (await seriesDetail(chapter.seriesId)) ?? status(404, { error: "series not found" });
     },
     { params: t.Object({ id: IdParam }), response: { 200: SeriesDetail, 404: ErrBody } },
@@ -372,6 +417,32 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       response: {
         200: t.Composite([ChapterDetail, t.Object({ imported: t.Integer(), skipped: t.Array(t.Object({ name: t.String(), reason: t.String() })) })]),
         404: ErrBody,
+      },
+    },
+  )
+
+  .post(
+    "/chapters/:id/pages/urls",
+    async ({ params, body, status }) => {
+      if (!(await ChapterStore.findById(params.id))) return status(404, { error: "chapter not found" });
+      const urls = tidyUrls(body.urls);
+      if (urls.length === 0) return status(422, { error: "give at least one image address" });
+      const report = await importUrlsIntoChapter(params.id, urls);
+      const detail = await chapterDetail(params.id);
+      if (!detail) return status(404, { error: "chapter not found" });
+      return { ...detail, imported: report.pages.length, skipped: report.skipped };
+    },
+    {
+      params: t.Object({ id: IdParam }),
+      body: t.Object({ urls: t.Array(t.String({ maxLength: 4096 }), { maxItems: MAX_URLS_PER_IMPORT }) }),
+      response: {
+        200: t.Composite([ChapterDetail, t.Object({
+          imported: t.Integer(),
+          /** `url` is the address that failed, so an offer to retry knows exactly which ones to send again. */
+          skipped: t.Array(t.Object({ url: t.Nullable(t.String()), name: t.String(), reason: t.String() })),
+        })]),
+        404: ErrBody,
+        422: ErrBody,
       },
     },
   )
@@ -746,6 +817,102 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       return updated ? toPage(updated) : status(404, { error: "page not found" });
     },
     { params: t.Object({ id: PageIdParam }), response: { 200: ReadPageSchema, 404: ErrBody } },
+  )
+
+  // ── Reviews (any signed-in account, in a browser) ──────────────────────────
+
+  .put(
+    "/reviews/:target/:id",
+    async ({ params, body, principal, status }) => {
+      if (!principal) return status(401, { error: "sign in to review" });
+      const target = params.target;
+      const exists = target === "series"
+        ? await SeriesStore.findById(params.id)
+        : await ChapterStore.findById(params.id);
+      if (!exists) return status(404, { error: `${target} not found` });
+      await ReviewStore.put({
+        target,
+        targetId: params.id,
+        userId: principal.user.id,
+        rating: body.rating,
+        body: body.body?.trim() || null,
+      });
+      // A review points at its subject by id, with no foreign key to cascade, so a delete landing between the check
+      // above and the write leaves a row attached to nothing. Asking again is cheaper than a lock, and the window is
+      // the only way it can happen
+      const stillThere = target === "series" ? await SeriesStore.findById(params.id) : await ChapterStore.findById(params.id);
+      if (!stillThere) {
+        await ReviewStore.forgetTarget(target, params.id);
+        return status(404, { error: `${target} not found` });
+      }
+      return reviewPage(target, params.id, principal.user.id);
+    },
+    {
+      params: t.Object({ target: t.UnionEnum([...REVIEW_TARGETS]), id: IdParam }),
+      body: t.Object({
+        rating: t.Integer({ minimum: 1, maximum: 5 }),
+        body: t.Optional(t.Nullable(t.String({ maxLength: 4000 }))),
+      }),
+      response: { 200: ReviewPage, 401: ErrBody, 404: ErrBody },
+    },
+  )
+
+  .delete(
+    "/reviews/:target/:id/:reviewId",
+    async ({ params, principal, status }) => {
+      if (!principal) return status(401, { error: "sign in to remove a review" });
+      // Yours to remove; an admin may remove anyone's, which is what passing no user id means
+      const admin = principal.user.role === "admin";
+      const removed = await ReviewStore.remove({
+        id: params.reviewId,
+        target: params.target,
+        targetId: params.id,
+        ...(admin ? {} : { userId: principal.user.id }),
+      });
+      if (!removed) return status(404, { error: "no such review of yours, on this one" });
+      return reviewPage(params.target, params.id, principal.user.id);
+    },
+    {
+      params: t.Object({ target: t.UnionEnum([...REVIEW_TARGETS]), id: IdParam, reviewId: IdParam }),
+      response: { 200: ReviewPage, 401: ErrBody, 404: ErrBody },
+    },
+  )
+
+  // ── Publish backfill (admin) ───────────────────────────────────────────────
+
+  .get(
+    "/publish-backfill",
+    async () => {
+      const [pending, blocked, ranAt] = await Promise.all([pagesNeedingPublish(), pagesBlockedFromPublish(), backfillRanAt()]);
+      return { pending: pending.length, blocked, ran_at: ranAt };
+    },
+    {
+      response: {
+        200: t.Object({
+          pending: t.Integer(),
+          /** Pages holding an unpublished burn that can't be published as they stand, and why. */
+          blocked: t.Array(t.Object({ pageId: t.String(), reason: t.String() })),
+          /** When the one-time pass ran on this server; null before it has. */
+          ran_at: t.Nullable(t.String()),
+        }),
+      },
+    },
+  )
+
+  .post(
+    "/publish-backfill",
+    async () => {
+      const report = await backfillPublishes();
+      return { published: report.published.length, failed: report.failed };
+    },
+    {
+      response: {
+        200: t.Object({
+          published: t.Integer(),
+          failed: t.Array(t.Object({ pageId: t.String(), error: t.String() })),
+        }),
+      },
+    },
   )
 
   // ── Region scans (your own; everyone's for an admin) ───────────────────────

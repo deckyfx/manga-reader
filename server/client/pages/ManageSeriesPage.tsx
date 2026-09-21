@@ -17,6 +17,7 @@ import {
   type VolumeWithChapters,
 } from "../api";
 import { useConfirm } from "../components/ConfirmDialog";
+import { CoverGallery } from "../components/CoverGallery";
 import { SeriesForm } from "../components/SeriesForm";
 
 const STATUS_LABEL: Record<string, string> = { ongoing: "Ongoing", completed: "Completed", hiatus: "Hiatus" };
@@ -166,6 +167,10 @@ export function ManageSeriesPage() {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="border-b border-gray-800 p-4">
+          <CoverGallery seriesId={series.id} />
         </div>
 
         <div className="space-y-5 p-4">

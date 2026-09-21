@@ -1,8 +1,9 @@
 import { Navigate } from "react-router";
-import { Loader2, MonitorSmartphone, ScanText, ShieldAlert, UserPlus, Users } from "lucide-react";
+import { Loader2, MonitorSmartphone, ScanText, ShieldAlert, UserPlus, Users, Wrench } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { LoadFailure } from "../components/LoadFailure";
 import { SectionedPage, type PageSection } from "../components/SectionedPage";
+import { MaintenanceSection } from "./admin/MaintenanceSection";
 import { PolicySection } from "./admin/PolicySection";
 import { ScansSection } from "./admin/ScansSection";
 import { SessionsSection } from "./admin/SessionsSection";
@@ -55,6 +56,13 @@ export function AdminPage() {
       title: "Scan log",
       description: "Every region scanned through this server: who ran it, and what came back.",
       render: () => <ScansSection />,
+    },
+    {
+      id: "maintenance",
+      label: "Maintenance",
+      icon: <Wrench size={16} />,
+      description: "Jobs to run by hand when something in the library needs putting right.",
+      render: () => <MaintenanceSection />,
     },
   ];
 

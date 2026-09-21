@@ -56,8 +56,14 @@ export const series = sqliteTable("series", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   title: text("title").notNull(),
   synopsis: text("synopsis"),
-  /** Cover image inside the covers folder; falls back to the first page when unset. */
+  /** @deprecated moved to `series_covers`; migration 0015 copied every value into a row there. Nothing reads it. */
   coverPath: text("cover_path"),
+  /**
+   * The cover to show instead of the newest one, when somebody has picked one. Nothing enforces that it points at a
+   * row of this series' covers — the column is added by ALTER TABLE, and SQLite can't add a foreign key that way —
+   * so `CoverStore` clears it when that cover goes, and resolving it falls back to the newest if it dangles.
+   */
+  coverId: integer("cover_id"),
   author: text("author"),
   /** ongoing | completed | hiatus */
   status: text("status").notNull().default("ongoing"),
@@ -66,6 +72,25 @@ export const series = sqliteTable("series", {
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 });
+
+/**
+ * Cover art of a series: several per series, newest first. A series shows the pinned one (`series.coverId`) when it
+ * has one, else the most recent, else the first page of its first chapter.
+ *
+ * Only the file name is stored; the file itself lives in the covers folder, like the single cover this replaced.
+ */
+export const seriesCovers = sqliteTable("series_covers", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  seriesId: integer("series_id").notNull().references(() => series.id, { onDelete: "cascade" }),
+  /** File name inside the covers folder. */
+  path: text("path").notNull(),
+  /** What this one is, in the contributor's words ("volume 3", "colour spread"). */
+  label: text("label"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  // The gallery and the "newest" rule both read one series' covers in id order
+  seriesCoverIdx: index("series_covers_series_idx").on(table.seriesId, table.id),
+}));
 
 /** Tags of a series, one row each, so searches can include and exclude them without scanning strings. */
 export const seriesTags = sqliteTable("series_tags", {
@@ -106,6 +131,34 @@ export const chapters = sqliteTable("chapters", {
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 }, (table) => ({
   chapterSeriesIdx: index("chapters_series_sort_idx").on(table.seriesId, table.sortOrder),
+}));
+
+/**
+ * What readers think of a series or one of its chapters: a rating, and optionally a few words. One per account per
+ * thing, so an average is an average of people rather than of opinions typed twice.
+ *
+ * `target` says which table `targetId` points into. A foreign key can't span two tables, so the routes check the
+ * series or chapter exists before writing, and deleting one clears its reviews (see `ReviewStore.forgetTarget`).
+ */
+export const REVIEW_TARGETS = ["series", "chapter"] as const;
+export type ReviewTarget = (typeof REVIEW_TARGETS)[number];
+
+export const reviews = sqliteTable("reviews", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  /** series | chapter */
+  target: text("target").notNull(),
+  targetId: integer("target_id").notNull(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  /** 1–5, as whole stars. */
+  rating: integer("rating").notNull(),
+  body: text("body"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  // One review per account per thing: a second one edits the first rather than stacking up
+  reviewOnceIdx: uniqueIndex("reviews_target_user_idx").on(table.target, table.targetId, table.userId),
+  // Listing a thing's reviews, newest first, and averaging them
+  reviewTargetIdx: index("reviews_target_idx").on(table.target, table.targetId, table.id),
 }));
 
 // ── Studio page-translation pipeline ────────────────────────────────────────
@@ -415,6 +468,11 @@ export type NewTranslateLog = typeof translateLogs.$inferInsert;
 
 export type Series = typeof series.$inferSelect;
 export type NewSeries = typeof series.$inferInsert;
+export type Review = typeof reviews.$inferSelect;
+export type NewReview = typeof reviews.$inferInsert;
+
+export type SeriesCover = typeof seriesCovers.$inferSelect;
+export type NewSeriesCover = typeof seriesCovers.$inferInsert;
 export type SeriesTag = typeof seriesTags.$inferSelect;
 
 export type Volume = typeof volumes.$inferSelect;
