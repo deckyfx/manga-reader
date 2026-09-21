@@ -94,24 +94,34 @@ export function createExhentaiExtractor(intervalMs = MIN_INTERVAL_MS): Extractor
         return { images: [], adult: true };
       }
 
-      // Every gallery page, the first of which is already open
+      // Every gallery page, in order — including the ones before this one. The open page may be any of them: someone
+      // who paged through to page 3 and then pressed Import would otherwise lose pages 1 and 2 and get 3 twice.
+      const stated = Number.parseInt(ctx.url.searchParams.get("p") ?? "0", 10);
+      const openPage = Number.isInteger(stated) && stated > 0 ? stated : 0;
       const claimed = lastPagerIndex(ctx.document);
-      const lastPage = Math.min(claimed, MAX_GALLERY_PAGES - 1);
-      if (claimed > lastPage) ctx.log(`the pager claims ${claimed + 1} pages; reading the first ${lastPage + 1}`);
-      const pageLinks: string[] = imagePageLinks(ctx.document, ctx.url);
-      for (let page = 1; page <= lastPage; page++) {
+      const lastPage = Math.min(Math.max(claimed, openPage), MAX_GALLERY_PAGES - 1);
+      if (Math.max(claimed, openPage) > lastPage) {
+        ctx.log(`the pager claims ${Math.max(claimed, openPage) + 1} pages; reading the first ${lastPage + 1}`);
+      }
+
+      // Collected by page index and flattened afterwards, so reading order doesn't depend on which page was open
+      const byPage = new Map<number, string[]>([[openPage, imagePageLinks(ctx.document, ctx.url)]]);
+      for (let page = 0; page <= lastPage; page++) {
+        if (page === openPage) continue;
         const url = new URL(ctx.url.toString());
         url.searchParams.set("p", String(page));
         await delay(intervalMs);
         ctx.log(`reading gallery page ${page + 1} of ${lastPage + 1}`);
         try {
-          pageLinks.push(...imagePageLinks(await ctx.fetchDocument(url.toString()), ctx.url));
+          byPage.set(page, imagePageLinks(await ctx.fetchDocument(url.toString()), ctx.url));
         } catch (err) {
-          // A gallery page that won't load costs its share of the images, but the ones already collected are worth having
+          // A gallery page that won't load costs its share of the images; the rest are still worth having
           ctx.log(`gallery page ${page + 1} couldn't be read: ${err instanceof Error ? err.message : String(err)}`);
-          break;
         }
       }
+
+      const pageLinks: string[] = [];
+      for (let page = 0; page <= lastPage; page++) pageLinks.push(...(byPage.get(page) ?? []));
 
       if (pageLinks.length > MAX_IMAGE_PAGES) {
         ctx.log(`${pageLinks.length} pages found, which is more than this reads in one go — stopping at ${MAX_IMAGE_PAGES}`);
@@ -140,7 +150,8 @@ export function createExhentaiExtractor(intervalMs = MIN_INTERVAL_MS): Extractor
           ctx.log(`page ${index + 1} had no image`);
           continue;
         }
-        images.push(new URL(url, ctx.url).toString());
+        // Against `link`: the address lives on the image page, and resolving it against the gallery would be wrong
+        images.push(new URL(url, link).toString());
       }
 
       const title = ctx.document.querySelector("#gj")?.textContent?.trim() || ctx.document.querySelector("#gn")?.textContent?.trim();

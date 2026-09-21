@@ -205,6 +205,45 @@ describe("the exhentai extractor", () => {
     expect(result).toMatchObject({ title: "日本語の題", adult: true });
   });
 
+  test("reads the pages before the open one, and each exactly once", async () => {
+    const ctx = galleryContext(
+      // The reader is on page 2 of 2 and presses Import there
+      `<h1 id="gn">A Gallery</h1>
+       <a href="/s/ccc333/123456-3">3</a><a href="/s/ddd444/123456-4">4</a>
+       <table class="ptb"><tr><td><a href="?p=0">1</a></td><td><a href="?p=1">2</a></td></tr></table>`,
+      {
+        [`${GALLERY}?p=0`]: `<a href="/s/aaa111/123456-1">1</a><a href="/s/bbb222/123456-2">2</a>`,
+        "https://exhentai.org/s/aaa111/123456-1": imagePage("https://hath.test/a/1.jpg"),
+        "https://exhentai.org/s/bbb222/123456-2": imagePage("https://hath.test/b/2.jpg"),
+        "https://exhentai.org/s/ccc333/123456-3": imagePage("https://hath.test/c/3.jpg"),
+        "https://exhentai.org/s/ddd444/123456-4": imagePage("https://hath.test/d/4.jpg"),
+      },
+      `${GALLERY}?p=1`,
+    );
+
+    const result = await extractor.extract(ctx);
+    // Gallery order, not "whatever page happened to be open first"
+    expect(result.images).toEqual([
+      "https://hath.test/a/1.jpg",
+      "https://hath.test/b/2.jpg",
+      "https://hath.test/c/3.jpg",
+      "https://hath.test/d/4.jpg",
+    ]);
+  });
+
+  test("resolves a relative image address against the page it was read from", async () => {
+    const ctx = galleryContext(
+      `<h1 id="gn">A Gallery</h1><a href="/s/aaa111/123456-1">1</a>`,
+      { "https://exhentai.org/s/aaa111/123456-1": imagePage("keystamp/1.jpg") },
+      GALLERY,
+    );
+
+    const result = await extractor.extract(ctx);
+    // Against the image page it was read from. Resolved against the gallery instead, this would have been
+    // /g/123456/abcdef0123/keystamp/1.jpg, which is nobody's image.
+    expect(result.images).toEqual(["https://exhentai.org/s/aaa111/keystamp/1.jpg"]);
+  });
+
   test("won't walk a pager that claims thousands of pages", async () => {
     let fetched = 0;
     const ctx = contextFor(
