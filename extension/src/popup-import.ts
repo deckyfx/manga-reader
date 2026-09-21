@@ -10,7 +10,7 @@ import { ensureContentScript } from "./inject";
 import type { ChapterExtractResult, SeriesExtractResult } from "./chapter-extract";
 import type { SeriesInfo } from "../../server/src/shared/providers/series-info";
 import { loadServerAccess } from "./settings-store";
-import type { ImportRequest } from "./types";
+import type { ExtractProgressMsg, ImportRequest } from "./types";
 
 /** The background worker's answer to `import-status`. */
 interface ImportStatusReply {
@@ -361,6 +361,16 @@ export async function start(rescan = false): Promise<void> {
       message("The browser doesn't let extensions read this page.");
       return;
     }
+    // Each step of the read, as the page reports it. A long walk also warns that closing the popup ends it: the
+    // result comes back to this popup, and a closed popup has nowhere to put it.
+    const onProgress = (msg: unknown): void => {
+      if (!msg || typeof msg !== "object" || (msg as { type?: unknown }).type !== "extract-progress") return;
+      show(
+        el("p", "muted", (msg as ExtractProgressMsg).message),
+        el("p", "muted", "Keep this popup open until it finishes — closing it stops the read."),
+      );
+    };
+    chrome.runtime.onMessage.addListener(onProgress);
     let found: ChapterExtractResult | undefined;
     try {
       found = await chrome.tabs.sendMessage(tab.id, { type: "extract-chapter", rescan }) as ChapterExtractResult | undefined;
@@ -368,6 +378,8 @@ export async function start(rescan = false): Promise<void> {
       // Injection succeeded but the page went away before it answered — the raw "Receiving end does not exist"
       // tells the user nothing they can act on
       found = undefined;
+    } finally {
+      chrome.runtime.onMessage.removeListener(onProgress);
     }
     if (!found) {
       // Injected, yet nothing answered: most likely the page navigated away while it was being read

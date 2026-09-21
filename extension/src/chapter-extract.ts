@@ -8,6 +8,7 @@
 import { extractorFor } from "../../server/src/shared/providers/registry";
 import { seriesInfoFrom, type SeriesInfo } from "../../server/src/shared/providers/series-info";
 import type { ExtractContext } from "../../server/src/shared/providers/types";
+import type { ExtractProgressMsg } from "./types";
 
 /** What a series page says about itself, for "New series from this page". */
 export type SeriesExtractResult =
@@ -53,8 +54,11 @@ const SCROLL_SETTLE_MS = 250;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Same-origin fetch + parse, for readers that spread one chapter over several pages. */
+/** Longest a page of a multi-page walk may take. Without a limit one stalled request hung the whole read. */
+const FETCH_TIMEOUT_MS = 20_000;
+
 async function fetchDocument(url: string): Promise<Document> {
-  const response = await fetch(url, { credentials: "include" });
+  const response = await fetch(url, { credentials: "include", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`${url} answered ${response.status}`);
   return new DOMParser().parseFromString(await response.text(), "text/html");
 }
@@ -96,7 +100,13 @@ export async function extractChapterHere(rescan = false): Promise<ChapterExtract
     const url = new URL(location.href);
     const extractor = extractorFor(url);
     const logs: string[] = [];
-    const ctx: ExtractContext = { url, document, fetchDocument, log: (message) => logs.push(message) };
+    const log = (message: string): void => {
+      logs.push(message);
+      // Live, to the popup: a gallery walk takes a second a page, and without this the popup sat on its first
+      // message for minutes and looked hung. Nobody listening (the popup closed) is not an error.
+      chrome.runtime.sendMessage({ type: "extract-progress", message } satisfies ExtractProgressMsg).catch(() => undefined);
+    };
+    const ctx: ExtractContext = { url, document, fetchDocument, log };
 
     let extract = await extractor.extract(ctx);
     // A reader that adds pages as you scroll answers the first read with however many exist so far, which is

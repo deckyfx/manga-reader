@@ -63,7 +63,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === MENU.importChapter) {
     // First, and synchronously: a menu click counts as a user gesture only until something is awaited, and
     // openPopup may need one. Anything that goes wrong falls back to a window that always works.
-    chrome.action.openPopup().catch(() => openImportWindow(tab?.id));
+    if (typeof chrome.action.openPopup === "function") chrome.action.openPopup().catch(() => openImportWindow(tab?.id));
+    else openImportWindow(tab?.id);
     return;
   }
   if (info.menuItemId === MENU.region) void handlePopupMode("region", tab?.id);

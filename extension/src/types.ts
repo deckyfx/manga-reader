@@ -91,6 +91,8 @@ export interface ExplainResultMsg   { type: "explain-result"; tokens: TokenInfo[
 export interface ExplainErrorMsg    { type: "explain-error"; message: string }
 
 export interface StartImageModeMsg  { type: "start-image-mode" }
+/** A step of a page read as it happens, so the popup can show "reading page 37 of 120" instead of waiting silently. */
+export interface ExtractProgressMsg { type: "extract-progress"; message: string }
 /** Asks the content script to read this page's chapter images; `rescan` forces the scroll pass. */
 export interface ExtractChapterMsg  { type: "extract-chapter"; rescan?: boolean }
 /** Asks the content script what this page says about itself, for "New series from this page". */
