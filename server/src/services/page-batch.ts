@@ -156,6 +156,7 @@ export async function startBatchRun(
         batch = (await loadPages()).filter((page) => !attempted.has(page.id));
       } catch (err) {
         log.warn({ err, key }, "A following run couldn't look for new pages, and stopped");
+        state.error = err instanceof Error ? err.message : String(err);
         break;
       }
       state.total += batch.length;

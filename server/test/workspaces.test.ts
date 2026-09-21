@@ -148,7 +148,7 @@ describe("workspaces", () => {
     const pageId: string = upload.body.pages[0].id;
 
     const closed = await call("DELETE", `/studio/api/workspaces/${id}?keep_pages=true`, undefined, { cookie });
-    expect(closed.body).toMatchObject({ pages_deleted: 0 });
+    expect(closed.body).toMatchObject({ pages_deleted: 0, pages_kept: 1 });
     const page = await call("GET", `/studio/api/pages/${pageId}`, undefined, { cookie });
     expect(page.body.page.workspace_id).toBeNull();
     const loose = (await call<{ id: string }[]>("GET", "/studio/api/pages", undefined, { cookie })).body.map((p) => p.id);

@@ -204,10 +204,10 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         if (batchRun(runKey(params.id))?.running) return "running" as const;
         if (!(await WorkspaceStore.findById(params.id))) return "missing" as const;
 
+        const pages = await WorkspaceStore.pages(params.id);
         let pagesDeleted = 0;
-        let pagesKept = 0;
+        let pagesKept = query.keep_pages ? pages.length : 0;
         if (!query.keep_pages) {
-          const pages = await WorkspaceStore.pages(params.id);
           // A page still in the pipeline can't go: refuse the whole close rather than leave half a workspace behind
           if (pages.some((page) => page.status === "queued" || page.status === "running")) return "busy" as const;
           for (const page of pages) {
@@ -217,8 +217,16 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
               pagesKept++;
               continue;
             }
-            const discarded = await withPageLock(page.id, () => discardPage(page.id));
+            // Checked again under the page's own lock: a single-page rerun can be queued after the check above, and a
+            // page that started running since is kept (loose) rather than deleted under its job
+            const discarded = await withPageLock(page.id, async () => {
+              const now = await PageStore.findById(page.id);
+              if (!now) return { ok: false as const, error: "already gone" };
+              if (now.status === "queued" || now.status === "running") return { ok: false as const, error: "busy" };
+              return discardPage(page.id);
+            });
             if (discarded.ok) pagesDeleted++;
+            else pagesKept++;
           }
         }
         // Whatever is left falls back to loose (the foreign key clears it): kept pages, or everything with keep_pages
