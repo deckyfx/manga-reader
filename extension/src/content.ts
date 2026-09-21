@@ -12,7 +12,7 @@ import type {
   FromEngineMsg,
   FetchImageMsg,
 } from "./types";
-import { extractChapterHere } from "./chapter-extract";
+import { extractChapterHere, extractSeriesHere } from "./chapter-extract";
 import { loadServerAccess } from "./settings-store";
 import { errorMessage, serverApi, streamUrl, type PageJobEvent, type PageLiveEvent } from "./api";
 
@@ -63,6 +63,10 @@ function init(): void {
   // Its own listener, because this one answers: reading the page is asynchronous (a reader may have to be scrolled
   // through first), and `true` is what keeps the message channel open until the result is ready.
   chrome.runtime.onMessage.addListener((msg: ToContentMsg, _sender, sendResponse) => {
+    if (msg.type === "extract-series") {
+      sendResponse(extractSeriesHere());
+      return undefined;
+    }
     if (msg.type !== "extract-chapter") return undefined;
     void extractChapterHere(msg.rescan === true).then(sendResponse);
     return true;

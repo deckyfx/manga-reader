@@ -3,7 +3,7 @@
  * emits (`bun run --cwd ../server types:api`), so request and response shapes are checked at build time.
  */
 import { treaty } from "@elysiajs/eden";
-import type { Api, PageJobEvent, PageLiveEvent, SettingsApi, StudioApi } from "../../server/types/src/api";
+import type { Api, ManageApi, PageJobEvent, PageLiveEvent, SettingsApi, StudioApi } from "../../server/types/src/api";
 
 export type { PageJobEvent, PageLiveEvent };
 
@@ -146,4 +146,29 @@ export async function workspacePageSources(serverUrl: string, apiKey: string, wo
 export async function startWorkspaceRun(serverUrl: string, apiKey: string, workspaceId: number): Promise<void> {
   const { error } = await studioApi(serverUrl, apiKey).studio.api.workspaces({ id: workspaceId }).run.post({});
   if (error && error.status !== 409) throw new Error(errorMessage(error));
+}
+
+// ── New series from a page: the /manage/api library routes ───────────────────
+
+const manageApi = (serverUrl: string, apiKey: string) =>
+  treaty<ManageApi>(serverUrl.replace(/\/$/, ""), { headers: apiKey ? { "x-api-key": apiKey } : {}, fetcher: keyedFetch });
+
+/** Makes the series and answers with its id, so the popup can offer to open it. */
+export async function createSeries(
+  serverUrl: string,
+  apiKey: string,
+  body: { title: string; synopsis?: string; adult?: boolean },
+): Promise<{ id: number; title: string }> {
+  const { data, error } = await manageApi(serverUrl, apiKey).manage.api.series.post(body);
+  if (error) throw new Error(errorMessage(error));
+  return { id: data.series.id, title: data.series.title };
+}
+
+/**
+ * Puts a cover on it. The image is downloaded in the worker rather than the popup: the popup closes the moment the
+ * user looks away, and a download that outlives it belongs to the worker — the rule chapter images already follow.
+ */
+export async function addSeriesCover(serverUrl: string, apiKey: string, seriesId: number, cover: File): Promise<void> {
+  const { error } = await manageApi(serverUrl, apiKey).manage.api.series({ id: seriesId }).covers.post({ cover });
+  if (error) throw new Error(errorMessage(error));
 }

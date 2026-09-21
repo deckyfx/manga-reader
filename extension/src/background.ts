@@ -13,7 +13,7 @@ import type {
 import { DEFAULT_SETTINGS } from "./types";
 import { loadSettings, usableApiKey } from "./settings-store";
 import { errorMessage, serverApi } from "./api";
-import { clearImport, currentImport, resumeChapterImport, retryChapterImport, startChapterImport } from "./import-queue";
+import { clearImport, createSeriesFromPage, currentImport, resumeChapterImport, retryChapterImport, startChapterImport } from "./import-queue";
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -76,6 +76,12 @@ chrome.runtime.onMessage.addListener((
   if (msg.type === "start-chapter-import") {
     startChapterImport(msg.request)
       .then((job) => sendResponse({ ok: true, job }))
+      .catch((err: unknown) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+    return true;
+  }
+  if (msg.type === "create-series") {
+    createSeriesFromPage(msg.request)
+      .then((series) => sendResponse({ ok: true, series }))
       .catch((err: unknown) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
     return true;
   }

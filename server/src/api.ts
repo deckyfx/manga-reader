@@ -7,6 +7,7 @@ import { routeTools } from "@/plugins/route-tools";
 import { routeTranslatePage } from "@/plugins/route-translate-page";
 import { routeSettings } from "@/plugins/route-settings";
 import { studioPlugin } from "@/plugins/studio/index";
+import { managePlugin } from "@/plugins/manage/index";
 
 /**
  * Routes used by the browser extension. `Api` is emitted as declarations (`bun run types:api`) so the
@@ -23,11 +24,13 @@ export const api = new Elysia()
 export type Api = typeof api;
 
 /**
- * The extension also talks to two areas the main app mounts separately: `/api/settings` (which server this is, and
- * what it can do) and `/studio/api` (chapter import, through the workspace routes). Only their types are exported —
- * nothing is composed here, so neither plugin is mounted twice.
+ * The extension also talks to three areas the main app mounts separately: `/api/settings` (which server this is, and
+ * what it can do), `/studio/api` (chapter import, through the workspace routes) and `/manage/api` (starting a series
+ * from a page). Only their types are exported — nothing is composed here, so no plugin is mounted twice.
  */
 export type SettingsApi = typeof routeSettings;
 export type StudioApi = typeof studioPlugin;
+/** `/manage/api`, for "New series from this page": creating a series and putting a cover on it. */
+export type ManageApi = typeof managePlugin;
 export type { PageJobEvent } from "@/stores/translation-job-store";
 export type { PageLiveEvent } from "@/stores/page-live-channel";
