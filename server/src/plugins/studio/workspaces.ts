@@ -200,7 +200,8 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
     async ({ params, body, status }) => {
       if (!(await WorkspaceStore.findById(params.id))) return status(404, { error: "workspace not found" });
       const files = Array.isArray(body.files) ? body.files : [body.files];
-      const sources = body.sources ?? [];
+      // One file's worth of sources arrives as a plain string: form data can't tell a one-item list from a value
+      const sources = body.sources === undefined ? [] : Array.isArray(body.sources) ? body.sources : [body.sources];
       if (body.sources !== undefined && sources.length !== files.length) return status(422, { error: "sources must list one URL per file" });
       const uploads: WorkspaceUpload[] = [];
       for (const [i, file] of files.entries()) {
@@ -219,7 +220,11 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         /** 0-based position of the first file in the workspace. */
         start_index: t.Numeric({ minimum: 0, maximum: 100_000 }),
         /** Each file's source URL, in the same order (a JSON array in the form field). */
-        sources: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 4096 }), { maxItems: 500 })),
+        // A list, or — when a batch holds a single file, as a page-at-a-time import always does — one plain string
+        sources: t.Optional(t.Union([
+          t.Array(t.String({ minLength: 1, maxLength: 4096 }), { maxItems: 500 }),
+          t.String({ minLength: 1, maxLength: 4096 }),
+        ])),
       }),
       response: {
         200: t.Composite([WorkspaceDetail, t.Object({ imported: t.Integer(), existing: t.Array(t.Integer()), skipped: t.Array(Skipped) })]),

@@ -93,6 +93,19 @@ describe("workspaces", () => {
     expect(added.body.pages.map((p: { name: string }) => p.name)).toEqual(["2", "3"]);
   });
 
+  test("take a single file with its source, as a page-at-a-time import sends it", async () => {
+    const id = await create({ name: "One at a time" });
+    // One file and one source: form data sends that source as a plain string, not a one-item list
+    const form = new FormData();
+    form.append("files", new File([await png("#123456")], "001.png"));
+    form.append("start_index", "0");
+    form.append("sources", "https://exhentai.test/s/abc/1-1");
+
+    const res = await call("POST", `/studio/api/workspaces/${id}/pages`, form, { cookie });
+    expect(res.status).toBe(200);
+    expect(res.body.pages[0]).toMatchObject({ source: "https://exhentai.test/s/abc/1-1" });
+  });
+
   test("refuse a sources list that doesn't match the files", async () => {
     const id = await create({ name: "Mismatch" });
     const res = await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(0, ["a.png", "b.png"], ["only one"]), { cookie });
