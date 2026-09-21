@@ -10,9 +10,9 @@
  * so their own cookies go along. A signed-out visitor gets the "no access" page instead of a gallery, which is
  * reported as such rather than as an empty chapter.
  *
- * The markup this depends on (`#gn`, `#img`, `/s/<key>/<gid>-<n>` links, `?p=` pager) is taken from the plan rather
- * than from a probe of the live site — unlike rawkuma, which was checked on 2026-09-18. The fixtures encode those
- * assumptions, so a redesign shows up as a failing test, but the first real run is the one that confirms them.
+ * The markup this depends on — `#gn`, `#gj`, `/s/<key>/<gid>-<n>` links carrying the gallery's own id, the `?p=`
+ * pager, and `#img` holding an absolute H@H address — was checked against live e-hentai galleries on 2026-09-21 (same
+ * markup as exhentai, which needs a signed-in browser to fetch). The fixtures pin it, so a redesign fails loudly.
  */
 import type { ChapterExtract, ExtractContext, Extractor } from "./types";
 
@@ -22,10 +22,13 @@ const MIN_INTERVAL_MS = 1000;
 const MAX_IMAGE_PAGES = 2000;
 /**
  * Gallery pages read in one go. The pager is whatever the page claims it is, and at a second a request a page
- * claiming `?p=99999` would otherwise buy itself a day of this extension's time. Forty images a page puts this well
- * past MAX_IMAGE_PAGES anyway, so a real gallery never reaches it.
+ * claiming `?p=99999` would otherwise buy itself a day of this extension's time.
+ *
+ * Sized so MAX_IMAGE_PAGES is the limit that actually bites: a gallery page lists twenty images by default (checked
+ * against a live e-hentai gallery on 2026-09-21 — 64 images over `?p=0..3`), so this many pages covers the full
+ * image cap and a real gallery never reaches it first.
  */
-const MAX_GALLERY_PAGES = 60;
+const MAX_GALLERY_PAGES = Math.ceil(MAX_IMAGE_PAGES / 20);
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

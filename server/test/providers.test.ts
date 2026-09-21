@@ -277,8 +277,9 @@ describe("the exhentai extractor", () => {
     };
 
     await extractor.extract(counting);
-    // A page is free to claim any number of pages; the walk is bounded regardless
-    expect(fetched).toBeLessThan(100);
+    // A page is free to claim any number of pages; the walk is bounded regardless. Asserted as orders of magnitude
+    // below the claim rather than as the cap's exact value, so resizing the cap doesn't break the test's point.
+    expect(fetched).toBeLessThan(1000);
     expect(ctx.logs.join(" ")).toContain("claims 100000 pages");
   });
 
