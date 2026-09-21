@@ -14,7 +14,7 @@
  * pager, and `#img` holding an absolute H@H address — was checked against live e-hentai galleries on 2026-09-21 (same
  * markup as exhentai, which needs a signed-in browser to fetch). The fixtures pin it, so a redesign fails loudly.
  */
-import type { ChapterExtract, ExtractContext, Extractor } from "./types";
+import type { ChapterExtract, ExtractContext, Extractor, Resolved } from "./types";
 
 /** exhentai has asked for a second between requests for years; the walk is slow by design. */
 const MIN_INTERVAL_MS = 1000;
@@ -154,40 +154,32 @@ export function createExhentaiExtractor(intervalMs = MIN_INTERVAL_MS): Extractor
         pageLinks.length = MAX_IMAGE_PAGES;
       }
 
-      // Then each image page, which is where the address actually lives
-      const images: string[] = [];
-      for (const [index, link] of pageLinks.entries()) {
-        await delay(intervalMs);
-        ctx.log(`reading page ${index + 1} of ${pageLinks.length}`);
-        let page: Document;
-        try {
-          page = await ctx.fetchDocument(link);
-        } catch (err) {
-          ctx.log(`page ${index + 1} couldn't be read: ${err instanceof Error ? err.message : String(err)}`);
-          continue;
-        }
-        const { url, limited } = imageOn(page);
-        if (limited) {
-          // The daily allowance is spent. What has been collected still imports, and a later run picks up the rest.
-          ctx.log(`image limit reached after ${images.length} page(s) — try again later and the rest will follow`);
-          break;
-        }
-        if (!url) {
-          ctx.log(`page ${index + 1} had no image`);
-          continue;
-        }
-        // Against `link`: the address lives on the image page, and resolving it against the gallery would be wrong
-        images.push(new URL(url, link).toString());
-      }
-
       const title = ctx.document.querySelector("#gj")?.textContent?.trim() || ctx.document.querySelector("#gn")?.textContent?.trim();
-      ctx.log(`${images.length} image(s) from ${pageLinks.length} page(s)`);
+      ctx.log(`${pageLinks.length} page(s) in the gallery`);
+      // The image pages, not the images: each is resolved as the import reaches it (see `resolve`), so a long gallery
+      // starts importing at once instead of after a second per page of reading first
       return {
-        images,
+        images: pageLinks,
         ...(title ? { title } : {}),
         // Every gallery here is adult; a series filed from this import inherits it
         adult: true,
       };
+    },
+
+    async resolve(link: string, ctx: ExtractContext): Promise<Resolved> {
+      await delay(intervalMs);
+      let page: Document;
+      try {
+        page = await ctx.fetchDocument(link);
+      } catch (err) {
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      }
+      const { url, limited } = imageOn(page);
+      // The daily allowance is spent: every page after this one would say the same, so stop rather than burn them
+      if (limited) return { ok: false, reason: "image limit reached — try again later and the rest will follow", stop: true };
+      if (!url) return { ok: false, reason: "that page had no image" };
+      // Against `link`: the address lives on the image page, and resolving it against the gallery would be wrong
+      return { ok: true, url: new URL(url, link).toString() };
     },
   };
 }

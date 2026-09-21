@@ -18,7 +18,10 @@ export interface ExtractContext {
 
 /** What one chapter (or gallery) page yielded. */
 export interface ChapterExtract {
-  /** Absolute image addresses, in reading order. */
+  /**
+   * The chapter's pages, in reading order: image addresses, or — for an extractor with `resolve` — the addresses of
+   * the pages that hold them, each turned into its image one at a time as the import reaches it.
+   */
   images: string[];
   /** Series or gallery title, for naming the workspace. */
   title?: string;
@@ -27,6 +30,15 @@ export interface ChapterExtract {
   /** Set by extractors for adult sites, and carried into a series filed from the import. */
   adult?: boolean;
 }
+
+/** One listed page turned into the image to download, or why it couldn't be. */
+export type Resolved =
+  | { ok: true; url: string }
+  /**
+   * `stop` means every later page would fail the same way (a daily image limit), so the import should pause rather
+   * than burn through the rest; without it only this page fails.
+   */
+  | { ok: false; reason: string; stop?: boolean };
 
 export interface Extractor {
   /** Stored on the workspace as `sourceProvider`. */
@@ -38,4 +50,10 @@ export interface Extractor {
   /** Smallest gap between image downloads this site tolerates. */
   minIntervalMs: number;
   extract(ctx: ExtractContext): Promise<ChapterExtract>;
+  /**
+   * For a site whose list holds pages rather than images: one listed page to its image address. Runs where the
+   * user's cookies are, one page at a time as the import reaches it, so a long gallery starts importing at once
+   * instead of after every page has been read. An extractor without it lists images directly.
+   */
+  resolve?(page: string, ctx: ExtractContext): Promise<Resolved>;
 }
