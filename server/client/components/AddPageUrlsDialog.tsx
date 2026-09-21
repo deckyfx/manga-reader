@@ -74,8 +74,12 @@ export function AddPageUrlsDialog({
 
   const importM = useMutation({
     mutationFn: () => onImport(urls, { resend: sameList }),
+    // Recorded when the request goes, not when it comes back. A request that fails part-way has still filed the
+    // pages it got through — each download is stored as it arrives — so "sent" is what the guard has to mean. A
+    // failure that recorded nothing would let an unchanged list be sent again and file those pages twice, and would
+    // make the Studio build a second workspace beside the one it had already created
+    onMutate: () => setImported(text),
     onSuccess: (report) => {
-      setImported(text);
       if (report.skipped.length === 0) onClose();
     },
   });
@@ -160,6 +164,13 @@ export function AddPageUrlsDialog({
         )}
         {importM.isPending && (
           <p className="text-xs text-gray-500">Downloading one at a time, so the host isn't hammered — this can take a moment.</p>
+        )}
+        {importM.isError && (
+          <p className="text-xs text-amber-400">
+            {resendable
+              ? "That attempt stopped part-way. Sending the same list again picks up where it left off — the pages already here keep their places."
+              : "That attempt stopped part-way, and the pages it did file are filed. Edit the list before sending it again, or those would be filed twice."}
+          </p>
         )}
 
         {report && (
