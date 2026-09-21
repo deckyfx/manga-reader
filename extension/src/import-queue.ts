@@ -10,6 +10,7 @@
  * they arrive, so the Studio shows progress early and the worker never holds a whole chapter in memory.
  */
 import { addSeriesCover, createSeries, createWorkspace, findWorkspaceBySource, serverHasWorkspaces, startWorkspaceRun, uploadWorkspacePages, workspacePageSources } from "./api";
+import { isPrivateHost } from "../../server/src/shared/private-host";
 import { loadServerAccess } from "./settings-store";
 import type { CreateSeriesRequest, ImportRequest } from "./types";
 
@@ -113,9 +114,6 @@ export async function clearImport(): Promise<void> {
 /** A failure worth another go: the network dropped, or the CDN is rate-limiting or briefly broken. */
 class Transient extends Error {}
 
-/** Addresses a cover may never come from: the machine itself, the link-local range, and private networks. */
-const PRIVATE_HOST = /^(?:localhost|127\.|0\.0\.0\.0|\[?::1\]?|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|\[?f[cd][0-9a-f]{2}:)/i;
-
 /**
  * Refuses a cover address that points inside the network the browser sits on.
  *
@@ -124,9 +122,9 @@ const PRIVATE_HOST = /^(?:localhost|127\.|0\.0\.0\.0|\[?::1\]?|10\.|192\.168\.|1
  * *request* those, but it cannot read the answer; this would, and would then upload it to the server. So a cover is
  * only ever fetched from a public address.
  *
- * Only literal hosts can be checked here: a name that resolves to a private address gets through, because the
- * extension has no resolver. That is the same limit the server's own image fetch works around with DNS pinning, and
- * it is worth saying rather than implying this is airtight.
+ * Only literal addresses can be checked here: a name that resolves to a private one gets through, because the
+ * extension has no resolver. That is the limit the server's own image fetch closes with DNS pinning, and it is
+ * worth saying rather than implying this is airtight.
  */
 function coverMustBePublic(cover: string): void {
   let url: URL;
@@ -136,7 +134,7 @@ function coverMustBePublic(cover: string): void {
     throw new Error("that isn't an address a cover can be fetched from");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`a cover can't be fetched over ${url.protocol}`);
-  if (PRIVATE_HOST.test(url.hostname)) throw new Error("the cover points inside your own network, so it wasn't fetched");
+  if (isPrivateHost(url.hostname)) throw new Error("the cover points inside your own network, so it wasn't fetched");
 }
 
 /**
