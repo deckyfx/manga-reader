@@ -20,6 +20,8 @@ interface ImportStatusReply {
     pages: { index: number; url: string; state: string; reason?: string }[];
     finishedAt?: number;
     error?: string;
+    /** A gallery: its pages are read by the tab, which therefore has to stay open. */
+    resolves?: boolean;
   } | null;
   done: number;
   failed: number;
@@ -82,6 +84,10 @@ async function renderProgress(status: ImportStatusReply): Promise<void> {
   ];
 
   if (job.error) nodes.push(el("p", "error", job.error));
+  // The popup can close now — the pages are read by the gallery tab, so that is what has to stay
+  if (job.resolves && !finished && !job.error) {
+    nodes.push(el("p", "muted", "Keep the gallery tab open until every page is read. This popup can close."));
+  }
   // Stopped rather than finished: the pages already downloaded are still waiting, so offer to carry on
   if (job.error && !finished) {
     const again = el("button", "menu-btn", "Try again");
@@ -244,7 +250,7 @@ function renderSeries(info: SeriesInfo): void {
 
 // ── What the page holds ──────────────────────────────────────────────────────
 
-function renderFound(found: Extract<ChapterExtractResult, { ok: true }>, sourceUrl: string, earlier: WorkspaceRef | null): void {
+function renderFound(found: Extract<ChapterExtractResult, { ok: true }>, sourceUrl: string, tabId: number, earlier: WorkspaceRef | null): void {
   const chosen = new Set(found.images);
   const suggested = [found.title, found.chapter ? `Chapter ${found.chapter}` : null].filter(Boolean).join(" — ");
 
@@ -315,6 +321,8 @@ function renderFound(found: Extract<ChapterExtractResult, { ok: true }>, sourceU
       images,
       name: name.value.trim() || "Imported chapter",
       runAfter: translateTick.checked,
+      resolves: found.resolves,
+      tabId,
       ...(found.adult !== undefined ? { adult: found.adult } : {}),
       ...(earlier && addToEarlier?.checked ? { workspaceId: earlier.id } : {}),
     };
@@ -409,7 +417,7 @@ export async function start(rescan = false): Promise<void> {
     const earlier = access.serverUrl && access.apiKey
       ? await findWorkspaceBySource(access.serverUrl, access.apiKey, sourceUrl).catch(() => null)
       : null;
-    renderFound(found, sourceUrl, earlier);
+    renderFound(found, sourceUrl, tab.id, earlier);
   } catch (err) {
     message(err instanceof Error ? err.message : String(err), "error");
   }

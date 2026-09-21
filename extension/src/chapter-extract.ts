@@ -5,9 +5,9 @@
  * own scripts finished, the user's session applied. The extractors themselves are shared with the server
  * (`shared/providers/`), so the same code the fixtures test is the code that runs here.
  */
-import { extractorFor } from "../../server/src/shared/providers/registry";
+import { extractorById, extractorFor } from "../../server/src/shared/providers/registry";
 import { seriesInfoFrom, type SeriesInfo } from "../../server/src/shared/providers/series-info";
-import type { ExtractContext } from "../../server/src/shared/providers/types";
+import type { ExtractContext, Resolved } from "../../server/src/shared/providers/types";
 import type { ExtractProgressMsg } from "./types";
 
 /** What a series page says about itself, for "New series from this page". */
@@ -37,6 +37,8 @@ export type ChapterExtractResult =
       provider: string;
       label: string;
       minIntervalMs: number;
+      /** The list holds pages rather than images, each resolved by this tab when the import reaches it. */
+      resolves: boolean;
       images: string[];
       title?: string;
       chapter?: string;
@@ -122,6 +124,7 @@ export async function extractChapterHere(rescan = false): Promise<ChapterExtract
       provider: extractor.id,
       label: extractor.label,
       minIntervalMs: extractor.minIntervalMs,
+      resolves: extractor.resolve !== undefined,
       images: extract.images,
       ...(extract.title !== undefined ? { title: extract.title } : {}),
       ...(extract.chapter !== undefined ? { chapter: extract.chapter } : {}),
@@ -132,3 +135,19 @@ export async function extractChapterHere(rescan = false): Promise<ChapterExtract
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+/**
+ * Turns one listed page into its image, for an import in progress. It runs here, in the tab, because this is where the
+ * user's cookies are: the worker asks, a page at a time, as it reaches each one. Pacing is the worker's business.
+ */
+export async function resolvePageHere(provider: string, page: string): Promise<Resolved> {
+  const extractor = extractorById(provider);
+  if (!extractor?.resolve) return { ok: false, reason: `${provider} has no pages to resolve`, stop: true };
+  try {
+    const ctx: ExtractContext = { url: new URL(location.href), document, fetchDocument, log: () => undefined };
+    return await extractor.resolve(page, ctx);
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+

@@ -166,8 +166,9 @@ export function createExhentaiExtractor(intervalMs = MIN_INTERVAL_MS): Extractor
       };
     },
 
+    // No pause here, unlike the listing walk: the import resolves several pages at once and paces them itself, so a
+    // pause per call would only make five callers sleep in parallel and then fire together
     async resolve(link: string, ctx: ExtractContext): Promise<Resolved> {
-      await delay(intervalMs);
       let page: Document;
       try {
         page = await ctx.fetchDocument(link);
