@@ -46,14 +46,37 @@ function lastPagerIndex(document: Document): number {
   return last;
 }
 
-/** The image-page links on one gallery page, in order, as absolute addresses. */
+/** The gallery's own id, from `/g/<gid>/<token>/`. */
+function galleryId(base: URL): string | null {
+  return /^\/g\/(\d+)\//.exec(base.pathname)?.[1] ?? null;
+}
+
+/**
+ * The image-page links on one gallery page, in order, as absolute addresses.
+ *
+ * A link counts only if it is this site's, and this gallery's: the page is a page of someone else's site as far as
+ * this code is concerned, and a stray `/s/` link — another gallery in a comment, a mirror on another host — would
+ * otherwise be walked and its images imported into the reader's chapter.
+ */
 function imagePageLinks(document: Document, base: URL): string[] {
+  const gid = galleryId(base);
   const links: string[] = [];
   const seen = new Set<string>();
   for (const anchor of Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))) {
     const href = anchor.getAttribute("href") ?? "";
-    if (!/\/s\/[0-9a-f]+\/\d+-\d+/i.test(href)) continue;
-    const absolute = new URL(href, base).toString();
+    if (!href) continue;
+    let url: URL;
+    try {
+      url = new URL(href, base);
+    } catch {
+      continue;
+    }
+    if (url.origin !== base.origin) continue;
+    // Anchored, so `/elsewhere/s/abc/1-1` doesn't pass for an image page
+    const path = /^\/s\/[0-9a-f]+\/(\d+)-\d+$/i.exec(url.pathname);
+    if (!path) continue;
+    if (gid !== null && path[1] !== gid) continue;
+    const absolute = url.toString();
     if (seen.has(absolute)) continue;
     seen.add(absolute);
     links.push(absolute);

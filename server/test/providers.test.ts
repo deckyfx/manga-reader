@@ -244,6 +244,21 @@ describe("the exhentai extractor", () => {
     expect(result.images).toEqual(["https://exhentai.org/s/aaa111/keystamp/1.jpg"]);
   });
 
+  test("ignores links to another site or another gallery", async () => {
+    const ctx = galleryContext(
+      `<h1 id="gn">A Gallery</h1>
+       <a href="/s/aaa111/123456-1">mine</a>
+       <a href="https://mirror.test/s/bbb222/123456-2">another site</a>
+       <a href="/s/ccc333/999999-1">another gallery</a>`,
+      { "https://exhentai.org/s/aaa111/123456-1": imagePage("https://hath.test/a/1.jpg") },
+      GALLERY,
+    );
+
+    const result = await extractor.extract(ctx);
+    // Only this gallery's own page; the fixtures deliberately have no answer for the other two
+    expect(result.images).toEqual(["https://hath.test/a/1.jpg"]);
+  });
+
   test("won't walk a pager that claims thousands of pages", async () => {
     let fetched = 0;
     const ctx = contextFor(
