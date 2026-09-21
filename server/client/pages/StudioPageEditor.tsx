@@ -28,7 +28,7 @@ import { ChapterPicker } from "../components/ChapterPicker";
 import { DiscardPageDialog } from "../components/DiscardPageDialog";
 import { useConfirm } from "../components/ConfirmDialog";
 import { JobProgress } from "../components/JobProgress";
-import { StatusBadge } from "../components/StatusBadge";
+import { pageStatus, StatusBadge } from "../components/StatusBadge";
 import { usePageJobEvents } from "../hooks/usePageJobEvents";
 import { PageCanvas, type PageCanvasHandle } from "../studio/canvas/PageCanvas";
 import { buildLettering, relayoutBlock, useTypesetter } from "../studio/text/typesetter";
@@ -407,7 +407,7 @@ export function StudioPageEditor() {
         ) : (
           <h1 className="truncate text-base font-semibold">{page.name ?? `Page ${page.id.slice(-8)}`}</h1>
         )}
-        <StatusBadge status={page.status} />
+        <StatusBadge status={pageStatus(page)} />
         {page.has_edits ? (
           <span
             className="rounded-full bg-amber-900/60 px-2 py-0.5 text-xs font-medium text-amber-300"

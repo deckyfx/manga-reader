@@ -22,7 +22,7 @@ import {
 } from "../api";
 import { AddPageUrlsDialog } from "../components/AddPageUrlsDialog";
 import { useConfirm } from "../components/ConfirmDialog";
-import { StatusBadge } from "../components/StatusBadge";
+import { pageStatus, StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
 
 /** One chapter's pages: importing, reordering, translating the whole chapter and exporting it. */
@@ -350,7 +350,7 @@ export function ManageChapterPage() {
                     ) : page.has_result ? (
                       <StatusBadge status="done" label="translated" />
                     ) : (
-                      <StatusBadge status={page.status} />
+                      <StatusBadge status={pageStatus(page)} />
                     )}
                   </span>
                 </div>
