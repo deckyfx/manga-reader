@@ -37,6 +37,8 @@ export function StudioWorkspacePage() {
   const [importingUrls, setImportingUrls] = useState(false);
   // Where the address list's first send started, so sending the same list again fills the same positions
   const urlStart = useRef<number | null>(null);
+  // Where the next list goes, from the last import's own answer: the cached workspace may not have refetched yet
+  const urlNext = useRef<number | null>(null);
   // The close dialog, holding whether the loose pages stay; null while it's shut
   const [closing, setClosing] = useState<{ keepPages: boolean } | null>(null);
 
@@ -207,6 +209,7 @@ export function StudioWorkspacePage() {
           <button
             onClick={() => {
               urlStart.current = null;
+              urlNext.current = null;
               setImportingUrls(true);
             }}
             title="Download pages from their addresses"
@@ -319,9 +322,10 @@ export function StudioWorkspacePage() {
           }}
           onImport={async (urls, { resend }) => {
             // A resend reuses the first send's positions, so pages that already landed are skipped, not doubled
-            const start = resend && urlStart.current !== null ? urlStart.current : workspace.next_index;
+            const start = resend && urlStart.current !== null ? urlStart.current : (urlNext.current ?? workspace.next_index);
             urlStart.current = start;
             const report = await importWorkspacePageUrls(id, urls, start);
+            urlNext.current = report.workspace.next_index;
             refresh();
             return {
               imported: report.imported,

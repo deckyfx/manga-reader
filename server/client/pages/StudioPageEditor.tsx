@@ -152,6 +152,8 @@ export function StudioPageEditor() {
   // The toolset is shared by the pages of a workspace (or chapter): this page opens with the view and stage image the
   // last one was left on, and the canvas restores its zoom, tool and brush the same way
   const toolScope = pageQ.data ? toolsetScope(workspaceId, chapterId) : null;
+  // Once per editor, which is once per page: the route remounts the editor for each page (key={id}), so every page
+  // runs this, and checks the saved image against its own stages
   const restoredScope = useRef<string | null>(null);
   useEffect(() => {
     if (toolScope === null || restoredScope.current === toolScope) return;
