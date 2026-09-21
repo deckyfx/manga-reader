@@ -60,7 +60,16 @@ export const batchRun = (key: string): BatchRunState | null => runs.get(key) ?? 
 export async function startBatchRun(
   key: string,
   loadPages: () => Promise<Page[]>,
-  options: { cleanSfx: boolean; publish: boolean },
+  options: {
+    cleanSfx: boolean;
+    publish: boolean;
+    /**
+     * Keep going while pages keep arriving: once the list is done, ask `loadPages` again and run whatever is new.
+     * For a workspace being imported into, whose pages land one at a time while the run is already translating the
+     * first ones — without it, every page uploaded after the run started would wait for a run of its own.
+     */
+    follow?: boolean;
+  },
 ): Promise<BatchRunState | null> {
   if (runs.get(key)?.running) return null;
 
@@ -88,34 +97,54 @@ export async function startBatchRun(
   }
   state.total = pages.length;
 
-  void (async () => {
-    for (const page of pages) {
-      state.currentPageId = page.id;
-      try {
-        // Admission under the page's lock (the run itself queues behind it), so it can't land mid-publish
-        const result = await withPageLock(page.id, () =>
-          runStoredPage(page.id, { source: page.source, cleanSfx: options.cleanSfx, force: true }));
-        if (!result.ok) {
-          state.failed++;
-          state.error = result.error;
-          log.warn({ key, pageId: page.id, error: result.error }, "Run skipped a page");
-          continue;
-        }
-        await result.done;
-        const after = await PageStore.findById(page.id);
-        if (after?.status === "error") {
-          state.failed++;
-          state.error = after.errorMessage ?? "page failed";
-        } else {
-          // Readers are served published snapshots, so a translated page has to be published to become readable
-          if (options.publish) await withPageLock(page.id, () => publishPage(page.id));
-          state.done++;
-        }
-      } catch (err) {
+  /** One page through the pipeline, counted into the run's state. */
+  const runPage = async (page: Page): Promise<void> => {
+    state.currentPageId = page.id;
+    try {
+      // Admission under the page's lock (the run itself queues behind it), so it can't land mid-publish
+      const result = await withPageLock(page.id, () =>
+        runStoredPage(page.id, { source: page.source, cleanSfx: options.cleanSfx, force: true }));
+      if (!result.ok) {
         state.failed++;
-        state.error = err instanceof Error ? err.message : String(err);
-        log.error({ err, key, pageId: page.id }, "Run failed on a page");
+        state.error = result.error;
+        log.warn({ key, pageId: page.id, error: result.error }, "Run skipped a page");
+        return;
       }
+      await result.done;
+      const after = await PageStore.findById(page.id);
+      if (after?.status === "error") {
+        state.failed++;
+        state.error = after.errorMessage ?? "page failed";
+      } else {
+        // Readers are served published snapshots, so a translated page has to be published to become readable
+        if (options.publish) await withPageLock(page.id, () => publishPage(page.id));
+        state.done++;
+      }
+    } catch (err) {
+      state.failed++;
+      state.error = err instanceof Error ? err.message : String(err);
+      log.error({ err, key, pageId: page.id }, "Run failed on a page");
+    }
+  };
+
+  void (async () => {
+    // Every page this run has tried, successful or not: a page that fails is not tried again by the same run, or a
+    // following run would loop on it for as long as it keeps failing
+    const attempted = new Set<string>();
+    let batch = pages;
+    while (batch.length > 0) {
+      for (const page of batch) {
+        attempted.add(page.id);
+        await runPage(page);
+      }
+      if (!options.follow) break;
+      try {
+        batch = (await loadPages()).filter((page) => !attempted.has(page.id));
+      } catch (err) {
+        log.warn({ err, key }, "A following run couldn't look for new pages, and stopped");
+        break;
+      }
+      state.total += batch.length;
     }
     state.currentPageId = null;
     state.running = false;

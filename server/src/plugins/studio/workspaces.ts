@@ -266,6 +266,8 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         return startBatchRun(runKey(params.id), () => pagesToRun(params.id, body?.force ?? false), {
           cleanSfx: body?.clean_sfx ?? false,
           publish: false,
+          // An import uploads a page at a time while this run is translating: keep picking up new ones as they land
+          follow: true,
         });
       });
       if (started === "missing") return status(404, { error: "workspace not found" });
