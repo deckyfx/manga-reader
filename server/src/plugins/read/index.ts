@@ -366,7 +366,7 @@ export const readPlugin = new Elysia({ prefix: "/read/api" })
     },
   )
 
-  .get("/series/tags", () => SeriesStore.allTags(), {
+  .get("/series/tags", ({ principal }) => SeriesStore.allTags({ hideAdult: !seesAdult(principal) }), {
     response: { 200: t.Array(t.Object({ tag: t.String(), count: t.Integer() })) },
   })
 

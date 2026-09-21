@@ -68,10 +68,14 @@ export class SeriesStore {
   }
 
   /** Every tag in use, with how many series carry it (for the search panel). */
-  static async allTags(): Promise<{ tag: string; count: number }[]> {
+  static async allTags({ hideAdult = false } = {}): Promise<{ tag: string; count: number }[]> {
+    // Joined to the series so a hidden one can be left out: a tag only an adult series carries would otherwise be
+    // listed, which says it exists — and the counts on shared tags would be a headcount of what a reader can't see
     const rows = await db
       .select({ tag: seriesTags.tag, count: sql<number>`count(*)` })
       .from(seriesTags)
+      .innerJoin(series, eq(series.id, seriesTags.seriesId))
+      .where(hideAdult ? eq(series.adult, false) : undefined)
       .groupBy(seriesTags.tag)
       .orderBy(asc(seriesTags.tag));
     return rows.map((row) => ({ tag: row.tag, count: Number(row.count) }));

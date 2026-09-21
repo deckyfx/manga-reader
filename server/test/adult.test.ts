@@ -50,6 +50,26 @@ describe("a reader who hasn't asked for adult series", () => {
     expect(asReader.body.some((entry) => entry.id === seriesId)).toBe(false);
   });
 
+  test("doesn't see its tags either", async () => {
+    const owner = await signedIn("contributor");
+    const secret = `only-on-adult-${crypto.randomUUID().slice(0, 8)}`;
+    const shared = `shared-${crypto.randomUUID().slice(0, 8)}`;
+    await call("POST", "/manage/api/series", { title: `Adult ${crypto.randomUUID()}`, adult: true, tags: [secret, shared] }, { cookie: owner.cookie });
+    await call("POST", "/manage/api/series", { title: `Plain ${crypto.randomUUID()}`, tags: [shared] }, { cookie: owner.cookie });
+
+    const tags = await call<{ tag: string; count: number }[]>("GET", "/read/api/series/tags");
+    // A tag only a hidden series carries would say it exists, and a shared tag's count would be a headcount of what
+    // this reader can't see
+    expect(tags.body.some((entry) => entry.tag === secret)).toBe(false);
+    expect(tags.body.find((entry) => entry.tag === shared)?.count).toBe(1);
+
+    const reader = await signedIn("reader");
+    await wantsAdult(reader.cookie);
+    const withAdult = await call<{ tag: string; count: number }[]>("GET", "/read/api/series/tags", undefined, { cookie: reader.cookie });
+    expect(withAdult.body.some((entry) => entry.tag === secret)).toBe(true);
+    expect(withAdult.body.find((entry) => entry.tag === shared)?.count).toBe(2);
+  });
+
   test("gets 404 everywhere it could be reached, not 403", async () => {
     const owner = await signedIn("contributor");
     const { seriesId, chapterId, pageId } = await adultSeries(owner.cookie);
