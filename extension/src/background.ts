@@ -19,9 +19,55 @@ import { ensureContentScript } from "./inject";
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener((details) => {
+  createContextMenus();
   if (details.reason === "install") {
     chrome.tabs.create({ url: chrome.runtime.getURL("options.html") });
   }
+});
+
+// ── Context menu: the popup's actions, one right-click away ───────────────────
+
+const MENU = { region: "socr-region", image: "socr-image", importChapter: "socr-import" } as const;
+
+/**
+ * The same three things the toolbar popup offers. Registered on install and update: MV3 keeps menus across worker
+ * restarts and browser restarts, so creating them anywhere else would only duplicate them. Offered on images too,
+ * since on a manga reader the page *is* an image and that is where the right-click lands.
+ */
+function createContextMenus(): void {
+  chrome.contextMenus.removeAll(() => {
+    const contexts: [`${chrome.contextMenus.ContextType}`, ...`${chrome.contextMenus.ContextType}`[]] = ["page", "frame", "selection", "link", "image"];
+    chrome.contextMenus.create({ id: MENU.region, title: "Region scan", contexts });
+    chrome.contextMenus.create({ id: MENU.image, title: "Translate image", contexts });
+    chrome.contextMenus.create({ id: "socr-separator", type: "separator", contexts });
+    chrome.contextMenus.create({ id: MENU.importChapter, title: "Import chapter…", contexts });
+  });
+}
+
+/**
+ * The import panel in a window of its own, for when the popup can't be opened from here: an older Chrome, or one that
+ * doesn't count a menu click as the gesture openPopup wants. The panel is told which tab to read, since in its own
+ * window "the active tab" would be itself.
+ */
+function openImportWindow(tabId: number | undefined): void {
+  if (tabId === undefined) return;
+  void chrome.windows.create({
+    url: chrome.runtime.getURL(`popup.html?tab=${tabId}`),
+    type: "popup",
+    width: 360,
+    height: 600,
+  });
+}
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === MENU.importChapter) {
+    // First, and synchronously: a menu click counts as a user gesture only until something is awaited, and
+    // openPopup may need one. Anything that goes wrong falls back to a window that always works.
+    chrome.action.openPopup().catch(() => openImportWindow(tab?.id));
+    return;
+  }
+  if (info.menuItemId === MENU.region) void handlePopupMode("region", tab?.id);
+  else if (info.menuItemId === MENU.image) void handlePopupMode("image", tab?.id);
 });
 
 // An MV3 worker is stopped whenever it looks idle, including mid-import: whatever was left is picked up here, both
@@ -31,10 +77,10 @@ void resumeChapterImport();
 
 // ── Popup mode handler ────────────────────────────────────────────────────────
 
-async function handlePopupMode(mode: "region" | "image"): Promise<void> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) return;
-  const tabId = tab.id;
+async function handlePopupMode(mode: "region" | "image", knownTabId?: number): Promise<void> {
+  // The context menu knows which tab it was opened on; the popup's buttons mean the active one
+  const tabId = knownTabId ?? (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+  if (tabId === undefined) return;
 
   const settings = await loadSettings();
 

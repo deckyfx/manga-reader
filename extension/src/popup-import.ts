@@ -57,7 +57,12 @@ const send = <T>(msg: unknown): Promise<T> => chrome.runtime.sendMessage(msg) as
 
 /** The tab the user is looking at, when it is a page a content script can read. */
 async function activeTab(): Promise<chrome.tabs.Tab | null> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // Opened in its own window from the context menu, the panel is told which tab to read: "the active tab" in that
+  // window would be the panel itself
+  const pointed = Number(new URL(location.href).searchParams.get("tab"));
+  const tab = Number.isInteger(pointed) && pointed > 0
+    ? await chrome.tabs.get(pointed).catch(() => undefined)
+    : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
   if (!tab?.id || !tab.url || !/^https?:/i.test(tab.url)) return null;
   return tab;
 }
@@ -136,7 +141,13 @@ async function seriesButton(tabId: number): Promise<HTMLElement | null> {
   } catch {
     return null;
   }
-  const read = await chrome.tabs.sendMessage(tabId, { type: "extract-series" }) as SeriesExtractResult | undefined;
+  let read: SeriesExtractResult | undefined;
+  try {
+    read = await chrome.tabs.sendMessage(tabId, { type: "extract-series" }) as SeriesExtractResult | undefined;
+  } catch {
+    // No answer is no button, not an error: this is an offer, and the chapter read beside it still stands
+    return null;
+  }
   if (!read?.ok) return null;
   const button = el("button", "menu-btn", "New series from this page");
   button.addEventListener("click", () => renderSeries(read.info));
@@ -350,7 +361,14 @@ export async function start(rescan = false): Promise<void> {
       message("The browser doesn't let extensions read this page.");
       return;
     }
-    const found = await chrome.tabs.sendMessage(tab.id, { type: "extract-chapter", rescan }) as ChapterExtractResult | undefined;
+    let found: ChapterExtractResult | undefined;
+    try {
+      found = await chrome.tabs.sendMessage(tab.id, { type: "extract-chapter", rescan }) as ChapterExtractResult | undefined;
+    } catch {
+      // Injection succeeded but the page went away before it answered — the raw "Receiving end does not exist"
+      // tells the user nothing they can act on
+      found = undefined;
+    }
     if (!found) {
       // Injected, yet nothing answered: most likely the page navigated away while it was being read
       message("The page didn't answer — try again once it has finished loading.");
