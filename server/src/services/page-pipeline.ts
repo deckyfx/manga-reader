@@ -408,7 +408,7 @@ export class PagePipeline {
       if (b.kind === "sfx") area = rectArea(b, isDarkBackground(rgb, width, height, b));
       else if (b.kind === "text") {
         area = textAreaFor(rgb, width, height, b, matchBubble(b, bubbles));
-        detected.push({ block: b, area });
+        if (area) detected.push({ block: b, area });
       }
       if (area) areas.set(b.id, area);
     }

@@ -28,8 +28,8 @@ describe("text areas", () => {
     const block = { x: 80, y: 85, w: 40, h: 30 };
     const area = textAreaFor(rgb, W, H, block, { x: 36, y: 36, w: 128, h: 128 });
     // Bigger than the text itself, and inside the outline
-    expect(allowed(area.mask)).toBeGreaterThan(block.w * block.h);
-    expect(area.bound.x).toBeGreaterThanOrEqual(36);
+    expect(allowed(area?.mask ?? new Uint8Array())).toBeGreaterThan(block.w * block.h);
+    expect(area?.bound.x).toBeGreaterThanOrEqual(36);
   });
 
   test("text written on the artwork, with no bubble around it, gets its own box instead of nothing", () => {
@@ -37,13 +37,25 @@ describe("text areas", () => {
     const rgb = page((x, y) => ((x >> 1) + (y >> 1)) % 2 === 0 ? 20 : 235);
     const block = { x: 50, y: 60, w: 70, h: 50 };
     const area = textAreaFor(rgb, W, H, block, null);
-    expect(area.bound).toEqual(block);
-    expect(allowed(area.mask)).toBe(block.w * block.h);
+    expect(area?.bound).toEqual(block);
+    expect(allowed(area?.mask ?? new Uint8Array())).toBe(block.w * block.h);
   });
 
   test("a block hanging off the page keeps only the part on it", () => {
     const rgb = page((x, y) => ((x >> 1) + (y >> 1)) % 2 === 0 ? 20 : 235);
     const area = textAreaFor(rgb, W, H, { x: 170, y: -10, w: 60, h: 40 }, null);
-    expect(area.bound).toEqual({ x: 170, y: 0, w: 30, h: 30 });
+    expect(area?.bound).toEqual({ x: 170, y: 0, w: 30, h: 30 });
+  });
+
+  test("a block entirely off the page gets no area, past any edge", () => {
+    const rgb = page((x, y) => ((x >> 1) + (y >> 1)) % 2 === 0 ? 20 : 235);
+    for (const block of [
+      { x: -50, y: 50, w: 40, h: 40 }, // left
+      { x: W + 10, y: 50, w: 40, h: 40 }, // right
+      { x: 50, y: -50, w: 40, h: 40 }, // above
+      { x: 50, y: H, w: 40, h: 40 }, // below, touching the edge only
+    ]) {
+      expect(textAreaFor(rgb, W, H, block, null)).toBeNull();
+    }
   });
 });

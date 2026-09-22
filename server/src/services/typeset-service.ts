@@ -99,9 +99,12 @@ export function findTextArea(rgb: Buffer, width: number, height: number, block: 
  * Text written straight onto the artwork — a narration or a character's inner monologue with no bubble around it — has
  * no plain background to flood through, so `findTextArea` finds no room and the block would be left unlettered: its
  * original text cleaned away and nothing burned in its place. The block's box is exactly what was cleaned, so the
- * translation goes there, as a sound effect's does.
+ * translation goes there, as a sound effect's does. A block entirely off the page gets no area: there's nowhere to
+ * put it.
  */
-export function textAreaFor(rgb: Buffer, width: number, height: number, block: Box, bubble: Box | null): TextArea {
+export function textAreaFor(rgb: Buffer, width: number, height: number, block: Box, bubble: Box | null): TextArea | null {
+  const onPage = block.x < width && block.y < height && block.x + block.w > 0 && block.y + block.h > 0;
+  if (!onPage) return null;
   return findTextArea(rgb, width, height, block, bubble) ?? rectArea(clampBox(block, width, height), isDarkBackground(rgb, width, height, block));
 }
 
