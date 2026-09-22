@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
-import { setShowAdult } from "../../api";
+import { getMe, setShowAdult } from "../../api";
 import { when } from "../../lib/format";
 import type { Account } from "../../api";
 
@@ -45,15 +45,28 @@ export function ProfileSection({ account }: { account: Account }) {
   );
 }
 
+type Me = Awaited<ReturnType<typeof getMe>>;
+
 /** What this account sees in the reader. Off until somebody turns it on, and never on for a guest. */
 function AdultToggle({ account }: { account: Account }) {
   const qc = useQueryClient();
+  // Optimistic: the box follows the click at once, and a refused save puts it back. The answer is written straight
+  // into the signed-in account rather than waiting on a fresh `/me`, which is what left the box showing the old value
+  // (every click then sent the same "on" again)
   const save = useMutation({
     mutationFn: (show: boolean) => setShowAdult(show),
-    // The library and every series page filter on this, so they all have to be asked again
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["me"] });
+    onMutate: async (show: boolean) => {
+      await qc.cancelQueries({ queryKey: ["me"], exact: true });
+      const before = qc.getQueryData<Me>(["me"]);
+      qc.setQueryData<Me>(["me"], (me) => (me?.user ? { ...me, user: { ...me.user, show_adult: show } } : me));
+      return { before };
+    },
+    onError: (_error, _show, context) => qc.setQueryData(["me"], context?.before),
+    onSuccess: (answer) => {
+      qc.setQueryData<Me>(["me"], (me) => (me ? { ...me, user: answer.user } : me));
+      // The library and every series page filter on this, so they all have to be asked again
       void qc.invalidateQueries({ queryKey: ["series"] });
+      void qc.invalidateQueries({ queryKey: ["chapter"] });
     },
   });
 
@@ -65,7 +78,6 @@ function AdultToggle({ account }: { account: Account }) {
           type="checkbox"
           checked={account.show_adult}
           onChange={(e) => save.mutate(e.target.checked)}
-          disabled={save.isPending}
           className="accent-indigo-500"
         />
         Show adult series
