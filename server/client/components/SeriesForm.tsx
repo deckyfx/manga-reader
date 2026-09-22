@@ -13,6 +13,7 @@ import {
   type SeriesSummary,
 } from "../api";
 import { Modal } from "./Modal";
+import { Toggle } from "./Toggle";
 
 const STATUSES: { value: SeriesStatus; label: string }[] = [
   { value: "ongoing", label: "Ongoing" },
@@ -80,7 +81,7 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
       if (cover) {
         await addSeriesCover(detail.series.id, cover);
         // Read back, so what the caller is handed says the series has a cover — it does now
-        detail = await getSeries(detail.series.id);
+        detail = await getSeries(detail.series.id, true);
       }
       return detail;
     },
@@ -99,7 +100,7 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
   }, [picked]);
 
   // What the cover box shows: a freshly picked file, else the cover this series is showing
-  const preview = picked ?? (series?.has_cover ? seriesCoverUrl(series.id, series.updated_at) : null);
+  const preview = picked ?? (series?.has_cover ? seriesCoverUrl(series.id, series.updated_at, true) : null);
 
   return (
     <Modal
@@ -192,11 +193,10 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
             <textarea value={synopsis} onChange={(e) => setSynopsis(e.target.value)} rows={4} maxLength={4000} className={`${inputClass} resize-y`} />
           </label>
 
-          <label className="flex items-center gap-2 text-sm text-gray-300">
-            <input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} className="accent-indigo-500" />
+          <Toggle checked={adult} onChange={setAdult} className="text-sm text-gray-300">
             Adult
             <span className="text-xs text-gray-500">— only shown to readers who ask for it in their profile</span>
-          </label>
+          </Toggle>
 
           <div className="space-y-1">
             <span className="text-xs text-gray-400">Tags</span>

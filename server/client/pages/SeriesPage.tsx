@@ -4,6 +4,7 @@ import { ArrowLeft, BookOpen, Loader2, Settings2 } from "lucide-react";
 import { RatingBadge, Reviews } from "../components/Reviews";
 import { getSeries, seriesCoverUrl, type ChapterSummary } from "../api";
 import { chapterLink, savedPage } from "../lib/read-progress";
+import { libraryUrl } from "./ReadPage";
 
 const STATUS_LABEL: Record<string, string> = { ongoing: "Ongoing", completed: "Completed", hiatus: "Hiatus" };
 
@@ -21,7 +22,7 @@ export function SeriesPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-800">
-        <Link to="/read" className="text-gray-400 hover:text-white" title="Library">
+        <Link to="/read" className="text-gray-400 hover:text-gray-50" title="Library">
           <ArrowLeft size={18} />
         </Link>
         <h1 className="max-w-[min(36rem,60vw)] truncate text-base font-semibold" title={series.title}>{series.title}</h1>
@@ -56,9 +57,14 @@ export function SeriesPage() {
             {series.tags.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {series.tags.map((tag) => (
-                  <span key={tag} className="px-2 py-0.5 rounded-full border border-gray-700 text-[11px] text-gray-400">
+                  <Link
+                    key={tag}
+                    to={libraryUrl({ tags: [tag] })}
+                    title={`Every series tagged “${tag}”`}
+                    className="px-2 py-0.5 rounded-full border border-gray-700 text-[11px] text-gray-400 transition-colors hover:border-indigo-500 hover:text-indigo-300"
+                  >
                     {tag}
-                  </span>
+                  </Link>
                 ))}
               </div>
             )}

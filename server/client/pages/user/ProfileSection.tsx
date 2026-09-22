@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
-import { setShowAdult } from "../../api";
+import { getMe, setShowAdult } from "../../api";
 import { when } from "../../lib/format";
 import type { Account } from "../../api";
+import { Toggle } from "../../components/Toggle";
 
 const ROLE_LABEL: Record<string, string> = { admin: "Admin", contributor: "Contributor", reader: "Reader" };
 
@@ -45,32 +46,44 @@ export function ProfileSection({ account }: { account: Account }) {
   );
 }
 
+type Me = Awaited<ReturnType<typeof getMe>>;
+
 /** What this account sees in the reader. Off until somebody turns it on, and never on for a guest. */
 function AdultToggle({ account }: { account: Account }) {
   const qc = useQueryClient();
+  // Optimistic: the box follows the click at once, and a refused save puts it back. The answer is written straight
+  // into the signed-in account rather than waiting on a fresh `/me`, which is what left the box showing the old value
+  // (every click then sent the same "on" again)
   const save = useMutation({
     mutationFn: (show: boolean) => setShowAdult(show),
-    // The library and every series page filter on this, so they all have to be asked again
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["me"] });
+    onMutate: async (show: boolean) => {
+      await qc.cancelQueries({ queryKey: ["me"], exact: true });
+      const before = qc.getQueryData<Me>(["me"]);
+      qc.setQueryData<Me>(["me"], (me) => (me?.user ? { ...me, user: { ...me.user, show_adult: show } } : me));
+      return { before };
+    },
+    onError: (_error, _show, context) => qc.setQueryData(["me"], context?.before),
+    onSuccess: (answer) => {
+      qc.setQueryData<Me>(["me"], (me) => (me ? { ...me, user: answer.user } : me));
+      // The library and every series page filter on this, so they all have to be asked again
       void qc.invalidateQueries({ queryKey: ["series"] });
+      void qc.invalidateQueries({ queryKey: ["chapter"] });
     },
   });
 
   return (
     <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
       <h3 className="text-sm font-semibold text-gray-100">What you see in the reader</h3>
-      <label className="mt-3 flex items-center gap-2 text-sm text-gray-300">
-        <input
-          type="checkbox"
-          checked={account.show_adult}
-          onChange={(e) => save.mutate(e.target.checked)}
-          disabled={save.isPending}
-          className="accent-indigo-500"
-        />
+      {/* One save at a time: two in flight could answer out of order, and the older answer would win */}
+      <Toggle
+        checked={account.show_adult}
+        onChange={(show) => save.mutate(show)}
+        disabled={save.isPending}
+        className="mt-3 text-sm text-gray-300"
+      >
         Show adult series
         {save.isPending && <Loader2 size={13} className="animate-spin text-gray-500" />}
-      </label>
+      </Toggle>
       <p className="mt-1 text-xs text-gray-500">
         Off by default. With it off, adult series aren't listed and their pages can't be opened, even by their address.
       </p>

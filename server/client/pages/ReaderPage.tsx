@@ -25,9 +25,17 @@ const FIT_CLASS: Record<FitMode, string> = {
   original: "max-w-none",
 };
 
+/** The outer third of the visible view a pointer is over, or null for the middle (where a click does nothing). */
+function sideAt(e: { clientX: number; currentTarget: HTMLElement }): "left" | "right" | null {
+  const box = e.currentTarget.getBoundingClientRect();
+  const x = (e.clientX - box.left) / box.width;
+  return x < 1 / 3 ? "left" : x > 2 / 3 ? "right" : null;
+}
+
 /**
- * The reader: one page at a time, right to left by default (the volume decides). Click the sides or use the arrow
- * keys to turn pages; neighbouring pages are preloaded, and the chapter's last page steps into the next chapter.
+ * The reader: one page at a time, right to left by default (the volume decides). Click the right side for the next
+ * page and the left for the previous, or use the arrow keys (which follow the reading direction); neighbouring pages
+ * are preloaded, and the chapter's last page steps into the next chapter.
  */
 export function ReaderPage() {
   const { id = "", n = "1" } = useParams();
@@ -51,6 +59,9 @@ export function ReaderPage() {
   const [immersive, setImmersive] = useState(false);
   const [showReviews, setShowReviews] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  /** Which third of the view the pointer is over, to show that side's arrow. */
+  const [hoverSide, setHoverSide] = useState<"left" | "right" | null>(null);
 
   const pages = chapterQ.data?.pages ?? [];
   const rtl = (chapterQ.data?.series.reading_direction ?? "rtl") === "rtl";
@@ -79,6 +90,11 @@ export function ReaderPage() {
       img.src = readPageImageUrl(neighbour.id, `${neighbour.revision}-${neighbour.updated_at}`);
     }
   }, [pages, pageNumber]);
+
+  // A new page starts at its top, not wherever the last one was scrolled to
+  useEffect(() => {
+    scrollerRef.current?.scrollTo({ top: 0, left: 0 });
+  }, [chapterId, pageNumber]);
 
   const goToPage = useCallback((target: number) => {
     navigate(`/read/chapters/${chapterId}/pages/${target}`, { replace: true });
@@ -160,7 +176,7 @@ export function ReaderPage() {
       aria-pressed={fit === mode}
       title={label}
       aria-label={label}
-      className={`p-1.5 rounded-md ${fit === mode ? "bg-gray-700 text-white" : "text-gray-400 hover:bg-gray-800"}`}
+      className={`p-1.5 rounded-md ${fit === mode ? "bg-gray-700 text-gray-50" : "text-gray-400 hover:bg-gray-800"}`}
     >
       {icon}
     </button>
@@ -169,7 +185,7 @@ export function ReaderPage() {
   return (
     <div ref={frameRef} className="flex flex-col h-full bg-gray-950">
       <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-gray-800">
-        <Link to={`/read/series/${chapterQ.data.series.id}`} className="text-gray-400 hover:text-white" title="Back to the series">
+        <Link to={`/read/series/${chapterQ.data.series.id}`} className="text-gray-400 hover:text-gray-50" title="Back to the series">
           <ArrowLeft size={18} />
         </Link>
         <span className="text-sm font-medium truncate">{chapterQ.data.chapter.title}</span>
@@ -188,28 +204,47 @@ export function ReaderPage() {
         </div>
       </div>
 
-      <div className={`flex-1 min-h-0 relative ${fit === "original" ? "overflow-auto" : "overflow-hidden"}`}>
-        <div className={`min-h-full flex items-center justify-center ${fit === "original" ? "" : "h-full"}`}>
-          <img
-            key={page.id}
-            src={readPageImageUrl(page.id, `${page.revision}-${page.updated_at}`)}
-            alt={page.name ?? `Page ${pageNumber}`}
-            className={FIT_CLASS[fit]}
-          />
+      {/*
+        The page scrolls inside `scrollerRef`; the sides are worked out from where a click lands in the visible
+        window, not from overlays inside the scrolling box. Overlays scrolled away with the page, so a reader who had
+        scrolled down found nothing to click; and they sat over the page, taking the wheel away from it.
+      */}
+      <div className="flex-1 min-h-0 relative">
+        <div
+          ref={scrollerRef}
+          className={`absolute inset-0 ${fit === "height" ? "overflow-hidden" : "overflow-auto"} ${hoverSide ? "cursor-pointer" : ""}`}
+          // Right is next and left is previous whatever the reading direction: the side you tap is where you're going
+          // in the chapter, not across the spread. The arrow keys still follow the direction (see above)
+          onClick={(e) => {
+            const side = sideAt(e);
+            if (side === "left") previous();
+            else if (side === "right") next();
+          }}
+          onMouseMove={(e) => setHoverSide(sideAt(e))}
+          onMouseLeave={() => setHoverSide(null)}
+        >
+          <div className={`min-h-full flex items-center justify-center ${fit === "height" ? "h-full" : ""}`}>
+            <img
+              key={page.id}
+              src={readPageImageUrl(page.id, `${page.revision}-${page.updated_at}`)}
+              alt={page.name ?? `Page ${pageNumber}`}
+              className={FIT_CLASS[fit]}
+            />
+          </div>
         </div>
 
-        {/* Click targets: the side that turns forward depends on the reading direction */}
+        {/* The keyboard's and a screen reader's way in, and a hint for the mouse; they stay put while the page scrolls */}
         <button
-          onClick={rtl ? next : previous}
-          aria-label={rtl ? "Next page" : "Previous page"}
-          className="absolute inset-y-0 left-0 w-1/3 flex items-center justify-start pl-2 opacity-0 hover:opacity-100 transition-opacity"
+          onClick={previous}
+          aria-label="Previous page"
+          className={`absolute left-2 top-1/2 -translate-y-1/2 rounded-full p-1 transition-opacity hover:opacity-100 focus-visible:opacity-100 ${hoverSide === "left" ? "opacity-100" : "opacity-0"}`}
         >
           <ChevronLeft size={28} className="text-white/70 drop-shadow" />
         </button>
         <button
-          onClick={rtl ? previous : next}
-          aria-label={rtl ? "Previous page" : "Next page"}
-          className="absolute inset-y-0 right-0 w-1/3 flex items-center justify-end pr-2 opacity-0 hover:opacity-100 transition-opacity"
+          onClick={next}
+          aria-label="Next page"
+          className={`absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 transition-opacity hover:opacity-100 focus-visible:opacity-100 ${hoverSide === "right" ? "opacity-100" : "opacity-0"}`}
         >
           <ChevronRight size={28} className="text-white/70 drop-shadow" />
         </button>

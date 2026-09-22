@@ -25,7 +25,7 @@ import { hasUnpublishedEdits, publishedFile } from "@/services/page-history";
 import { ChapterStore, SeriesStore, SERIES_STATUSES, VolumeStore, type SeriesWithCounts } from "@/stores/library-store";
 import { pageDir, PageStore } from "@/stores/page-store";
 import type { Chapter, Page, ReviewTarget, Series, Volume } from "@/db/schema";
-import type { Principal } from "@/services/auth";
+import { hasRole, type Principal } from "@/services/auth";
 
 export const READING_DIRECTIONS = ["rtl", "ltr"] as const;
 
@@ -311,7 +311,20 @@ export function pageImagePath(pageId: string): string | null {
  * Whether this caller sees adult series. Only a signed-in account that has asked for them: a guest never does, and
  * neither does somebody who simply hasn't turned it on.
  */
-export const seesAdult = (principal: Principal | null | undefined): boolean => principal?.user.showAdult === true;
+export const seesAdult = (principal: Principal | null | undefined, library = false): boolean =>
+  principal?.user.showAdult === true || (library && principal != null && hasRole(principal.user, "contributor"));
+
+/**
+ * `?library=true`: the caller is working on the library (Manage, the Studio's File dialog), not reading it. A
+ * contributor then sees adult series whatever their own reading preference — they file into them and edit them, and a
+ * series they just made adult must not vanish from under them. A reader asking the same gets nothing extra.
+ */
+const LibraryQuery = t.Object({
+  library: t.Optional(t.String()),
+  /** Cache-buster the client adds to image addresses (a revision or a timestamp); not read. */
+  v: t.Optional(t.String()),
+});
+const asLibrary = (query: { library?: string } | undefined): boolean => query?.library === "true";
 
 /**
  * The series, unless it is adult and this caller doesn't see those — then nothing, and the route answers 404.
@@ -319,17 +332,17 @@ export const seesAdult = (principal: Principal | null | undefined): boolean => p
  * 404 rather than 403 on purpose: 403 would confirm the series exists, which is the one thing hiding it is meant to
  * avoid. Somebody who can't see it should get the same answer as for a series that was never there.
  */
-async function visibleSeries(id: number, principal: Principal | null | undefined): Promise<Series | undefined> {
+async function visibleSeries(id: number, principal: Principal | null | undefined, library = false): Promise<Series | undefined> {
   const row = await SeriesStore.findById(id);
   if (!row) return undefined;
-  return row.adult && !seesAdult(principal) ? undefined : row;
+  return row.adult && !seesAdult(principal, library) ? undefined : row;
 }
 
 /** A chapter of a hidden series is hidden with it. */
-async function visibleChapter(id: number, principal: Principal | null | undefined): Promise<Chapter | undefined> {
+async function visibleChapter(id: number, principal: Principal | null | undefined, library = false): Promise<Chapter | undefined> {
   const chapter = await ChapterStore.findById(id);
   if (!chapter) return undefined;
-  return (await visibleSeries(chapter.seriesId, principal)) ? chapter : undefined;
+  return (await visibleSeries(chapter.seriesId, principal, library)) ? chapter : undefined;
 }
 
 export const readPlugin = new Elysia({ prefix: "/read/api" })
@@ -341,7 +354,7 @@ export const readPlugin = new Elysia({ prefix: "/read/api" })
     "/series",
     async ({ query, principal }) => {
       const list = await SeriesStore.list({
-        hideAdult: !seesAdult(principal),
+        hideAdult: !seesAdult(principal, asLibrary(query)),
         search: query.q,
         withTags: query.tags?.split(",").filter(Boolean),
         withoutTags: query.exclude?.split(",").filter(Boolean),
@@ -361,6 +374,7 @@ export const readPlugin = new Elysia({ prefix: "/read/api" })
         has_chapters: t.Optional(t.String()),
         status: t.Optional(t.String()),
         sort: t.Optional(t.String()),
+        library: t.Optional(t.String()),
       }),
       response: { 200: t.Array(SeriesSchema) },
     },
@@ -372,17 +386,17 @@ export const readPlugin = new Elysia({ prefix: "/read/api" })
 
   .get(
     "/series/:id",
-    async ({ params, principal, status }) => {
-      if (!(await visibleSeries(params.id, principal))) return status(404, { error: "series not found" });
+    async ({ params, query, principal, status }) => {
+      if (!(await visibleSeries(params.id, principal, asLibrary(query)))) return status(404, { error: "series not found" });
       return (await seriesDetail(params.id)) ?? status(404, { error: "series not found" });
     },
-    { params: t.Object({ id: IdParam }), response: { 200: SeriesDetail, 404: ErrBody } },
+    { params: t.Object({ id: IdParam }), query: LibraryQuery, response: { 200: SeriesDetail, 404: ErrBody } },
   )
 
   .get(
     "/series/:id/cover",
-    async ({ params, principal, status }) => {
-      if (!(await visibleSeries(params.id, principal))) return status(404, { error: "series not found" });
+    async ({ params, query, principal, status }) => {
+      if (!(await visibleSeries(params.id, principal, asLibrary(query)))) return status(404, { error: "series not found" });
       const entry = await SeriesStore.withCounts(params.id);
       if (!entry) return status(404, { error: "series not found" });
       // The uploaded cover, else the first page of the first chapter
@@ -390,29 +404,29 @@ export const readPlugin = new Elysia({ prefix: "/read/api" })
       if (!file) return status(404, { error: "this series has no cover yet" });
       return new Response(Bun.file(file), { headers: { "content-type": "image/png", "cache-control": "no-cache" } });
     },
-    { params: t.Object({ id: IdParam }) },
+    { params: t.Object({ id: IdParam }), query: LibraryQuery },
   )
 
   .get(
     "/series/:id/covers",
-    async ({ params, principal, status }) => {
-      if (!(await visibleSeries(params.id, principal))) return status(404, { error: "series not found" });
+    async ({ params, query, principal, status }) => {
+      if (!(await visibleSeries(params.id, principal, asLibrary(query)))) return status(404, { error: "series not found" });
       return coverList(params.id);
     },
-    { params: t.Object({ id: IdParam }), response: { 200: t.Array(CoverSchema), 404: ErrBody } },
+    { params: t.Object({ id: IdParam }), query: LibraryQuery, response: { 200: t.Array(CoverSchema), 404: ErrBody } },
   )
 
   .get(
     "/series/:id/covers/:coverId",
-    async ({ params, principal, status }) => {
-      if (!(await visibleSeries(params.id, principal))) return status(404, { error: "no such cover" });
+    async ({ params, query, principal, status }) => {
+      if (!(await visibleSeries(params.id, principal, asLibrary(query)))) return status(404, { error: "no such cover" });
       const cover = await CoverStore.find(params.id, params.coverId);
       if (!cover) return status(404, { error: "no such cover" });
       const file = coverFilePath(cover.path);
       if (!existsSync(file)) return status(404, { error: "that cover's image is missing" });
       return new Response(Bun.file(file), { headers: { "content-type": "image/png", "cache-control": "no-cache" } });
     },
-    { params: t.Object({ id: IdParam, coverId: IdParam }) },
+    { params: t.Object({ id: IdParam, coverId: IdParam }), query: LibraryQuery },
   )
 
   .get(
@@ -435,26 +449,26 @@ export const readPlugin = new Elysia({ prefix: "/read/api" })
 
   .get(
     "/chapters/:id",
-    async ({ params, principal, status }) => {
-      if (!(await visibleChapter(params.id, principal))) return status(404, { error: "chapter not found" });
+    async ({ params, query, principal, status }) => {
+      if (!(await visibleChapter(params.id, principal, asLibrary(query)))) return status(404, { error: "chapter not found" });
       return (await chapterDetail(params.id)) ?? status(404, { error: "chapter not found" });
     },
-    { params: t.Object({ id: IdParam }), response: { 200: ChapterDetail, 404: ErrBody } },
+    { params: t.Object({ id: IdParam }), query: LibraryQuery, response: { 200: ChapterDetail, 404: ErrBody } },
   )
 
   .get(
     "/pages/:id/image",
-    async ({ params, principal, status }) => {
+    async ({ params, query, principal, status }) => {
       const page = await PageStore.findById(params.id);
       if (!page) return status(404, { error: "page not found" });
       // A page of a hidden series is hidden with it. Without this the id — which the reader hands out freely — would
       // answer differently for a series somebody can't see, which is exactly what hiding it is meant to prevent
-      if (page.chapterId !== null && !(await visibleChapter(page.chapterId, principal))) {
+      if (page.chapterId !== null && !(await visibleChapter(page.chapterId, principal, asLibrary(query)))) {
         return status(404, { error: "page not found" });
       }
       const file = pageImagePath(params.id);
       if (!file) return status(404, { error: "this page has no image yet" });
       return new Response(Bun.file(file), { headers: { "content-type": "image/png", "cache-control": "no-cache" } });
     },
-    { params: t.Object({ id: PageIdParam }) },
+    { params: t.Object({ id: PageIdParam }), query: LibraryQuery },
   );

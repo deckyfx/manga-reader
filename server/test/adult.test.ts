@@ -192,3 +192,37 @@ describe("an adult import", () => {
     expect((await SeriesStore.findById(seriesId))?.adult).toBe(true);
   });
 });
+
+describe("working on the library rather than reading it", () => {
+  test("a contributor sees an adult series they don't read, so they can file into it and edit it", async () => {
+    // The contributor's own reading preference is left off: this is the Studio's File dialog and Manage
+    const contributor = await signedIn("contributor");
+    const { seriesId, chapterId, pageId } = await adultSeries(contributor.cookie);
+    const as = { cookie: contributor.cookie };
+
+    // As a reader, still hidden
+    expect((await call("GET", `/read/api/series/${seriesId}`, undefined, as)).status).toBe(404);
+
+    // As the library, everything the tools load is there
+    const list = await call<{ id: number }[]>("GET", "/read/api/series?library=true", undefined, as);
+    expect(list.body.some((entry) => entry.id === seriesId)).toBe(true);
+    expect((await call("GET", `/read/api/series/${seriesId}?library=true`, undefined, as)).status).toBe(200);
+    expect((await call("GET", `/read/api/series/${seriesId}/covers?library=true`, undefined, as)).status).toBe(200);
+    expect((await call("GET", `/read/api/chapters/${chapterId}?library=true`, undefined, as)).status).toBe(200);
+    expect((await call("GET", `/read/api/pages/${pageId}/image?library=true`, undefined, as)).status).toBe(200);
+  });
+
+  test("gives a reader or a guest nothing extra", async () => {
+    const owner = await signedIn("contributor");
+    const { seriesId, chapterId } = await adultSeries(owner.cookie);
+    const reader = await signedIn("reader");
+
+    for (const cookie of [reader.cookie, undefined]) {
+      const options = cookie ? { cookie } : {};
+      const list = await call<{ id: number }[]>("GET", "/read/api/series?library=true", undefined, options);
+      expect(list.body.some((entry) => entry.id === seriesId)).toBe(false);
+      expect((await call("GET", `/read/api/series/${seriesId}?library=true`, undefined, options)).status).toBe(404);
+      expect((await call("GET", `/read/api/chapters/${chapterId}?library=true`, undefined, options)).status).toBe(404);
+    }
+  });
+});

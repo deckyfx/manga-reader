@@ -4,6 +4,7 @@ import { ArrowLeft, BookOpen, Loader2, Plus, Search } from "lucide-react";
 import { copyPageIntoChapter, createChapter, createSeries, fileWorkspace, getSeries, listSeries, seriesCoverUrl } from "../api";
 import { MAX_SERIES_TAGS, splitTags, tagProblem } from "../../src/shared/tags";
 import { Modal } from "./Modal";
+import { Toggle } from "./Toggle";
 
 interface ChapterPickerProps {
   /** The draft being filed; leave out and give `workspaceId` to file a whole workspace. */
@@ -47,8 +48,13 @@ export function ChapterPicker({
   const [newSeries, setNewSeries] = useState<{ title: string; tags: string; adult: boolean } | null>(null);
   const [newChapter, setNewChapter] = useState<{ number: string; title: string } | null>(null);
 
-  const seriesQ = useQuery({ queryKey: ["series", { q: search.trim() || undefined }], queryFn: () => listSeries({ q: search.trim() || undefined }) });
-  const detailQ = useQuery({ queryKey: ["series", seriesId], queryFn: () => getSeries(seriesId ?? 0), enabled: seriesId !== null });
+  // Asked as the library, not as a reader: an adult series has to be fileable even by someone who doesn't read them,
+  // and one made adult here mustn't vanish on the next step
+  const seriesQ = useQuery({
+    queryKey: ["series", { q: search.trim() || undefined }, "library"],
+    queryFn: () => listSeries({ q: search.trim() || undefined, library: true }),
+  });
+  const detailQ = useQuery({ queryKey: ["series", seriesId, "library"], queryFn: () => getSeries(seriesId ?? 0, true), enabled: seriesId !== null });
 
   const fileM = useMutation({
     // Filing a workspace can leave pages behind, and the caller reports those; a single page has nothing to report
@@ -76,7 +82,7 @@ export function ChapterPicker({
     mutationFn: (form: { title: string; tags: string; adult: boolean }) =>
       createSeries({ title: form.title.trim(), adult: form.adult, tags: splitTags(form.tags) }),
     onSuccess: (series) => {
-      qc.setQueryData(["series", series.series.id], series);
+      qc.setQueryData(["series", series.series.id, "library"], series);
       void qc.invalidateQueries({ queryKey: ["series"], refetchType: "none" });
       setNewSeries(null);
       setSeriesId(series.series.id);
@@ -92,7 +98,7 @@ export function ChapterPicker({
         title: form.title.trim(),
         number: form.number.trim() || null,
       });
-      qc.setQueryData(["series", detail.series.id], detail);
+      qc.setQueryData(["series", detail.series.id, "library"], detail);
       return chapterId;
     },
     onSuccess: (chapterId) => {
@@ -122,10 +128,15 @@ export function ChapterPicker({
           ) : filed ? (
             <span className="mr-auto self-center text-xs text-gray-500">The chapter gets its own copy; this page stays where it is.</span>
           ) : (
-            <label className="mr-auto flex items-center gap-2 self-center text-xs text-gray-400" title="Off moves the page instead of copying it">
-              <input type="checkbox" checked={keepDraft} onChange={(e) => setKeepDraft(e.target.checked)} className="accent-indigo-500" />
+            <Toggle
+              size="sm"
+              checked={keepDraft}
+              onChange={setKeepDraft}
+              title="Off moves the page instead of copying it"
+              className="mr-auto self-center text-xs text-gray-400"
+            >
               Keep the draft in the Inbox
-            </label>
+            </Toggle>
           )}
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-800">Cancel</button>
         </>
@@ -179,15 +190,9 @@ export function ChapterPicker({
                 <p className="text-xs text-gray-500">The tags came from the page this workspace was imported from; edit them as you like.</p>
               )}
               <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 text-xs text-gray-400">
-                  <input
-                    type="checkbox"
-                    checked={newSeries.adult}
-                    onChange={(e) => setNewSeries({ ...newSeries, adult: e.target.checked })}
-                    className="accent-indigo-500"
-                  />
+                <Toggle size="sm" checked={newSeries.adult} onChange={(on) => setNewSeries({ ...newSeries, adult: on })} className="text-xs text-gray-400">
                   Adult
-                </label>
+                </Toggle>
                 <button type="button" onClick={() => setNewSeries(null)} className="ml-auto rounded-lg px-3 py-1 text-sm text-gray-400 hover:bg-gray-800">
                   Cancel
                 </button>
@@ -219,7 +224,7 @@ export function ChapterPicker({
                   >
                     <div className="flex aspect-[2/3] w-full items-center justify-center bg-gray-900">
                       {entry.has_cover ? (
-                        <img src={seriesCoverUrl(entry.id, entry.updated_at)} alt="" loading="lazy" className="h-full w-full object-cover" />
+                        <img src={seriesCoverUrl(entry.id, entry.updated_at, true)} alt="" loading="lazy" className="h-full w-full object-cover" />
                       ) : (
                         <BookOpen size={24} className="text-gray-700" />
                       )}
@@ -256,7 +261,7 @@ export function ChapterPicker({
               <div className="hidden w-32 shrink-0 sm:block">
                 <div className="flex aspect-[2/3] items-center justify-center overflow-hidden rounded-lg bg-gray-900">
                   {detailQ.data.series.has_cover ? (
-                    <img src={seriesCoverUrl(detailQ.data.series.id, detailQ.data.series.updated_at)} alt="" className="h-full w-full object-cover" />
+                    <img src={seriesCoverUrl(detailQ.data.series.id, detailQ.data.series.updated_at, true)} alt="" className="h-full w-full object-cover" />
                   ) : (
                     <BookOpen size={24} className="text-gray-700" />
                   )}

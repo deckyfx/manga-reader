@@ -1278,7 +1278,7 @@ export function PageCanvas({
                   onClick={() => setBrushLayer(value)}
                   aria-pressed={brushLayer === value}
                   title={`${hint} (X swaps)`}
-                  className={`px-2 py-1 ${brushLayer === value ? "bg-gray-700 text-white" : "text-gray-400 hover:bg-gray-800"}`}
+                  className={`px-2 py-1 ${brushLayer === value ? "bg-gray-700 text-gray-50" : "text-gray-400 hover:bg-gray-800"}`}
                   style={brushLayer === value ? { boxShadow: `inset 0 -2px 0 ${color}` } : undefined}
                 >
                   {label}
@@ -1308,7 +1308,7 @@ export function PageCanvas({
                 onClick={() => setKind(value)}
                 aria-pressed={kind === value}
                 title={KIND_HINTS[value]}
-                className={`px-2 py-1 ${kind === value ? "bg-gray-700 text-white" : "text-gray-400 hover:bg-gray-800"}`}
+                className={`px-2 py-1 ${kind === value ? "bg-gray-700 text-gray-50" : "text-gray-400 hover:bg-gray-800"}`}
                 style={kind === value ? { boxShadow: `inset 0 -2px 0 ${REGION_COLORS[value].stroke}` } : undefined}
               >
                 {value === "text" ? "Text" : "SFX"}
@@ -1392,7 +1392,7 @@ export function PageCanvas({
                 title={`${label}. Ctrl+wheel always zooms.`}
                 aria-label={label}
                 aria-pressed={wheelMode === mode}
-                className={`px-1.5 py-1 ${wheelMode === mode ? "bg-gray-700 text-white" : "text-gray-400 hover:bg-gray-800"}`}
+                className={`px-1.5 py-1 ${wheelMode === mode ? "bg-gray-700 text-gray-50" : "text-gray-400 hover:bg-gray-800"}`}
               >
                 {icon}
               </button>

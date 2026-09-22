@@ -17,7 +17,8 @@ export function ManagePage() {
   const [creating, setCreating] = useState(false);
 
   const query = { q: search.trim() || undefined, sort: "recent" as const };
-  const seriesQ = useQuery({ queryKey: ["series", query], queryFn: () => listSeries(query) });
+  // As the library: adult series are managed like any other, whatever this account reads
+  const seriesQ = useQuery({ queryKey: ["series", query, "library"], queryFn: () => listSeries({ ...query, library: true }) });
   const inboxQ = useQuery({ queryKey: ["inbox"], queryFn: listInbox });
 
   const deleteM = useMutation({
@@ -61,7 +62,7 @@ export function ManagePage() {
             className="w-44 bg-transparent text-sm focus:outline-none"
           />
           {search && (
-            <button onClick={() => setSearch("")} aria-label="Clear search" className="text-gray-500 hover:text-white">
+            <button onClick={() => setSearch("")} aria-label="Clear search" className="text-gray-500 hover:text-gray-50">
               <X size={13} />
             </button>
           )}
@@ -104,7 +105,7 @@ export function ManagePage() {
                   className="flex h-28 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md bg-gray-950"
                 >
                   {entry.has_cover ? (
-                    <img src={seriesCoverUrl(entry.id, entry.updated_at)} alt="" loading="lazy" className="h-full w-full object-cover" />
+                    <img src={seriesCoverUrl(entry.id, entry.updated_at, true)} alt="" loading="lazy" className="h-full w-full object-cover" />
                   ) : (
                     <BookOpen size={22} className="text-gray-700" />
                   )}
@@ -125,7 +126,7 @@ export function ManagePage() {
                       onClick={() => setEditing(entry)}
                       title="Edit this series"
                       aria-label={`Edit ${entry.title}`}
-                      className="rounded-md p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
+                      className="rounded-md p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-50"
                     >
                       <SquarePen size={14} />
                     </button>
@@ -133,7 +134,7 @@ export function ManagePage() {
                       to={`/read/series/${entry.id}`}
                       title="Open in Read"
                       aria-label={`Read ${entry.title}`}
-                      className="rounded-md p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
+                      className="rounded-md p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-50"
                     >
                       <BookOpen size={14} />
                     </Link>

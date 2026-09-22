@@ -23,7 +23,7 @@ function NavItem({ to, icon, label, expanded }: { to: string; icon: React.ReactN
       title={expanded ? undefined : label}
       className={({ isActive }) =>
         `flex items-center gap-3 rounded-lg p-2.5 text-sm transition-colors ${
-          isActive ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-white hover:bg-gray-800"
+          isActive ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-gray-50 hover:bg-gray-800"
         }`
       }
     >
@@ -62,11 +62,11 @@ export function Layout() {
         }`}
       >
         <div className={`flex items-center mb-2 ${expanded ? "justify-between pl-2" : "justify-center"}`}>
-          {expanded && <NavLink to="/home" className="text-sm font-semibold text-gray-300 hover:text-white">Web OCR</NavLink>}
+          {expanded && <NavLink to="/home" className="text-sm font-semibold text-gray-300 hover:text-gray-50">Web OCR</NavLink>}
           <button
             onClick={toggle}
             title={expanded ? "Collapse sidebar" : "Expand sidebar"}
-            className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800"
+            className="p-1.5 rounded-md text-gray-400 hover:text-gray-50 hover:bg-gray-800"
           >
             {expanded ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
           </button>
@@ -93,7 +93,7 @@ export function Layout() {
                     .finally(() => setSigningOut(false));
                 }}
                 title={expanded ? undefined : "Sign out"}
-                className="flex w-full items-center gap-3 rounded-lg p-2.5 text-sm text-gray-400 transition-colors hover:bg-gray-800 hover:text-white disabled:opacity-50"
+                className="flex w-full items-center gap-3 rounded-lg p-2.5 text-sm text-gray-400 transition-colors hover:bg-gray-800 hover:text-gray-50 disabled:opacity-50"
               >
                 <span className="shrink-0"><LogOut size={20} /></span>
                 {expanded && <span className="truncate">Sign out</span>}

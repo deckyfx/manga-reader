@@ -93,7 +93,7 @@ export function StudioPagesPage() {
               title={entry.hint}
               aria-pressed={scope === entry.value}
               className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
-                scope === entry.value ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"
+                scope === entry.value ? "bg-gray-700 text-gray-50" : "text-gray-400 hover:text-gray-50"
               }`}
             >
               {entry.label}
@@ -111,7 +111,7 @@ export function StudioPagesPage() {
             className="w-48 bg-transparent text-sm focus:outline-none"
           />
           {search && (
-            <button onClick={() => setSearch("")} aria-label="Clear search" className="text-gray-500 hover:text-white">
+            <button onClick={() => setSearch("")} aria-label="Clear search" className="text-gray-500 hover:text-gray-50">
               <X size={13} />
             </button>
           )}
@@ -142,7 +142,7 @@ export function StudioPagesPage() {
         {workspacesQ.isError && (
           <p className="mb-4 text-sm text-red-400">
             The workspaces couldn't be loaded: {workspacesQ.error.message}{" "}
-            <button type="button" onClick={() => void workspacesQ.refetch()} className="text-gray-300 underline hover:text-white">Try again</button>
+            <button type="button" onClick={() => void workspacesQ.refetch()} className="text-gray-300 underline hover:text-gray-50">Try again</button>
           </p>
         )}
         {workspaces.length > 0 && (
@@ -215,7 +215,7 @@ export function StudioPagesPage() {
                         to={`/manage/chapters/${page.location.chapter_id}`}
                         title={`${page.location.series_title} · ${page.location.chapter_title}`}
                         aria-label="Open the chapter in Manage"
-                        className="rounded-md bg-gray-900/90 p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white"
+                        className="rounded-md bg-gray-900/90 p-1.5 text-gray-400 hover:bg-gray-800 hover:text-gray-50"
                       >
                         <BookOpen size={14} />
                       </Link>
@@ -225,7 +225,7 @@ export function StudioPagesPage() {
                         disabled={busy}
                         title="File this draft into a chapter"
                         aria-label="File into a chapter"
-                        className="rounded-md bg-gray-900/90 p-1.5 text-gray-400 hover:bg-gray-800 hover:text-white disabled:opacity-40"
+                        className="rounded-md bg-gray-900/90 p-1.5 text-gray-400 hover:bg-gray-800 hover:text-gray-50 disabled:opacity-40"
                       >
                         <FolderInput size={14} />
                       </button>

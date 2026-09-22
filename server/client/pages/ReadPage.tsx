@@ -1,18 +1,47 @@
-import { useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, Library, Loader2, Search, X } from "lucide-react";
 import { listSeries, listSeriesTags, seriesCoverUrl, type SeriesQuery, type SeriesStatus } from "../api";
 
 const STATUS_LABEL: Record<string, string> = { ongoing: "Ongoing", completed: "Completed", hiatus: "Hiatus" };
 
-/** The library: browse and search series to read. Editing lives in Manage. */
+const STATUSES: readonly SeriesStatus[] = ["ongoing", "completed", "hiatus"];
+
+/** Where the library's filters live: `/read?tag=a&tag=b&not=c&status=ongoing&sort=recent&q=…`. */
+export function libraryUrl(filters: { tags?: string[] } = {}): string {
+  const params = new URLSearchParams();
+  for (const tag of filters.tags ?? []) params.append("tag", tag);
+  const query = params.toString();
+  return query ? `/read?${query}` : "/read";
+}
+
+/**
+ * The library: browse and search series to read. Editing lives in Manage.
+ *
+ * The filters are the address, not component state, so a tag on a series page can link straight to "everything
+ * tagged this", Back returns to the filter you had, and a filtered library can be shared.
+ */
 export function ReadPage() {
-  const [search, setSearch] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
-  const [exclude, setExclude] = useState<string[]>([]);
-  const [status, setStatus] = useState<SeriesStatus | "">("");
-  const [sort, setSort] = useState<"title" | "recent">("title");
+  const [params, setParams] = useSearchParams();
+  const search = params.get("q") ?? "";
+  const tags = params.getAll("tag");
+  const exclude = params.getAll("not");
+  const status = STATUSES.find((value) => value === params.get("status")) ?? "";
+  const sort = params.get("sort") === "recent" ? "recent" : "title";
+
+  /** Changes some filters, keeping the rest. Typing in the search box replaces the entry rather than piling up history. */
+  const update = (change: { q?: string; tag?: string[]; not?: string[]; status?: string; sort?: string }, replace = false) => {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(change)) {
+      next.delete(key);
+      if (Array.isArray(value)) for (const item of value) next.append(key, item);
+      else if (value) next.set(key, value);
+    }
+    setParams(next, { replace });
+  };
+  const setSearch = (value: string) => update({ q: value }, true);
+  const setStatus = (value: SeriesStatus | "") => update({ status: value });
+  const setSort = (value: "title" | "recent") => update({ sort: value === "title" ? "" : value });
 
   const query: SeriesQuery = {
     q: search.trim() || undefined,
@@ -26,14 +55,9 @@ export function ReadPage() {
 
   /** A tag cycles: off → must have → must not have → off. */
   const cycleTag = (tag: string) => {
-    if (tags.includes(tag)) {
-      setTags(tags.filter((t) => t !== tag));
-      setExclude([...exclude, tag]);
-    } else if (exclude.includes(tag)) {
-      setExclude(exclude.filter((t) => t !== tag));
-    } else {
-      setTags([...tags, tag]);
-    }
+    if (tags.includes(tag)) update({ tag: tags.filter((t) => t !== tag), not: [...exclude, tag] });
+    else if (exclude.includes(tag)) update({ not: exclude.filter((t) => t !== tag) });
+    else update({ tag: [...tags, tag] });
   };
 
   const series = seriesQ.data ?? [];
@@ -56,7 +80,7 @@ export function ReadPage() {
             className="bg-transparent text-sm focus:outline-none w-44"
           />
           {search && (
-            <button onClick={() => setSearch("")} aria-label="Clear search" className="text-gray-500 hover:text-white">
+            <button onClick={() => setSearch("")} aria-label="Clear search" className="text-gray-500 hover:text-gray-50">
               <X size={13} />
             </button>
           )}
@@ -108,13 +132,9 @@ export function ReadPage() {
           })}
           {filtered && (
             <button
-              onClick={() => {
-                setTags([]);
-                setExclude([]);
-                setStatus("");
-                setSearch("");
-              }}
-              className="ml-auto text-gray-400 hover:text-white"
+              // The sort order is a preference, not a filter: it stays
+              onClick={() => update({ q: "", tag: [], not: [], status: "" })}
+              className="ml-auto text-gray-400 hover:text-gray-50"
             >
               Clear filters
             </button>

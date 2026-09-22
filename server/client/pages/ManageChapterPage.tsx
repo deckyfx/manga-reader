@@ -24,6 +24,7 @@ import { AddPageUrlsDialog } from "../components/AddPageUrlsDialog";
 import { useConfirm } from "../components/ConfirmDialog";
 import { pageStatus, StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
+import { Toggle } from "../components/Toggle";
 
 /** One chapter's pages: importing, reordering, translating the whole chapter and exporting it. */
 export function ManageChapterPage() {
@@ -34,8 +35,9 @@ export function ManageChapterPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const chapterQ = useQuery({
-    queryKey: ["chapter", chapterId],
-    queryFn: () => getChapter(chapterId),
+    // As the library: a chapter of an adult series is managed whatever this account reads
+    queryKey: ["chapter", chapterId, "library"],
+    queryFn: () => getChapter(chapterId, true),
     enabled: Number.isFinite(chapterId),
     // A page translating here or in the Studio rewrites its image: follow along while any of them is working
     refetchInterval: (query) => (query.state.data?.pages.some((page) => page.status === "queued" || page.status === "running") ? 3000 : false),
@@ -74,14 +76,14 @@ export function ManageChapterPage() {
     mutationFn: (files: File[]) => importChapterPages(chapterId, files),
     onSuccess: (detail) => {
       setSkipped(detail.skipped);
-      qc.setQueryData(["chapter", chapterId], detail);
+      qc.setQueryData(["chapter", chapterId, "library"], detail);
       void qc.invalidateQueries({ queryKey: ["chapter-run", chapterId] });
       void qc.invalidateQueries({ queryKey: ["series"], refetchType: "none" });
     },
   });
   const reorderM = useMutation({
     mutationFn: (ids: string[]) => reorderChapterPages(chapterId, ids),
-    onSuccess: (detail) => qc.setQueryData(["chapter", chapterId], detail),
+    onSuccess: (detail) => qc.setQueryData(["chapter", chapterId, "library"], detail),
   });
   const unfileM = useMutation({
     mutationFn: (pageId: string) => unfilePage(pageId),
@@ -121,7 +123,7 @@ export function ManageChapterPage() {
   const publishChapterM = useMutation({
     mutationFn: () => publishChapterEdits(chapterId),
     onSuccess: (detail) => {
-      qc.setQueryData(["chapter", chapterId], detail);
+      qc.setQueryData(["chapter", chapterId, "library"], detail);
       void qc.invalidateQueries({ queryKey: ["studio-pages"] });
     },
   });
@@ -165,7 +167,7 @@ export function ManageChapterPage() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b border-gray-800 px-4 py-3">
-        <Link to={`/manage/series/${series.id}`} className="text-gray-400 hover:text-white" title="Back to the series">
+        <Link to={`/manage/series/${series.id}`} className="text-gray-400 hover:text-gray-50" title="Back to the series">
           <ArrowLeft size={18} />
         </Link>
         <h1 className="max-w-[min(36rem,60vw)] truncate text-base font-semibold" title={chapter.title}>
@@ -177,10 +179,9 @@ export function ManageChapterPage() {
         {error && <span className="truncate text-xs text-red-400">{error.message}</span>}
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-gray-400" title="Also remove sound effects when translating">
-            <input type="checkbox" checked={cleanSfx} onChange={(e) => setCleanSfx(e.target.checked)} className="accent-indigo-500" />
+          <Toggle size="sm" checked={cleanSfx} onChange={setCleanSfx} title="Also remove sound effects when translating" className="gap-1.5 text-xs text-gray-400">
             Clean SFX
-          </label>
+          </Toggle>
           <button
             onClick={() => runM.mutate(false)}
             disabled={running || runM.isPending || pages.length === 0}
@@ -333,7 +334,7 @@ export function ManageChapterPage() {
               >
                 <Link to={`/read/chapters/${chapterId}/pages/${index + 1}`} className="block aspect-2/3 bg-gray-950">
                   <img
-                    src={readPageImageUrl(page.id, `${page.revision}-${page.updated_at}`)}
+                    src={readPageImageUrl(page.id, `${page.revision}-${page.updated_at}`, true)}
                     alt={page.name ?? `Page ${index + 1}`}
                     loading="lazy"
                     className="h-full w-full object-contain"
@@ -359,7 +360,7 @@ export function ManageChapterPage() {
                     to={`/studio/pages/${page.id}`}
                     title="Open in the Studio"
                     aria-label="Open in the Studio"
-                    className="rounded bg-gray-900/90 p-1 text-gray-300 hover:text-white"
+                    className="rounded bg-gray-900/90 p-1 text-gray-300 hover:text-gray-50"
                   >
                     <SquarePen size={13} />
                   </Link>
@@ -379,7 +380,7 @@ export function ManageChapterPage() {
                     disabled={rerunM.isPending || running}
                     title="Translate this page again"
                     aria-label="Translate this page again"
-                    className="rounded bg-gray-900/90 p-1 text-gray-300 hover:text-white disabled:opacity-40"
+                    className="rounded bg-gray-900/90 p-1 text-gray-300 hover:text-gray-50 disabled:opacity-40"
                   >
                     <RefreshCw size={13} />
                   </button>
@@ -406,7 +407,7 @@ export function ManageChapterPage() {
           onImport={async (urls) => {
             const detail = await importChapterPageUrls(chapterId, urls);
             setSkipped(detail.skipped);
-            qc.setQueryData(["chapter", chapterId], detail);
+            qc.setQueryData(["chapter", chapterId, "library"], detail);
             void qc.invalidateQueries({ queryKey: ["chapter-run", chapterId] });
             void qc.invalidateQueries({ queryKey: ["series"], refetchType: "none" });
             return { imported: detail.imported, skipped: detail.skipped };
@@ -429,10 +430,15 @@ function InboxPicker({ onAdd, adding, keepDrafts, onKeepDrafts }: {
 
   return (
     <div className="border-b border-gray-800 bg-gray-950/60 px-4 py-3">
-      <label className="mb-2 flex items-center gap-2 text-xs text-gray-400" title="Off moves the page into the chapter instead of copying it">
-        <input type="checkbox" checked={keepDrafts} onChange={(e) => onKeepDrafts(e.target.checked)} className="accent-indigo-500" />
+      <Toggle
+        size="sm"
+        checked={keepDrafts}
+        onChange={onKeepDrafts}
+        title="Off moves the page into the chapter instead of copying it"
+        className="mb-2 text-xs text-gray-400"
+      >
         Keep the draft in the Inbox (the chapter gets its own copy)
-      </label>
+      </Toggle>
       {inboxQ.isLoading ? (
         <Loader2 size={14} className="animate-spin text-gray-500" />
       ) : pages.length === 0 ? (
@@ -448,7 +454,7 @@ function InboxPicker({ onAdd, adding, keepDrafts, onKeepDrafts }: {
               className="w-24 shrink-0 overflow-hidden rounded-lg border border-gray-800 bg-gray-900 hover:border-indigo-500 disabled:opacity-50"
             >
               <span className="block aspect-2/3 bg-gray-950">
-                <img src={readPageImageUrl(page.id, `${page.revision}-${page.updated_at}`)} alt="" loading="lazy" className="h-full w-full object-contain" />
+                <img src={readPageImageUrl(page.id, `${page.revision}-${page.updated_at}`, true)} alt="" loading="lazy" className="h-full w-full object-contain" />
               </span>
               <span className="block truncate px-1.5 py-1 text-[11px] text-gray-400">{page.name ?? page.id.slice(-8)}</span>
             </button>

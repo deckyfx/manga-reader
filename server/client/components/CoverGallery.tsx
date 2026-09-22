@@ -14,7 +14,8 @@ export function CoverGallery({ seriesId }: { seriesId: number }) {
   const qc = useQueryClient();
   const confirm = useConfirm();
   const fileRef = useRef<HTMLInputElement>(null);
-  const coversQ = useQuery({ queryKey: ["covers", seriesId], queryFn: () => listSeriesCovers(seriesId) });
+  // Part of Manage: asked as the library, so an adult series' covers show for a contributor who doesn't read them
+  const coversQ = useQuery({ queryKey: ["covers", seriesId], queryFn: () => listSeriesCovers(seriesId, true) });
 
   // Both queries: the series card and the reader show whichever cover is current
   const refresh = () => {
@@ -82,7 +83,7 @@ export function CoverGallery({ seriesId }: { seriesId: number }) {
                   cover.current ? "border-indigo-500" : "border-gray-800"
                 }`}
               >
-                <img src={coverArtUrl(seriesId, cover.id)} alt={cover.label ?? ""} className="h-full w-full object-cover" />
+                <img src={coverArtUrl(seriesId, cover.id, true)} alt={cover.label ?? ""} className="h-full w-full object-cover" />
                 {cover.current && (
                   <span className="absolute top-1 left-1 rounded bg-indigo-600/90 px-1.5 py-0.5 text-[10px] text-white">
                     {cover.pinned ? "pinned" : "showing"}
@@ -98,7 +99,7 @@ export function CoverGallery({ seriesId }: { seriesId: number }) {
                   disabled={busy}
                   title={cover.pinned ? "Stop pinning, and show the newest" : "Always show this one"}
                   aria-label={cover.pinned ? "Unpin this cover" : "Pin this cover"}
-                  className="ml-auto rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-white disabled:opacity-40"
+                  className="ml-auto rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-gray-50 disabled:opacity-40"
                 >
                   {cover.pinned ? <PinOff size={12} /> : <Pin size={12} />}
                 </button>
