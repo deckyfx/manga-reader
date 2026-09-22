@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { getMe, setShowAdult } from "../../api";
 import { when } from "../../lib/format";
 import type { Account } from "../../api";
+import { Toggle } from "../../components/Toggle";
 
 const ROLE_LABEL: Record<string, string> = { admin: "Admin", contributor: "Contributor", reader: "Reader" };
 
@@ -73,16 +74,10 @@ function AdultToggle({ account }: { account: Account }) {
   return (
     <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
       <h3 className="text-sm font-semibold text-gray-100">What you see in the reader</h3>
-      <label className="mt-3 flex items-center gap-2 text-sm text-gray-300">
-        <input
-          type="checkbox"
-          checked={account.show_adult}
-          onChange={(e) => save.mutate(e.target.checked)}
-          className="accent-indigo-500"
-        />
+      <Toggle checked={account.show_adult} onChange={(show) => save.mutate(show)} className="mt-3 text-sm text-gray-300">
         Show adult series
         {save.isPending && <Loader2 size={13} className="animate-spin text-gray-500" />}
-      </label>
+      </Toggle>
       <p className="mt-1 text-xs text-gray-500">
         Off by default. With it off, adult series aren't listed and their pages can't be opened, even by their address.
       </p>

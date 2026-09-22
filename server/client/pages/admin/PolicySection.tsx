@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { getServerPolicy, updateServerPolicy, type RegistrationRole } from "../../api";
 import { fieldClass } from "../../lib/styles";
+import { Toggle } from "../../components/Toggle";
 
 /** Self-registration can't mint admins, so the default-role picker doesn't offer it. */
 const REGISTRATION_ROLES: RegistrationRole[] = ["contributor", "reader"];
@@ -29,16 +30,14 @@ export function PolicySection() {
         <Loader2 size={16} className="animate-spin text-gray-500" />
       ) : (
         <div className="flex flex-wrap items-center gap-6">
-          <label className="flex items-center gap-2 text-sm text-gray-300">
-            <input
-              type="checkbox"
-              checked={policy.registration_enabled}
-              onChange={(e) => saveM.mutate({ registration_enabled: e.target.checked })}
-              disabled={saveM.isPending}
-              className="accent-indigo-500"
-            />
+          <Toggle
+            checked={policy.registration_enabled}
+            onChange={(on) => saveM.mutate({ registration_enabled: on })}
+            disabled={saveM.isPending}
+            className="text-sm text-gray-300"
+          >
             Let people create their own accounts
-          </label>
+          </Toggle>
           <label className="flex items-center gap-2 text-sm text-gray-300">
             New accounts start as
             <select

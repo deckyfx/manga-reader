@@ -24,6 +24,7 @@ import { AddPageUrlsDialog } from "../components/AddPageUrlsDialog";
 import { useConfirm } from "../components/ConfirmDialog";
 import { pageStatus, StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
+import { Toggle } from "../components/Toggle";
 
 /** One chapter's pages: importing, reordering, translating the whole chapter and exporting it. */
 export function ManageChapterPage() {
@@ -178,10 +179,9 @@ export function ManageChapterPage() {
         {error && <span className="truncate text-xs text-red-400">{error.message}</span>}
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-gray-400" title="Also remove sound effects when translating">
-            <input type="checkbox" checked={cleanSfx} onChange={(e) => setCleanSfx(e.target.checked)} className="accent-indigo-500" />
+          <Toggle size="sm" checked={cleanSfx} onChange={setCleanSfx} title="Also remove sound effects when translating" className="gap-1.5 text-xs text-gray-400">
             Clean SFX
-          </label>
+          </Toggle>
           <button
             onClick={() => runM.mutate(false)}
             disabled={running || runM.isPending || pages.length === 0}
@@ -430,10 +430,15 @@ function InboxPicker({ onAdd, adding, keepDrafts, onKeepDrafts }: {
 
   return (
     <div className="border-b border-gray-800 bg-gray-950/60 px-4 py-3">
-      <label className="mb-2 flex items-center gap-2 text-xs text-gray-400" title="Off moves the page into the chapter instead of copying it">
-        <input type="checkbox" checked={keepDrafts} onChange={(e) => onKeepDrafts(e.target.checked)} className="accent-indigo-500" />
+      <Toggle
+        size="sm"
+        checked={keepDrafts}
+        onChange={onKeepDrafts}
+        title="Off moves the page into the chapter instead of copying it"
+        className="mb-2 text-xs text-gray-400"
+      >
         Keep the draft in the Inbox (the chapter gets its own copy)
-      </label>
+      </Toggle>
       {inboxQ.isLoading ? (
         <Loader2 size={14} className="animate-spin text-gray-500" />
       ) : pages.length === 0 ? (

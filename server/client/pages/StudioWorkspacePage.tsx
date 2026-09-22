@@ -19,6 +19,7 @@ import { Modal } from "../components/Modal";
 import { forgetWorkspace } from "../lib/optimistic";
 import { StudioPageCard } from "../components/StudioPageCard";
 import { useToast } from "../components/Toast";
+import { Toggle } from "../components/Toggle";
 
 /** A run is going, so progress is worth asking for often; otherwise the counts are enough. */
 const RUN_POLL_MS = 1500;
@@ -391,15 +392,9 @@ export function StudioWorkspacePage() {
             {workspace.chapter_id !== null && (
               <p className="text-xs text-gray-500">Pages already in its chapter stay there either way; only drafts are affected.</p>
             )}
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={closing.keepPages}
-                onChange={(e) => setClosing({ keepPages: e.target.checked })}
-                className="accent-indigo-500"
-              />
+            <Toggle checked={closing.keepPages} onChange={(keepPages) => setClosing({ keepPages })} className="text-sm">
               Keep the pages as loose drafts
-            </label>
+            </Toggle>
           </div>
         </Modal>
       )}

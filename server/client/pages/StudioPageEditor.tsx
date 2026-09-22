@@ -33,6 +33,7 @@ import { usePageJobEvents } from "../hooks/usePageJobEvents";
 import { PageCanvas, type PageCanvasHandle } from "../studio/canvas/PageCanvas";
 import { buildLettering, relayoutBlock, useTypesetter } from "../studio/text/typesetter";
 import { readToolset, saveToolset, toolsetScope } from "../studio/toolset";
+import { Toggle } from "../components/Toggle";
 
 const isBusy = (status: string | undefined) => status === "queued" || status === "running";
 
@@ -852,16 +853,16 @@ function IncludeToggle({ pageId, block, disabled, onChanged, trackSave, title }:
   });
   const checked = includeM.isPending && includeM.variables !== undefined ? includeM.variables : block.include;
   return (
-    <label className="flex items-center gap-1 text-gray-400 cursor-pointer" title={includeM.error ? includeM.error.message : title}>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled || includeM.isPending}
-        onChange={(e) => trackSave(includeM.mutateAsync(e.target.checked))}
-        className="accent-indigo-500"
-      />
+    <Toggle
+      size="sm"
+      checked={checked}
+      disabled={disabled || includeM.isPending}
+      onChange={(include) => trackSave(includeM.mutateAsync(include))}
+      title={includeM.error ? includeM.error.message : title}
+      className="gap-1 text-gray-400"
+    >
       <span className={includeM.error ? "text-red-400" : undefined}>clean</span>
-    </label>
+    </Toggle>
   );
 }
 
@@ -1103,16 +1104,15 @@ function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockSt
         </div>
         <NumberField label="Rotation °" value={style.rotation} min={-180} max={180} step={1} placeholder="0" disabled={disabled}
           onChange={(v) => change({ rotation: v === 0 ? undefined : v })} />
-        <label className="flex items-center gap-1.5">
-          <input
-            type="checkbox"
-            checked={style.uppercase ?? true}
-            disabled={disabled}
-            onChange={(e) => change({ uppercase: e.target.checked ? undefined : false })}
-            className="accent-indigo-500"
-          />
+        <Toggle
+          size="sm"
+          checked={style.uppercase ?? true}
+          disabled={disabled}
+          onChange={(on) => change({ uppercase: on ? undefined : false })}
+          className="gap-1.5"
+        >
           Capitals
-        </label>
+        </Toggle>
         <div className="flex items-center justify-end">
           {style.box || style.offset ? (
             <button type="button" disabled={disabled} onClick={() => change({ box: undefined, offset: undefined })} className="text-violet-300 hover:text-violet-200 disabled:opacity-40">
@@ -1262,16 +1262,16 @@ function ColorField({ label, value, fallback, disabled, onChange }: {
 }) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <label className="flex items-center gap-1.5" title="Tick for a fixed colour; unticked picks black or white by the background">
-        <input
-          type="checkbox"
-          checked={value !== undefined}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.checked ? fallback : undefined)}
-          className="accent-indigo-500"
-        />
+      <Toggle
+        size="sm"
+        checked={value !== undefined}
+        disabled={disabled}
+        onChange={(on) => onChange(on ? fallback : undefined)}
+        title="On for a fixed colour; off picks black or white by the background"
+        className="gap-1.5"
+      >
         {label}
-      </label>
+      </Toggle>
       <input
         type="color"
         aria-label={`${label} colour`}

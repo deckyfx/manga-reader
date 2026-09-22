@@ -4,6 +4,7 @@ import { ArrowLeft, BookOpen, Loader2, Plus, Search } from "lucide-react";
 import { copyPageIntoChapter, createChapter, createSeries, fileWorkspace, getSeries, listSeries, seriesCoverUrl } from "../api";
 import { MAX_SERIES_TAGS, splitTags, tagProblem } from "../../src/shared/tags";
 import { Modal } from "./Modal";
+import { Toggle } from "./Toggle";
 
 interface ChapterPickerProps {
   /** The draft being filed; leave out and give `workspaceId` to file a whole workspace. */
@@ -127,10 +128,15 @@ export function ChapterPicker({
           ) : filed ? (
             <span className="mr-auto self-center text-xs text-gray-500">The chapter gets its own copy; this page stays where it is.</span>
           ) : (
-            <label className="mr-auto flex items-center gap-2 self-center text-xs text-gray-400" title="Off moves the page instead of copying it">
-              <input type="checkbox" checked={keepDraft} onChange={(e) => setKeepDraft(e.target.checked)} className="accent-indigo-500" />
+            <Toggle
+              size="sm"
+              checked={keepDraft}
+              onChange={setKeepDraft}
+              title="Off moves the page instead of copying it"
+              className="mr-auto self-center text-xs text-gray-400"
+            >
               Keep the draft in the Inbox
-            </label>
+            </Toggle>
           )}
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-800">Cancel</button>
         </>
@@ -184,15 +190,9 @@ export function ChapterPicker({
                 <p className="text-xs text-gray-500">The tags came from the page this workspace was imported from; edit them as you like.</p>
               )}
               <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 text-xs text-gray-400">
-                  <input
-                    type="checkbox"
-                    checked={newSeries.adult}
-                    onChange={(e) => setNewSeries({ ...newSeries, adult: e.target.checked })}
-                    className="accent-indigo-500"
-                  />
+                <Toggle size="sm" checked={newSeries.adult} onChange={(on) => setNewSeries({ ...newSeries, adult: on })} className="text-xs text-gray-400">
                   Adult
-                </label>
+                </Toggle>
                 <button type="button" onClick={() => setNewSeries(null)} className="ml-auto rounded-lg px-3 py-1 text-sm text-gray-400 hover:bg-gray-800">
                   Cancel
                 </button>

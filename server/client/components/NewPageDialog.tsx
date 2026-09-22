@@ -3,6 +3,7 @@ import { ImageUp, Link2, Loader2, X } from "lucide-react";
 import { createPage } from "../api";
 import { usePageJobEvents } from "../hooks/usePageJobEvents";
 import { JobProgress } from "./JobProgress";
+import { Toggle } from "./Toggle";
 
 type Source = "upload" | "url";
 
@@ -125,14 +126,12 @@ export function NewPageDialog({ onClose, onCreated }: { onClose: () => void; onC
           )}
 
           <div className="flex flex-wrap gap-4 text-sm text-gray-300">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={cleanSfx} onChange={(e) => setCleanSfx(e.target.checked)} />
+            <Toggle checked={cleanSfx} onChange={setCleanSfx}>
               Clean sound effects
-            </label>
-            <label className="flex items-center gap-2" title="Translate again even if this image was translated before">
-              <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+            </Toggle>
+            <Toggle checked={force} onChange={setForce} title="Translate again even if this image was translated before">
               Run again if already translated
-            </label>
+            </Toggle>
           </div>
 
           {jobId && <JobProgress job={job} />}
