@@ -369,7 +369,13 @@ export interface SeriesQuery {
   has_chapters?: boolean;
   status?: SeriesStatus;
   sort?: "title" | "recent";
+  /** Working on the library rather than reading it: a contributor sees adult series whatever their preference. */
+  library?: boolean;
 }
+
+/** `?library=true` for the library tools (Manage, the Studio's File dialog); see `SeriesQuery.library`. */
+const libraryQuery = (library: boolean | undefined) => (library ? { library: "true" } : {});
+const withLibrary = (url: string, library: boolean | undefined) => (library ? `${url}${url.includes("?") ? "&" : "?"}library=true` : url);
 
 export const listSeries = (query: SeriesQuery = {}) =>
   unwrap(api.read.api.series.get({
@@ -380,22 +386,23 @@ export const listSeries = (query: SeriesQuery = {}) =>
       ...(query.has_chapters ? { has_chapters: "true" } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.sort ? { sort: query.sort } : {}),
+      ...libraryQuery(query.library),
     },
   }));
 
 export const listSeriesTags = () => unwrap(api.read.api.series.tags.get());
 
-export const getSeries = (id: number) => unwrap(api.read.api.series({ id }).get());
+export const getSeries = (id: number, library = false) => unwrap(api.read.api.series({ id }).get({ query: libraryQuery(library) }));
 
-export const getChapter = (id: number) => unwrap(api.read.api.chapters({ id }).get());
+export const getChapter = (id: number, library = false) => unwrap(api.read.api.chapters({ id }).get({ query: libraryQuery(library) }));
 
 /** Series cover: uploaded, else the first page of its first chapter. */
-export const seriesCoverUrl = (id: number, version?: string | number) =>
-  `/read/api/series/${id}/cover${version !== undefined ? `?v=${encodeURIComponent(String(version))}` : ""}`;
+export const seriesCoverUrl = (id: number, version?: string | number, library = false) =>
+  withLibrary(`/read/api/series/${id}/cover${version !== undefined ? `?v=${encodeURIComponent(String(version))}` : ""}`, library);
 
 /** Page image for the reader: the published result, else the original. */
-export const readPageImageUrl = (id: string, version?: string | number) =>
-  `/read/api/pages/${id}/image${version !== undefined ? `?v=${encodeURIComponent(String(version))}` : ""}`;
+export const readPageImageUrl = (id: string, version?: string | number, library = false) =>
+  withLibrary(`/read/api/pages/${id}/image${version !== undefined ? `?v=${encodeURIComponent(String(version))}` : ""}`, library);
 
 // ── Manage (library editing) ──────────────────────────────────────────────────
 
@@ -422,7 +429,7 @@ export const updateSeries = (id: number, body: {
 
 // ── Cover art: a series may hold several; the pinned one shows, else the newest ──
 
-export const listSeriesCovers = (id: number) => unwrap(api.read.api.series({ id }).covers.get());
+export const listSeriesCovers = (id: number, library = false) => unwrap(api.read.api.series({ id }).covers.get({ query: libraryQuery(library) }));
 
 export const addSeriesCover = (id: number, cover: File, label?: string) =>
   unwrap(api.manage.api.series({ id }).covers.post({ cover, ...(label ? { label } : {}) }));
@@ -438,7 +445,7 @@ export const removeSeriesCover = (id: number, coverId: number) =>
   unwrap(api.manage.api.series({ id }).covers({ coverId }).delete());
 
 /** One particular cover's image, rather than whichever the series currently shows. */
-export const coverArtUrl = (id: number, coverId: number) => `/read/api/series/${id}/covers/${coverId}`;
+export const coverArtUrl = (id: number, coverId: number, library = false) => withLibrary(`/read/api/series/${id}/covers/${coverId}`, library);
 
 export const deleteSeries = (id: number) => unwrap(api.manage.api.series({ id }).delete());
 

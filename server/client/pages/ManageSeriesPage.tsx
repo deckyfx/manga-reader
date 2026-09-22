@@ -32,10 +32,10 @@ export function ManageSeriesPage() {
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
 
-  const seriesQ = useQuery({ queryKey: ["series", seriesId], queryFn: () => getSeries(seriesId), enabled: Number.isFinite(seriesId) });
+  const seriesQ = useQuery({ queryKey: ["series", seriesId, "library"], queryFn: () => getSeries(seriesId, true), enabled: Number.isFinite(seriesId) });
   /** Every mutation here answers with the whole series, so the page refreshes from the response. */
   const applyDetail = (detail: SeriesDetail) => {
-    qc.setQueryData(["series", seriesId], detail);
+    qc.setQueryData(["series", seriesId, "library"], detail);
     void qc.invalidateQueries({ queryKey: ["series"], exact: false, refetchType: "none" });
   };
 
@@ -146,7 +146,7 @@ export function ManageSeriesPage() {
         <div className="flex flex-wrap gap-4 border-b border-gray-800 p-4">
           <div className="flex aspect-2/3 w-28 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-800 bg-gray-950">
             {series.has_cover ? (
-              <img src={seriesCoverUrl(series.id, series.updated_at)} alt="" className="h-full w-full object-cover" />
+              <img src={seriesCoverUrl(series.id, series.updated_at, true)} alt="" className="h-full w-full object-cover" />
             ) : (
               <BookOpen size={24} className="text-gray-700" />
             )}

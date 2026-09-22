@@ -80,7 +80,7 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
       if (cover) {
         await addSeriesCover(detail.series.id, cover);
         // Read back, so what the caller is handed says the series has a cover — it does now
-        detail = await getSeries(detail.series.id);
+        detail = await getSeries(detail.series.id, true);
       }
       return detail;
     },
@@ -99,7 +99,7 @@ export function SeriesForm({ series, onClose, onSaved }: SeriesFormProps) {
   }, [picked]);
 
   // What the cover box shows: a freshly picked file, else the cover this series is showing
-  const preview = picked ?? (series?.has_cover ? seriesCoverUrl(series.id, series.updated_at) : null);
+  const preview = picked ?? (series?.has_cover ? seriesCoverUrl(series.id, series.updated_at, true) : null);
 
   return (
     <Modal

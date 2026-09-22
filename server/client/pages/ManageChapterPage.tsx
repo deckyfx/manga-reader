@@ -34,8 +34,9 @@ export function ManageChapterPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const chapterQ = useQuery({
-    queryKey: ["chapter", chapterId],
-    queryFn: () => getChapter(chapterId),
+    // As the library: a chapter of an adult series is managed whatever this account reads
+    queryKey: ["chapter", chapterId, "library"],
+    queryFn: () => getChapter(chapterId, true),
     enabled: Number.isFinite(chapterId),
     // A page translating here or in the Studio rewrites its image: follow along while any of them is working
     refetchInterval: (query) => (query.state.data?.pages.some((page) => page.status === "queued" || page.status === "running") ? 3000 : false),
@@ -74,14 +75,14 @@ export function ManageChapterPage() {
     mutationFn: (files: File[]) => importChapterPages(chapterId, files),
     onSuccess: (detail) => {
       setSkipped(detail.skipped);
-      qc.setQueryData(["chapter", chapterId], detail);
+      qc.setQueryData(["chapter", chapterId, "library"], detail);
       void qc.invalidateQueries({ queryKey: ["chapter-run", chapterId] });
       void qc.invalidateQueries({ queryKey: ["series"], refetchType: "none" });
     },
   });
   const reorderM = useMutation({
     mutationFn: (ids: string[]) => reorderChapterPages(chapterId, ids),
-    onSuccess: (detail) => qc.setQueryData(["chapter", chapterId], detail),
+    onSuccess: (detail) => qc.setQueryData(["chapter", chapterId, "library"], detail),
   });
   const unfileM = useMutation({
     mutationFn: (pageId: string) => unfilePage(pageId),
@@ -121,7 +122,7 @@ export function ManageChapterPage() {
   const publishChapterM = useMutation({
     mutationFn: () => publishChapterEdits(chapterId),
     onSuccess: (detail) => {
-      qc.setQueryData(["chapter", chapterId], detail);
+      qc.setQueryData(["chapter", chapterId, "library"], detail);
       void qc.invalidateQueries({ queryKey: ["studio-pages"] });
     },
   });
@@ -333,7 +334,7 @@ export function ManageChapterPage() {
               >
                 <Link to={`/read/chapters/${chapterId}/pages/${index + 1}`} className="block aspect-2/3 bg-gray-950">
                   <img
-                    src={readPageImageUrl(page.id, `${page.revision}-${page.updated_at}`)}
+                    src={readPageImageUrl(page.id, `${page.revision}-${page.updated_at}`, true)}
                     alt={page.name ?? `Page ${index + 1}`}
                     loading="lazy"
                     className="h-full w-full object-contain"
@@ -406,7 +407,7 @@ export function ManageChapterPage() {
           onImport={async (urls) => {
             const detail = await importChapterPageUrls(chapterId, urls);
             setSkipped(detail.skipped);
-            qc.setQueryData(["chapter", chapterId], detail);
+            qc.setQueryData(["chapter", chapterId, "library"], detail);
             void qc.invalidateQueries({ queryKey: ["chapter-run", chapterId] });
             void qc.invalidateQueries({ queryKey: ["series"], refetchType: "none" });
             return { imported: detail.imported, skipped: detail.skipped };
@@ -448,7 +449,7 @@ function InboxPicker({ onAdd, adding, keepDrafts, onKeepDrafts }: {
               className="w-24 shrink-0 overflow-hidden rounded-lg border border-gray-800 bg-gray-900 hover:border-indigo-500 disabled:opacity-50"
             >
               <span className="block aspect-2/3 bg-gray-950">
-                <img src={readPageImageUrl(page.id, `${page.revision}-${page.updated_at}`)} alt="" loading="lazy" className="h-full w-full object-contain" />
+                <img src={readPageImageUrl(page.id, `${page.revision}-${page.updated_at}`, true)} alt="" loading="lazy" className="h-full w-full object-contain" />
               </span>
               <span className="block truncate px-1.5 py-1 text-[11px] text-gray-400">{page.name ?? page.id.slice(-8)}</span>
             </button>

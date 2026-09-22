@@ -135,8 +135,8 @@ export function StudioPageEditor() {
   // A page inside a chapter can be walked through in reading order, without going back to Manage each time
   const chapterId = pageQ.data?.page.location?.chapter_id ?? null;
   const chapterQ = useQuery({
-    queryKey: ["chapter", chapterId],
-    queryFn: () => getChapter(chapterId ?? 0),
+    queryKey: ["chapter", chapterId, "library"],
+    queryFn: () => getChapter(chapterId ?? 0, true),
     enabled: chapterId !== null,
   });
   // A page in a workspace walks through that workspace, in its order — including one filed into a chapter, which

@@ -17,7 +17,8 @@ export function ManagePage() {
   const [creating, setCreating] = useState(false);
 
   const query = { q: search.trim() || undefined, sort: "recent" as const };
-  const seriesQ = useQuery({ queryKey: ["series", query], queryFn: () => listSeries(query) });
+  // As the library: adult series are managed like any other, whatever this account reads
+  const seriesQ = useQuery({ queryKey: ["series", query, "library"], queryFn: () => listSeries({ ...query, library: true }) });
   const inboxQ = useQuery({ queryKey: ["inbox"], queryFn: listInbox });
 
   const deleteM = useMutation({
@@ -104,7 +105,7 @@ export function ManagePage() {
                   className="flex h-28 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md bg-gray-950"
                 >
                   {entry.has_cover ? (
-                    <img src={seriesCoverUrl(entry.id, entry.updated_at)} alt="" loading="lazy" className="h-full w-full object-cover" />
+                    <img src={seriesCoverUrl(entry.id, entry.updated_at, true)} alt="" loading="lazy" className="h-full w-full object-cover" />
                   ) : (
                     <BookOpen size={22} className="text-gray-700" />
                   )}
