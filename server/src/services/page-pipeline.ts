@@ -310,10 +310,21 @@ export class PagePipeline {
 
     const regions = job.blocks.filter((b) => b.kind === kind && b.include);
     const total = job.blocks.filter((b) => b.kind === kind).length;
+    /**
+     * Self-checks this pass makes untrue: blocks of this kind it doesn't clean (they were left out), and — when text
+     * is cleaned — every sound effect, since the pass that cleaned them was just thrown away with clean-sfx.png.
+     */
+    const dropStaleChecks = (): void => {
+      for (const block of job.blocks) {
+        if ((block.kind === kind && !regions.includes(block)) || (kind === "text" && block.kind === "sfx")) delete block.clean;
+      }
+    };
     const hasPainted = kind === "text" && existsSync(this.path(MASK_LAYER_FILES.add));
     if (regions.length === 0 && !hasPainted) {
       // Still write the output: later stages choose their input by file existence
       await sharp(this.path(input)).png().toFile(this.path(output));
+      dropStaleChecks();
+      await this.writeJob(job);
       this.report({ stage: "cleaning", message: `No ${label} to clean`, fraction: 1 });
       return null;
     }
@@ -340,6 +351,7 @@ export class PagePipeline {
     // Measured against the mask the clean actually removed, painted additions included
     const maskPng = await maskToPng(target, width, height);
     const ink = await leftoverInk(this.path(output), maskPng, regions);
+    dropStaleChecks();
     for (const [i, block] of regions.entries()) {
       block.clean = { method: methods[i] ?? "lama", ink: ink[i]?.ink ?? 0 };
     }

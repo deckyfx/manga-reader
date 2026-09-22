@@ -37,6 +37,21 @@ const job = (): PageJob => ({
   blocks: [{ id: 1, kind: "text", ...BLOCK, include: true, source_text: null, translated_text: null, clean: { method: "flat", ink: 1 } }],
 });
 
+describe("stale self-checks", () => {
+  test("a block left out of the clean, and the sound effects a text clean threw away, lose theirs", async () => {
+    const dir = await pageFolder("clean");
+    await Bun.write(join(dir, "original.png"), await Bun.file(join(dir, "clean-text.png")).arrayBuffer());
+    const pipeline = new PagePipeline(dir);
+    const current = job();
+    // Nothing to clean: one text block excluded, one sound effect checked by an earlier SFX pass
+    current.blocks[0]!.include = false;
+    current.blocks.push({ id: 2, kind: "sfx", x: 0, y: 0, w: 10, h: 10, include: true, source_text: null, translated_text: null, clean: { method: "lama", ink: 0.5 } });
+    await pipeline.clean(current, "text");
+    expect(current.blocks[0]?.clean).toBeUndefined();
+    expect(current.blocks[1]?.clean).toBeUndefined();
+  });
+});
+
 describe("the clean self-check", () => {
   test("a page that still shows its lettering measures as inked", async () => {
     const pipeline = new PagePipeline(await pageFolder("inked"));
