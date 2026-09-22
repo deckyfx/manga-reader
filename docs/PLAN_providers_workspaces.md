@@ -199,23 +199,18 @@ published, and then that copy's result replaces the chapter page.
 | Download images | background worker `fetch` (host permission covers CORS) | CDNs are cross-origin; the worker isn't bound by the page's CSP |
 | Upload to the server | background worker, typed Eden client (`extension/src/api.ts`) | Existing API key + server URL; the same "don't send the key over plain http" and "no redirects" rules apply |
 
-- **Referer — settled for rawkuma (2026-09-20):** its CDN (`kuma.kyut.dev`) doesn't check it. Tested by the other
-  session against a real chapter image: no Referer, no user agent, a wrong Referer and the right one all returned the
-  same 200 and the same 318,148 bytes. So the downloader sends no spoofed headers and needs **no**
-  `declarativeNetRequest` permission; a plain worker `fetch` under the existing `<all_urls>` grant is enough. Add the
-  rule only when a provider turns out to need it, and re-test for exhentai's H@H nodes (P5), which are a different
-  animal.
-  If one ever does: `fetch()` can't set `Referer` (a forbidden header name — silently dropped), so the only MV3 route
-  is a `declarativeNetRequest` session rule with `modifyHeaders`, using `declarativeNetRequestWithHostAccess` (the
-  narrower permission, since `<all_urls>` is already granted). **Still unconfirmed:** whether such a rule matches the
-  extension's *own* fetches rather than only page-initiated ones — isolate that with one rule and one fetch before
-  building on it.
-- **Worker lifetime:** MV3 workers sleep when idle. The import is a queue persisted in `chrome.storage.session`
-  (chapter, address list, per-page status, workspace id), so a woken worker resumes where it stopped. A long gallery
-  runs in an **offscreen document** if the spike shows the worker gets cut off mid-download.
-- **Pacing:** images download 2 at a time, with the extractor's `minIntervalMs` between requests, which matters for
-  exhentai's image quota. Batches of about 5 pages are uploaded as they arrive, so the server sees progress early and
-  the extension doesn't hold the whole chapter in memory.
+- **Referer — settled (rawkuma 2026-09-20, exhentai 2026-09-21):** neither site's image host checks it. rawkuma's CDN
+  (`kuma.kyut.dev`) returned the same 200 and bytes with no Referer, no user agent, a wrong Referer and the right one,
+  and exhentai's H@H nodes served imports with none. So the downloader sends no spoofed headers and the extension has
+  **no** `declarativeNetRequest` permission; a plain worker `fetch` under the existing `<all_urls>` grant is enough.
+  (Should a future provider need one: `fetch()` can't set `Referer`, a forbidden header name, so it would take a
+  `declarativeNetRequest` session rule — to be tested against the extension's own fetches before relying on it.)
+- **Worker lifetime — settled:** MV3 workers sleep when idle. The import is a job persisted in `chrome.storage.session`
+  (address list, per-page status, workspace id), so a woken worker resumes from the first pending page. Long galleries
+  import this way without an offscreen document.
+- **Pacing — as built:** a page at a time through resolve → download → upload, five in flight, with one pacing clock
+  per site at the extractor's `minIntervalMs` (galleries pace the page lookups; readers pace the downloads). Each page
+  uploads as soon as it is downloaded, so the server sees progress at once and translation follows the pages in.
 
 ### 6.3 Extractors (pluggable)
 
