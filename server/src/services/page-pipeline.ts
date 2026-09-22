@@ -441,7 +441,11 @@ export class PagePipeline {
     const checked = job.blocks.filter((b) => b.clean);
     if (checked.length === 0) return;
     const { mask, width, height } = await this.effectiveMask();
-    const ink = await leftoverInk(this.path(output), await maskToPng(mask, width, height), checked);
+    // Through the same ownership filter the clean used, so a neighbour's strokes inside this block's box aren't
+    // counted against it
+    const selection = job.blocks.map((b) => ({ ...b, include: checked.includes(b) }));
+    const target = selectBlockMask(mask, width, height, selection);
+    const ink = await leftoverInk(this.path(output), await maskToPng(target, width, height), checked);
     for (const [i, block] of checked.entries()) block.clean = { method: block.clean!.method, ink: ink[i]?.ink ?? 0 };
   }
 

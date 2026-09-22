@@ -205,7 +205,7 @@ export function areaFromStored(stored: StoredArea): TextArea {
 function tokenize(text: string, uppercase: boolean): Token[] {
   const tokens: Token[] = [];
   let broken = false;
-  for (const [row, line] of (uppercase ? text.toUpperCase() : text).split(/\r?\n/).entries()) {
+  for (const [row, line] of (uppercase ? text.toUpperCase() : text).split(/\r\n|[\r\n]/).entries()) {
     const words = line.split(/[^\S\r\n]+/).filter(Boolean);
     if (words.length === 0) {
       broken ||= row > 0;

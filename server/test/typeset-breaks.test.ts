@@ -41,7 +41,8 @@ describe("typed line breaks", () => {
     expect(wrapped.length).toBeGreaterThan(2);
   });
 
-  test("windows line endings count as one break", () => {
+  test("windows and old-mac line endings each count as one break", () => {
     expect(lines("Hello\r\nthere")).toEqual(["HELLO", "THERE"]);
+    expect(lines("Hello\rthere")).toEqual(["HELLO", "THERE"]);
   });
 });
