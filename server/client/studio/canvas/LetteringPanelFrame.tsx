@@ -42,8 +42,9 @@ export function LetteringPanelFrame({ spot, pinned, onPin, hostRef, children }: 
 
   return (
     <div
-      className="absolute z-20 w-[300px] rounded-lg border border-violet-500/40 bg-gray-900/95 shadow-2xl backdrop-blur flex flex-col"
-      style={{ left: spot.left, top: spot.top }}
+      className="absolute z-20 rounded-lg border border-violet-500/40 bg-gray-900/95 shadow-2xl backdrop-blur flex flex-col"
+      // The same width the drag clamp keeps inside the canvas area
+      style={{ left: spot.left, top: spot.top, width: PANEL_WIDTH }}
     >
       <div
         onPointerDown={startPanelDrag}
