@@ -99,6 +99,7 @@ export function BlockEditor({ pageId, block, disabled, onChanged, trackSave, aft
         onBlur={() => translation.dirty && trackSave(saveM.mutateAsync({ translated_text: translation.text }))}
         rows={Math.min(6, Math.max(2, Math.ceil(translation.text.length / 40)))}
         placeholder="Translation"
+        title="Enter starts a new line in the lettering; otherwise the text wraps to the bubble"
         className="w-full resize-y bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-indigo-500"
       />
       <StyleEditor pageId={pageId} block={block} disabled={locked} onChanged={onChanged} trackSave={trackSave} setBlockStyle={setBlockStyle} />
