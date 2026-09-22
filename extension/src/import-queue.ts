@@ -310,8 +310,12 @@ async function keepRunGoing(job: ImportJob, access: { serverUrl: string; apiKey:
 async function processJob(): Promise<void> {
   if (working) return;
   working = true;
-  const job = await loadJob();
+  // Read inside the try: a storage read that throws must still reach the finally, or `working` stays set and no
+  // import could start again until the service worker restarts
+  let loaded: ImportJob | null = null;
   try {
+    const job = await loadJob();
+    loaded = job;
     if (!job || job.finishedAt) return;
     const access = await loadServerAccess();
     const queue = job.pages.filter((page) => page.state === "pending");
@@ -351,10 +355,10 @@ async function processJob(): Promise<void> {
     await saveJob(job);
     showBadge(job);
   } catch (err) {
-    if (job) {
-      job.error = err instanceof Error ? err.message : String(err);
-      await saveJob(job);
-      showBadge(job);
+    if (loaded) {
+      loaded.error = err instanceof Error ? err.message : String(err);
+      await saveJob(loaded);
+      showBadge(loaded);
     }
   } finally {
     working = false;
