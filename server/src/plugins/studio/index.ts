@@ -37,6 +37,7 @@ import { runExclusiveResult, withPageLock } from "@/queue/page-queue";
 import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
 import { historyFile, listHistory, restoreResult } from "@/services/page-history";
+import { finalizePage, planFinalize } from "@/services/page-finalize";
 import { pageLocation, pageLocations } from "@/services/page-location";
 import { publishBlocker, publishDraft } from "@/services/draft-publish";
 import { discardPage } from "@/services/page-discard";
@@ -198,6 +199,20 @@ const PageDetail = t.Object({ page: PageSummary, stages: t.Array(StageSchema), b
 
 const PublishResult = t.Object({ revision: t.Integer(), notified: t.Integer() });
 
+const FinalizeResult = t.Object({
+  pages: t.Array(t.Object({
+    id: t.String(),
+    ok: t.Boolean(),
+    /** Why this page was left as it was; null when it was (or, on a dry run, would be) finalized. */
+    reason: t.Nullable(t.String()),
+    /** What was (or would be) deleted, relative to the page's folder. */
+    files: t.Array(t.String()),
+    bytes: t.Integer(),
+  })),
+  /** Space freed (or that would be) across all of them. */
+  bytes: t.Integer(),
+});
+
 function toStage(row: PageStageRow) {
   return { stage: row.stage, status: row.status, file: row.file, error: row.errorMessage, updated_at: row.updatedAt };
 }
@@ -223,10 +238,18 @@ async function pageDetail(id: string) {
 }
 
 /** Why a page can't be edited right now (missing, or still running in the pipeline), as a status + message. */
-async function editablePage(id: string): Promise<{ page: Page } | { code: 404 | 409; error: string }> {
+/**
+ * The page, if it can be worked on now. A finalized page can't — its working state is gone — except that one which
+ * kept its original may be redone (`redo`), which runs every stage again from that original.
+ */
+async function editablePage(id: string, { redo = false } = {}): Promise<{ page: Page } | { code: 404 | 409; error: string }> {
   const page = await PageStore.findById(id);
   if (!page) return { code: 404, error: "page not found" };
   if (page.status === "queued" || page.status === "running") return { code: 409, error: "page is still being translated" };
+  if (page.finalizedAt !== null) {
+    if (page.rawDeleted) return { code: 409, error: "this page is finalized without its original, so it can't be changed" };
+    if (!redo) return { code: 409, error: "this page is finalized — redo it to work on it again" };
+  }
   return { page };
 }
 
@@ -645,21 +668,51 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
   )
 
   .post(
+    "/pages/finalize",
+    async ({ body }) => {
+      const deleteRaw = body.delete_raw ?? false;
+      const pages: { id: string; ok: boolean; reason: string | null; files: string[]; bytes: number }[] = [];
+      // One page at a time, each under its own lock, read fresh there: a page may have been edited, run or finalized
+      // since the list was shown
+      for (const id of [...new Set(body.ids)]) {
+        const plan = await withPageLock(id, async () => {
+          const page = await PageStore.findById(id);
+          if (!page) return { ok: false as const, reason: "page not found" };
+          return body.dry_run ? planFinalize(page, deleteRaw) : finalizePage(page, deleteRaw);
+        });
+        pages.push(plan.ok ? { id, ok: true, reason: null, files: plan.files, bytes: plan.bytes } : { id, ok: false, reason: plan.reason, files: [], bytes: 0 });
+      }
+      return { pages, bytes: pages.reduce((sum, page) => sum + page.bytes, 0) };
+    },
+    {
+      body: t.Object({
+        ids: t.Array(IdParam, { minItems: 1, maxItems: 200 }),
+        /** Delete the original too: the page becomes read-only for good, and the image is no longer recognised. */
+        delete_raw: t.Optional(t.Boolean()),
+        /** Report what would be deleted and the space freed, changing nothing. */
+        dry_run: t.Optional(t.Boolean()),
+      }),
+      response: { 200: FinalizeResult },
+    },
+  )
+
+  .post(
     "/pages/:id/rerun",
     async ({ params, body, status }) => {
       // Admission under the page's lock: it marks the page queued, and a publish holding the lock must finish
       // deciding on the page it read before that happens. The run itself queues behind, outside this lock.
       const check = await withPageLock(params.id, async () => {
-        const editable = await editablePage(params.id);
+        // Running again is also how a finalized page (original kept) is redone
+        const editable = await editablePage(params.id, { redo: true });
         if ("code" in editable) return editable;
-        return {
-          ...editable,
-          result: await runStoredPage(params.id, {
-            source: editable.page.source,
-            cleanSfx: body?.clean_sfx ?? editable.page.cleanSfx,
-            force: true,
-          }),
-        };
+        const result = await runStoredPage(params.id, {
+          source: editable.page.source,
+          cleanSfx: body?.clean_sfx ?? editable.page.cleanSfx,
+          force: true,
+        });
+        // Only once the run is really under way: a refused start leaves the page finalized as it was
+        if (result.ok && editable.page.finalizedAt !== null) await PageStore.clearFinalized(params.id);
+        return { ...editable, result };
       });
       if ("code" in check) return status(check.code, { error: check.error });
       const { result } = check;

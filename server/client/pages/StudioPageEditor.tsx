@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlignCenter, AlignLeft, AlignRight, ArrowLeft, ChevronLeft, ChevronRight, Eraser, FolderInput, History, Languages, Loader2, Megaphone, PanelRightClose, PanelRightOpen, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, ChevronLeft, ChevronRight, Eraser, FolderInput, History, Languages, Loader2, Megaphone, PanelRightClose, PanelRightOpen, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
 import {
   deleteBlock,
   getChapter,
@@ -26,6 +26,7 @@ import {
 } from "../api";
 import { ActionsMenu, type MenuAction } from "../components/ActionsMenu";
 import { ChapterPicker } from "../components/ChapterPicker";
+import { FinalizeDialog } from "../components/FinalizeDialog";
 import { DiscardPageDialog } from "../components/DiscardPageDialog";
 import { useConfirm } from "../components/ConfirmDialog";
 import { JobProgress } from "../components/JobProgress";
@@ -138,6 +139,8 @@ export function StudioPageEditor() {
   const navigate = useNavigate();
   const [discarding, setDiscarding] = useState(false);
   const [filing, setFiling] = useState(false);
+  /** The finalize dialog: finalizing the page, or (already finalized) deleting its original too. */
+  const [finalizing, setFinalizing] = useState<"finalize" | "raw" | null>(null);
   const confirm = useConfirm();
   // A page inside a chapter can be walked through in reading order, without going back to Manage each time
   const chapterId = pageQ.data?.page.location?.chapter_id ?? null;
@@ -365,8 +368,16 @@ export function StudioPageEditor() {
       separated: true,
     },
     {
+      key: "finalize",
+      label: "Finalize…",
+      icon: <Archive size={14} />,
+      hint: "Remove the working files, keeping the final image",
+      onSelect: () => setFinalizing("finalize"),
+      unavailable: unavailableWhen(translating, [!page.has_result, "No finished image yet"]),
+    },
+    {
       key: "rerun",
-      label: "Run again…",
+      label: page.finalized ? "Redo job…" : "Run again…",
       icon: <RotateCcw size={14} />,
       hint: "Detect, read, translate and clean the page again from its original",
       onSelect: () => {
@@ -394,6 +405,24 @@ export function StudioPageEditor() {
       danger: true,
     },
   ];
+
+  // A finalized page has no working state left: redo it (original kept), delete its original, or delete it
+  const menuActions: MenuAction[] = page.finalized
+    ? [
+        ...pageActions.filter((action) => action.key === "rerun" && page.raw_kept),
+        ...(page.raw_kept
+          ? [{
+              key: "delete-raw",
+              label: "Delete the original…",
+              icon: <Archive size={14} />,
+              hint: "Free its space; the page becomes read-only for good",
+              onSelect: () => setFinalizing("raw"),
+              unavailable: unavailableWhen(translating),
+            }]
+          : []),
+        ...pageActions.filter((action) => action.key === "delete"),
+      ]
+    : pageActions;
 
   return (
     <div className="flex flex-col h-full">
@@ -511,11 +540,13 @@ export function StudioPageEditor() {
               Published rev {published.revision} · {published.notified} open tab{published.notified === 1 ? "" : "s"} updated
             </span>
           )}
-          <ActionsMenu actions={pageActions} />
+          <ActionsMenu actions={menuActions} />
         </div>
       </div>
 
-      {busy ? (
+      {page.finalized && !busy ? (
+        <FinalizedView pageId={page.id} rawKept={page.raw_kept} version={version} />
+      ) : busy ? (
         <ProcessingView pageId={page.id} status={page.status} version={version} job={job} />
       ) : (
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
@@ -634,6 +665,15 @@ export function StudioPageEditor() {
         </aside>
         )}
       </div>
+      )}
+
+      {finalizing && (
+        <FinalizeDialog
+          pageIds={[page.id]}
+          onlyRaw={finalizing === "raw"}
+          onClose={() => setFinalizing(null)}
+          onDone={() => setFinalizing(null)}
+        />
       )}
 
       {filing && (
@@ -905,6 +945,21 @@ function BlockNeeds({ block }: { block: StudioBlock }) {
     return <span className="rounded-full bg-amber-900/50 px-1.5 text-[10px] text-amber-300" title="Changed since the page was last burned">re-burn</span>;
   }
   return null;
+}
+
+/** A finalized page: only its final image is left, and what can still be done with it. */
+function FinalizedView({ pageId, rawKept, version }: { pageId: string; rawKept: boolean; version: string | number }) {
+  return (
+    <div className="flex flex-1 min-h-0 flex-col items-center gap-3 overflow-y-auto p-6">
+      <p className="max-w-xl text-center text-sm text-gray-400">
+        This page is finalized: its working files, regions and stages were removed, and this is its final image.{" "}
+        {rawKept
+          ? "The original is kept, so Redo job in the actions menu can rebuild it."
+          : "Its original was deleted too, so it is read-only."}
+      </p>
+      <img src={pageFileUrl(pageId, "result.png", version)} alt="The finished page" className="max-h-[80vh] max-w-full object-contain" />
+    </div>
+  );
 }
 
 /** One sound-effect region: selectable, with its include-in-cleaning toggle and optional new lettering. */

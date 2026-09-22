@@ -1,10 +1,13 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, FolderInput, FolderPlus, Layers, Loader2, Plus, Search, Trash2, X, Link2 } from "lucide-react";
+import { BookOpen, CheckSquare, FolderInput, FolderPlus, Layers, Loader2, Plus, Search, Trash2, X, Link2 } from "lucide-react";
 import { createWorkspace, importWorkspacePageUrls, listPages, listWorkspaces, pageFileUrl, type PageScope, type StudioPageSummary } from "../api";
 import { ChapterPicker } from "../components/ChapterPicker";
 import { DiscardPageDialog } from "../components/DiscardPageDialog";
+import { FinalizeDialog } from "../components/FinalizeDialog";
+import { SelectionBar } from "../components/SelectionBar";
+import { usePageSelection } from "../hooks/usePageSelection";
 import { Modal } from "../components/Modal";
 import { AddPageUrlsDialog } from "../components/AddPageUrlsDialog";
 import { NewPageDialog } from "../components/NewPageDialog";
@@ -47,6 +50,9 @@ export function StudioPagesPage() {
   const [search, setSearch] = useState("");
   const [filing, setFiling] = useState<StudioPageSummary | null>(null);
   const [discarding, setDiscarding] = useState<StudioPageSummary | null>(null);
+  const selection = usePageSelection();
+  /** The picked pages, while the finalize dialog asks about them. */
+  const [finalizingIds, setFinalizingIds] = useState<string[] | null>(null);
   const [scope, setScopeState] = useState<PageScope>(readScope);
   const [newWorkspace, setNewWorkspace] = useState<string | null>(null);
   const [importingUrls, setImportingUrls] = useState(false);
@@ -117,6 +123,16 @@ export function StudioPagesPage() {
           )}
         </label>
         <button
+          onClick={() => (selection.selecting ? selection.stop() : selection.start())}
+          aria-pressed={selection.selecting}
+          title="Pick pages to finalize together"
+          className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+            selection.selecting ? "border-indigo-500 text-indigo-300" : "border-gray-700 text-gray-300 hover:bg-gray-800"
+          }`}
+        >
+          <CheckSquare size={14} /> Select
+        </button>
+        <button
           onClick={() => setNewWorkspace("")}
           title="A folder of pages worked on together"
           className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-300 transition-colors hover:bg-gray-800"
@@ -137,6 +153,16 @@ export function StudioPagesPage() {
           <Plus size={14} /> New page
         </button>
       </div>
+
+      {selection.selecting && (
+        <SelectionBar
+          count={selection.selected.size}
+          total={pages.length}
+          onSelectAll={() => selection.selectAll(pages.map((page) => page.id))}
+          onFinalize={() => setFinalizingIds([...selection.selected])}
+          onCancel={selection.stop}
+        />
+      )}
 
       <div className="flex-1 overflow-y-auto p-4">
         {workspacesQ.isError && (
@@ -208,6 +234,9 @@ export function StudioPagesPage() {
               <StudioPageCard
                 key={page.id}
                 page={page}
+                selecting={selection.selecting}
+                selected={selection.selected.has(page.id)}
+                onToggleSelect={() => selection.toggle(page.id)}
                 actions={
                   <>
                     {page.location ? (
@@ -336,6 +365,19 @@ export function StudioPagesPage() {
             <p className="mt-2 text-xs text-gray-500">A folder of pages worked on together: add pages to it, run them all, then file them into a chapter.</p>
           </form>
         </Modal>
+      )}
+
+      {finalizingIds && (
+        <FinalizeDialog
+          pageIds={finalizingIds}
+          onClose={() => setFinalizingIds(null)}
+          onDone={(report) => {
+            setFinalizingIds(null);
+            selection.stop();
+            const done = report.pages.filter((page) => page.ok).length;
+            toast.info(`Finalized ${done} page${done === 1 ? "" : "s"}`);
+          }}
+        />
       )}
 
       {discarding && (

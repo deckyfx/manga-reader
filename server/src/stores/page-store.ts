@@ -82,7 +82,8 @@ export class PageStore {
    */
   static async findOrCreate(imageHash: string, source: string): Promise<{ page: Page; created: boolean }> {
     // Loose only: a workspace's page belongs to that workspace, and must not be handed back to the extension
-    const inbox = and(eq(pages.imageHash, imageHash), isNull(pages.chapterId), isNull(pages.workspaceId));
+    // A page finalized without its original can't be redone, so it no longer stands for this image: a new one starts
+    const inbox = and(eq(pages.imageHash, imageHash), isNull(pages.chapterId), isNull(pages.workspaceId), eq(pages.rawDeleted, false));
     const existing = await db.query.pages.findFirst({ where: inbox, orderBy: desc(pages.createdAt) });
     if (existing) return { page: existing, created: false };
     const [row] = await db.insert(pages).values({ id: randomUUIDv7(), imageHash, source }).returning();
@@ -298,6 +299,23 @@ export class PageStore {
       .returning({ revision: pages.revision });
     if (!row) throw new Error("page not found");
     return row.revision;
+  }
+
+  /**
+   * Finalizes a page's row: flagged, and its blocks and stage state gone with the working files they described — in one
+   * transaction, so nothing ever sees a finalized page that still claims to have stages to run.
+   */
+  static markFinalized(id: string, rawDeleted: boolean): void {
+    db.transaction((tx) => {
+      tx.update(pages).set({ finalizedAt: sql`(datetime('now'))`, rawDeleted, updatedAt: sql`(datetime('now'))` }).where(eq(pages.id, id)).run();
+      tx.delete(pageBlocks).where(eq(pageBlocks.pageId, id)).run();
+      tx.delete(pageStages).where(eq(pageStages.pageId, id)).run();
+    });
+  }
+
+  /** A finalized page (original kept) being redone: it is a working page again. */
+  static async clearFinalized(id: string): Promise<void> {
+    await db.update(pages).set({ finalizedAt: null, updatedAt: sql`(datetime('now'))` }).where(eq(pages.id, id));
   }
 
   /** Pages whose publish state was never recorded: every page of a library from before it was, and none after. */

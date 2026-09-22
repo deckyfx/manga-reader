@@ -246,6 +246,16 @@ export const pages = sqliteTable("pages", {
    */
   publishedSeq: integer("published_seq"),
   /**
+   * When the page was finalized: its working files, stage state and blocks were removed, keeping the final image (and
+   * the original unless `rawDeleted`). A flag, not a status — a finalized page is still "done". Null = a working page.
+   */
+  finalizedAt: text("finalized_at"),
+  /**
+   * Finalized with its original deleted too: read-only for good — no edit, re-run or publish — and no longer matched by
+   * image hash, so the same image sent again starts a new page. With the original kept, "Redo job" runs it again.
+   */
+  rawDeleted: integer("raw_deleted", { mode: "boolean" }).notNull().default(false),
+  /**
    * The Studio workspace this page is being worked on in; null = loose. Deleting a workspace never deletes its pages:
    * they fall back to loose. Within a workspace, `sortOrder` is the order the pages were imported in.
    */

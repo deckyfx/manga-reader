@@ -41,6 +41,10 @@ export const PageSummary = t.Object({
   workspace_id: t.Nullable(t.Integer()),
   /** For a draft copy of a chapter page: the page it replaces when published. */
   origin_page_id: t.Nullable(t.String()),
+  /** Finalized: its working files, stages and blocks were removed, keeping the final image. */
+  finalized: t.Boolean(),
+  /** Its original is still there, so a finalized page can be redone. */
+  raw_kept: t.Boolean(),
   /** Series, chapter and reading position, for pages filed into a chapter. */
   location: t.Optional(t.Nullable(PageLocationSchema)),
 });
@@ -67,5 +71,7 @@ export function toSummary(page: Page) {
     name: page.name,
     workspace_id: page.workspaceId,
     origin_page_id: page.originPageId,
+    finalized: page.finalizedAt !== null,
+    raw_kept: !page.rawDeleted,
   };
 }

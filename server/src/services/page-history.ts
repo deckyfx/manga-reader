@@ -88,7 +88,9 @@ export function publishedFile(pageId: string): string | null {
  * those was published — by this page, or, for a Studio draft, over the chapter page it replaces (see draft-publish).
  * File times used to stand in for this, which meant a publish recording an old burn had to fake its snapshot's time.
  */
-export function hasUnpublishedEdits(page: Pick<Page, "id" | "resultSeq" | "publishedSeq">): boolean {
+export function hasUnpublishedEdits(page: Pick<Page, "id" | "resultSeq" | "publishedSeq" | "finalizedAt">): boolean {
+  // A finalized page is finished: whatever it holds is final, with nothing left to publish
+  if (page.finalizedAt !== null) return false;
   if (!existsSync(join(pageDir(page.id), "result.png"))) return false;
   return page.publishedSeq !== page.resultSeq;
 }

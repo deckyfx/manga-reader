@@ -38,6 +38,8 @@ const rescanRequested = new Set<string>();
 
 /** Whether a page still needs the pipeline: never translated, failed, missing its result, or a stage went stale. */
 export async function needsRun(page: Page): Promise<boolean> {
+  // Finalized pages are finished on purpose; redoing one is a deliberate "Run again", never part of a batch
+  if (page.finalizedAt !== null) return false;
   if (page.status !== "done") return true;
   if (!existsSync(join(pageDir(page.id), "result.png"))) return true;
   const stages = await PageStore.listStages(page.id);
@@ -50,6 +52,8 @@ export async function pagesNeedingRun(pages: readonly Page[], force: boolean): P
   const selected: Page[] = [];
   for (const page of pages) {
     if (!existsSync(join(pageDir(page.id), "original.png"))) continue;
+    // Not even when forced: "run everything again" means the working pages, not the ones someone finished
+    if (page.finalizedAt !== null) continue;
     if (force || (await needsRun(page))) selected.push(page);
   }
   return selected;
