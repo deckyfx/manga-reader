@@ -1,6 +1,6 @@
 {
   "name": "selfhost-ocr-extension",
-  "version": "1.4.25",
+  "version": "1.4.26",
   "private": true,
   "type": "module",
   "scripts": {
