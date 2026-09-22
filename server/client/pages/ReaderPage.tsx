@@ -33,8 +33,9 @@ function sideAt(e: { clientX: number; currentTarget: HTMLElement }): "left" | "r
 }
 
 /**
- * The reader: one page at a time, right to left by default (the volume decides). Click the sides or use the arrow
- * keys to turn pages; neighbouring pages are preloaded, and the chapter's last page steps into the next chapter.
+ * The reader: one page at a time, right to left by default (the volume decides). Click the right side for the next
+ * page and the left for the previous, or use the arrow keys (which follow the reading direction); neighbouring pages
+ * are preloaded, and the chapter's last page steps into the next chapter.
  */
 export function ReaderPage() {
   const { id = "", n = "1" } = useParams();
@@ -211,11 +212,13 @@ export function ReaderPage() {
       <div className="flex-1 min-h-0 relative">
         <div
           ref={scrollerRef}
-          className={`absolute inset-0 ${fit === "height" ? "overflow-hidden" : "overflow-auto"}`}
+          className={`absolute inset-0 ${fit === "height" ? "overflow-hidden" : "overflow-auto"} ${hoverSide ? "cursor-pointer" : ""}`}
+          // Right is next and left is previous whatever the reading direction: the side you tap is where you're going
+          // in the chapter, not across the spread. The arrow keys still follow the direction (see above)
           onClick={(e) => {
             const side = sideAt(e);
-            if (side === "left") (rtl ? next : previous)();
-            else if (side === "right") (rtl ? previous : next)();
+            if (side === "left") previous();
+            else if (side === "right") next();
           }}
           onMouseMove={(e) => setHoverSide(sideAt(e))}
           onMouseLeave={() => setHoverSide(null)}
@@ -232,15 +235,15 @@ export function ReaderPage() {
 
         {/* The keyboard's and a screen reader's way in, and a hint for the mouse; they stay put while the page scrolls */}
         <button
-          onClick={rtl ? next : previous}
-          aria-label={rtl ? "Next page" : "Previous page"}
+          onClick={previous}
+          aria-label="Previous page"
           className={`absolute left-2 top-1/2 -translate-y-1/2 rounded-full p-1 transition-opacity hover:opacity-100 focus-visible:opacity-100 ${hoverSide === "left" ? "opacity-100" : "opacity-0"}`}
         >
           <ChevronLeft size={28} className="text-white/70 drop-shadow" />
         </button>
         <button
-          onClick={rtl ? previous : next}
-          aria-label={rtl ? "Previous page" : "Next page"}
+          onClick={next}
+          aria-label="Next page"
           className={`absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 transition-opacity hover:opacity-100 focus-visible:opacity-100 ${hoverSide === "right" ? "opacity-100" : "opacity-0"}`}
         >
           <ChevronRight size={28} className="text-white/70 drop-shadow" />
