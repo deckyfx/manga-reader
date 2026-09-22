@@ -1,28 +1,5 @@
-import { useCallback, useEffect, useImperativeHandle, useReducer, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
+import { useCallback, useEffect, useImperativeHandle, useReducer, useRef, useState } from "react";
 import { Canvas, Circle, Ellipse, FabricImage, Line, Point, Polyline, Rect, util, type FabricObject } from "fabric";
-import {
-  ALargeSmall,
-  Brush,
-  Circle as EllipseIcon,
-  Eye,
-  EyeOff,
-  GripHorizontal,
-  LocateFixed,
-  Maximize,
-  Shapes,
-  MousePointer2,
-  MoveHorizontal,
-  MoveVertical,
-  Pentagon,
-  Redo2,
-  Square,
-  Trash2,
-  Type,
-  Undo2,
-  WandSparkles,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react";
 import {
   createBlock,
   deleteBlock,
@@ -31,10 +8,8 @@ import {
   updateBlock,
   updateBlockGeometry,
   type BlockGeometry,
-  type LetteringPaths,
   type MaskLayerName,
   type TextStyle,
-  type StudioBlock,
   type StudioPageDetail,
 } from "../../api";
 import {
@@ -47,125 +22,39 @@ import {
   pagePoint,
   polygonGeometry,
   regionKey,
-  regionObject,
   REGION_COLORS,
-  type PageSize,
   type RegionKind,
 } from "./geometry";
 import { CommandHistory, type Command } from "./history";
-import { MaskLayers, mergeAreas, type Area, type StrokeRecord } from "./mask-layers";
-import type { LetteringItem } from "../text/typesetter";
+import { MaskLayers, type Area, type StrokeRecord } from "./mask-layers";
 import { LetteringObject, letteringIdOf } from "./lettering-object";
 import type { Toolset } from "../toolset";
+import {
+  DEFAULT_BRUSH,
+  isTyping,
+  MAX_ZOOM,
+  MIN_REGION,
+  MIN_ZOOM,
+  PANEL_OUTER_HEIGHT,
+  PANEL_WIDTH,
+  readWheelMode,
+  WHEEL_MAX_DELTA,
+  WHEEL_MODE_KEY,
+  WHEEL_ZOOM_RATE,
+  type CanvasActions,
+  type EditMode,
+  type Tool,
+  type WheelMode,
+} from "./config";
 
-export type Tool = "select" | "rect" | "ellipse" | "polygon" | "brush";
+import { CanvasToolbar } from "./CanvasToolbar";
+import { LetteringPanelFrame } from "./LetteringPanelFrame";
+import { recleanPlan, syncLettering, syncRegions, type Entry } from "./layer-sync";
+import type { PageCanvasHandle, PageCanvasProps } from "./props";
+import { useCanvasShortcuts } from "./useCanvasShortcuts";
 
-/** Regions: detection areas and the mask. Lettering: the translated text floating on the page. */
-export type EditMode = "regions" | "lettering";
-
-/** What the mouse wheel does without modifiers; Ctrl/Cmd + wheel always zooms, Shift switches direction. */
-type WheelMode = "zoom" | "vertical" | "horizontal";
-
-const WHEEL_MODE_KEY = "studio-canvas-wheel-mode";
-
-/** Saved wheel mode; storage can be unavailable (private mode), so fall back to scrolling up/down. */
-function readWheelMode(): WheelMode {
-  try {
-    const saved = localStorage.getItem(WHEEL_MODE_KEY);
-    return saved === "zoom" || saved === "horizontal" ? saved : "vertical";
-  } catch {
-    return "vertical";
-  }
-}
-
-const MIN_ZOOM = 0.05;
-const MAX_ZOOM = 8;
-/** Zoom speed per wheel pixel: one ordinary wheel notch (~100px) zooms exactly 10%, about 7 notches to double. */
-const WHEEL_ZOOM_RATE = Math.log(1.1) / 100;
-/** Largest wheel delta (pixels) honoured per event, so fast flicks and hi-res wheels don't jump several levels. */
-const WHEEL_MAX_DELTA = 300;
-/** Drawn regions smaller than this (page pixels) are treated as accidental clicks. */
-const MIN_REGION = 5;
-/** Mask brush diameter range and default, in page pixels. */
-const MIN_BRUSH = 2;
-const MAX_BRUSH = 200;
-const DEFAULT_BRUSH = 24;
-
-const TOOL_HINTS: Record<Tool, string> = {
-  select: "Click a region to select, drag to move, handles to resize, Delete to remove; drag empty space to pan",
-  rect: "Drag on empty space to draw a rectangle",
-  ellipse: "Drag on empty space to draw an ellipse",
-  polygon: "Click to add points; Enter, double-click or the first point to finish; Esc to cancel",
-  brush: "Add paints text the detector missed, Erase paints art it caught; X swaps, [ ] resize; then Re-clean",
-};
-
-const LETTERING_HINT = "Drag lettering to move it, handles to resize, the top knob to rotate; double-click to edit the text";
-
-/** Lettering panel size: 300 wide; its content scrolls past 340, plus the grab bar and borders. */
-const PANEL_WIDTH = 300;
-const PANEL_OUTER_HEIGHT = 372;
-
-/** Lettering selection colour (violet, distinct from text/sfx regions). */
-const LETTERING_COLOR = "#a78bfa";
-
-/** What each region colour means, shown on the kind buttons. */
-const KIND_HINTS: Record<RegionKind, string> = {
-  text: "Text (blue): speech bubbles and captions. Read with OCR, translated, removed by Clean text, lettered with the translation",
-  sfx: "Sound effect (orange): drawn sound effects. Not read or translated; removed by Clean SFX when ticked; lettered only if you type new lettering",
-};
-
-const WHEEL_HINTS: Record<WheelMode, string> = {
-  zoom: "Wheel zooms, Shift+wheel scrolls",
-  vertical: "Wheel scrolls up/down, Shift sideways",
-  horizontal: "Wheel scrolls sideways, Shift up/down",
-};
-
-/** What the page editor can ask the canvas to do. */
-export interface PageCanvasHandle {
-  /** Deletes a region through the canvas history, so it can be undone. */
-  deleteBlock: (id: number) => void;
-}
-
-interface PageCanvasProps {
-  ref?: Ref<PageCanvasHandle>;
-  pageId: string;
-  /** Background image (a stage image of the page). */
-  imageUrl: string;
-  page: PageSize;
-  blocks: StudioBlock[];
-  disabled: boolean;
-  selectedId: number | null;
-  onSelect: (id: number | null) => void;
-  /** Called with the page detail returned by each successful change. */
-  onDetail: (detail: StudioPageDetail) => void;
-  /** Re-fetch the page after a failed change, so the canvas matches the server again. */
-  onReload: () => void;
-  /** Extra controls at the start of the toolbar (e.g. the background image picker). */
-  toolbarStart?: ReactNode;
-  /** A cleaned page image was rewritten (e.g. re-cleaning an area): reload the stage images. */
-  onImagesChanged: () => void;
-  /** Lettering laid out by the shared typesetter, as the burn would place it. */
-  lettering: LetteringItem[];
-  /** In Regions mode the lettering shows only over a cleaned page (not over the original or the burned result). */
-  textPreviewAvailable: boolean;
-  /** Shows a style change right away, before the server has saved it. */
-  onStylePreview: (id: number, style: TextStyle | null) => void;
-  /** Lays one block out again in a new box, for live re-wrapping while it's resized. */
-  relayout: (id: number, box: { x: number; y: number; w: number; h: number }) => LetteringPaths | null;
-  onModeChange?: (mode: EditMode) => void;
-  /** Floating editor shown next to the selected block in Lettering mode. */
-  renderLetteringPanel?: (id: number) => ReactNode;
-  /** The toolset the previous page was left with; read once, when the canvas opens. */
-  initialToolset?: Toolset;
-  /** Told whenever the toolset changes, so the next page can start from it. */
-  onToolsetChange?: (patch: Toolset) => void;
-}
-
-interface Entry {
-  obj: FabricObject;
-  key: string;
-  geometry: BlockGeometry;
-}
+export type { EditMode, Tool } from "./config";
+export type { PageCanvasHandle } from "./props";
 
 interface PolygonDraft {
   points: { x: number; y: number }[];
@@ -173,22 +62,6 @@ interface PolygonDraft {
   outline: Polyline | null;
   rubber: Line;
 }
-
-/** Actions the keyboard handler and toolbar call into the canvas closure. */
-interface CanvasActions {
-  finishPolygon: () => void;
-  cancelDrawing: () => void;
-  deleteSelected: () => void;
-  fit: () => void;
-  /** First view of the page at a remembered zoom. */
-  openAt: (scale: number) => void;
-  zoomBy: (factor: number) => void;
-  /** Sets an exact zoom (1 = 100%), keeping the middle of the view where it is. */
-  zoomTo: (value: number) => void;
-}
-
-const isTyping = (target: EventTarget | null): boolean =>
-  target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
 /**
  * Fabric canvas for editing a page's regions: draw rectangles, ellipses and polygons, move / resize / delete them,
@@ -229,7 +102,6 @@ export function PageCanvas({
   const [panelPosition, setPanelPosition] = useState<{ left: number; top: number } | null>(null);
   /** Where the user dragged the lettering panel; it stays there for every selection until it's set to follow again. */
   const [panelPin, setPanelPin] = useState<{ left: number; top: number } | null>(null);
-  const panelDragRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [wheelMode, setWheelModeState] = useState<WheelMode>(readWheelMode);
   const setWheelMode = (mode: WheelMode) => {
     setWheelModeState(mode);
@@ -922,66 +794,7 @@ export function PageCanvas({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const objects = letteringRef.current;
-    const interactive = mode === "lettering" && !disabled;
-    const seen = new Set<number>();
-    for (const item of lettering) {
-      seen.add(item.id);
-      let obj = objects.get(item.id);
-      if (!obj) {
-        obj = new LetteringObject(item.id, {
-          originX: "center",
-          originY: "center",
-          objectCaching: false,
-          lockScalingFlip: true,
-          transparentCorners: false,
-          cornerColor: LETTERING_COLOR,
-          cornerSize: 9,
-          borderColor: LETTERING_COLOR,
-          borderDashArray: [6, 4],
-        });
-        objects.set(item.id, obj);
-        canvas.add(obj);
-      }
-      obj.set({
-        left: item.box.x + item.box.w / 2,
-        top: item.box.y + item.box.h / 2,
-        width: item.box.w,
-        height: item.box.h,
-        scaleX: 1,
-        scaleY: 1,
-        angle: item.rotation,
-        selectable: interactive,
-        evented: interactive,
-        hoverCursor: interactive ? "move" : "default",
-        visible: showTextLayer,
-        // Not placed yet: previewed in the region box until the server finds the bubble area
-        opacity: item.placed ? 1 : 0.6,
-      });
-      obj.showFrame = mode === "lettering";
-      obj.overflow = !item.fits;
-      obj.setPaths(item.paths);
-      obj.setCoords();
-      // Lettering sits above the regions while it's being edited, below them otherwise
-      if (mode === "lettering") canvas.bringObjectToFront(obj);
-      else canvas.sendObjectToBack(obj);
-    }
-    for (const [id, obj] of objects) {
-      if (seen.has(id)) continue;
-      if (canvas.getActiveObject() === obj) canvas.discardActiveObject();
-      canvas.remove(obj);
-      objects.delete(id);
-    }
-
-    const active = canvas.getActiveObject();
-    if (mode === "lettering") {
-      const target = selectedId !== null ? objects.get(selectedId) : undefined;
-      if (target && active !== target && !disabled) canvas.setActiveObject(target);
-      else if (!target && active) canvas.discardActiveObject();
-    } else if (letteringIdOf(active) !== undefined) {
-      canvas.discardActiveObject();
-    }
-    canvas.requestRenderAll();
+    syncLettering(canvas, letteringRef.current, lettering, { mode, disabled, showTextLayer, selectedId });
     updatePanelRef.current();
   }, [lettering, mode, showTextLayer, disabled, selectedId, createRegion, deleteRegion, reshapeRegion, paintStroke, restyle]);
 
@@ -995,38 +808,7 @@ export function PageCanvas({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const entries = entriesRef.current;
-    const seen = new Set<number>();
-    for (const block of blocks) {
-      seen.add(block.id);
-      const geometry = blockGeometry(block);
-      const key = regionKey(geometry, blockKind(block), block.include);
-      const existing = entries.get(block.id);
-      if (existing && existing.key === key) continue;
-      if (existing) canvas.remove(existing.obj);
-      const obj = regionObject(block);
-      canvas.add(obj);
-      entries.set(block.id, { obj, key, geometry });
-    }
-    for (const [id, entry] of entries) {
-      if (seen.has(id)) continue;
-      canvas.remove(entry.obj);
-      entries.delete(id);
-    }
-    const regionsInteractive = !disabled && mode === "regions";
-    for (const { obj } of entries.values()) {
-      obj.set({ selectable: regionsInteractive, evented: regionsInteractive, opacity: mode === "lettering" ? 0.35 : 1 });
-    }
-
-    if (mode === "regions") {
-      const target = selectedId !== null ? entries.get(selectedId)?.obj : undefined;
-      const active = canvas.getActiveObject();
-      if (target && active !== target) canvas.setActiveObject(target);
-      else if (!target && active) canvas.discardActiveObject();
-    }
-    // A region added or redrawn above the lettering must not cover it while the lettering is being edited
-    if (mode === "lettering") for (const obj of letteringRef.current.values()) canvas.bringObjectToFront(obj);
-    canvas.requestRenderAll();
+    syncRegions(canvas, entriesRef.current, blocks, { mode, disabled, selectedId }, letteringRef.current);
   }, [blocks, disabled, selectedId, mode, createRegion, deleteRegion, reshapeRegion, paintStroke, restyle]);
 
   // Switching tools abandons a half-drawn region; the brush paints over regions instead of picking them
@@ -1056,81 +838,9 @@ export function PageCanvas({
   }, [pageId, history]);
 
   // Keyboard: tools, undo / redo, delete, polygon finish / cancel, fit, space to pan
-  useEffect(() => {
-    const undo = () => enqueue(() => history.undo());
-    const redo = () => enqueue(() => history.redo());
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (isTyping(e.target)) return;
-      const canvas = canvasRef.current;
-      if (e.code === "Space") {
-        e.preventDefault();
-        if (!spaceRef.current && canvas) {
-          spaceRef.current = true;
-          canvas.skipTargetFind = true;
-          canvas.setCursor("grab");
-        }
-        return;
-      }
-      const mod = e.ctrlKey || e.metaKey;
-      const key = e.key.toLowerCase();
-      if (mod && key === "z") {
-        e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
-        return;
-      }
-      if (mod && key === "y") {
-        e.preventDefault();
-        redo();
-        return;
-      }
-      if (mod || e.altKey) return;
-      // Region tool keys switch back to Regions mode
-      const pickTool = (next: Tool) => {
-        setMode("regions");
-        setTool(next);
-      };
-      if (key === "v") pickTool("select");
-      else if (key === "r") pickTool("rect");
-      else if (key === "e") pickTool("ellipse");
-      else if (key === "p") pickTool("polygon");
-      else if (key === "b") pickTool("brush");
-      else if (key === "l") setMode((current) => (current === "lettering" ? "regions" : "lettering"));
-      else if (key === "enter" && live.current.mode === "lettering" && live.current.selectedId !== null) {
-        e.preventDefault();
-        focusLetteringText();
-      }
-      else if (key === "x") setBrushLayer((layer) => (layer === "add" ? "erase" : "add"));
-      else if (key === "[") setBrushSize((size) => Math.max(MIN_BRUSH, Math.round(size / 1.25)));
-      else if (key === "]") setBrushSize((size) => Math.min(MAX_BRUSH, Math.round(size * 1.25)));
-      else if (key === "m") setShowMask((shown) => !shown);
-      else if (key === "enter") actionsRef.current?.finishPolygon();
-      else if (key === "escape") {
-        actionsRef.current?.cancelDrawing();
-        live.current.onSelect(null);
-      } else if (key === "delete" || key === "backspace") {
-        e.preventDefault();
-        actionsRef.current?.deleteSelected();
-      } else if (key === "f" || key === "0") actionsRef.current?.fit();
-      else if (key === "+" || key === "=") actionsRef.current?.zoomBy(1.2);
-      else if (key === "-") actionsRef.current?.zoomBy(1 / 1.2);
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code !== "Space" || !spaceRef.current) return;
-      spaceRef.current = false;
-      const canvas = canvasRef.current;
-      if (canvas) {
-        canvas.skipTargetFind = live.current.mode === "regions" && live.current.tool === "brush";
-        canvas.setCursor(live.current.mode === "regions" && live.current.tool !== "select" ? "crosshair" : "default");
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-    };
-  }, [enqueue, history]);
+  useCanvasShortcuts({
+    enqueue, history, canvasRef, spaceRef, actionsRef, live, setMode, setTool, setBrushLayer, setBrushSize, setShowMask, focusLetteringText,
+  });
 
   /** Keeps the floating lettering panel next to the selected block, above or below it depending on the room. */
   const updatePanelRef = useRef<() => void>(() => {});
@@ -1165,35 +875,10 @@ export function PageCanvas({
       current && Math.abs(current.left - left) < 1 && Math.abs(current.top - top) < 1 ? current : { left: Math.round(left), top: Math.round(top) });
   };
 
-  /** Dragging the lettering panel by its grab bar, kept inside the canvas area. */
   const panelSpot = panelPin ?? panelPosition;
-  const startPanelDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!panelSpot || e.button !== 0) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    panelDragRef.current = { x: e.clientX, y: e.clientY, left: panelSpot.left, top: panelSpot.top };
-  };
-  const movePanel = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = panelDragRef.current;
-    const host = panelHostRef.current;
-    if (!drag || !host) return;
-    // Kept fully inside the canvas area (it clips), so the panel's bottom controls stay reachable
-    const left = Math.min(Math.max(0, drag.left + e.clientX - drag.x), Math.max(0, host.clientWidth - PANEL_WIDTH));
-    const top = Math.min(Math.max(0, drag.top + e.clientY - drag.y), Math.max(0, host.clientHeight - PANEL_OUTER_HEIGHT));
-    setPanelPin({ left: Math.round(left), top: Math.round(top) });
-  };
-  const endPanelDrag = () => {
-    panelDragRef.current = null;
-  };
 
   // Re-clean targets: the painted spots when there are any, otherwise the selected region's box
-  const selectedBlock = selectedId !== null ? blocks.find((b) => b.id === selectedId) : undefined;
-  const recleanTargets: Area[] = paintedAreas.length > 0
-    ? mergeAreas(paintedAreas)
-    : selectedBlock ? [{ x: selectedBlock.x, y: selectedBlock.y, w: selectedBlock.w, h: selectedBlock.h }] : [];
-  const recleanTitle = paintedAreas.length > 0
-    ? "Clean the painted spots again on the cleaned page"
-    : selectedBlock ? "Clean the selected region again on the cleaned page"
-    : "Paint missed text with the brush, or select a region, to clean just that area again";
+  const { targets: recleanTargets, title: recleanTitle } = recleanPlan(paintedAreas, blocks, selectedId);
 
   /** Runs after pending saves (so the painted layers are on the server); a failure only shows the error. */
   const reclean = () => {
@@ -1223,277 +908,50 @@ export function PageCanvas({
       });
   };
 
-  const toolButton = (value: Tool, icon: ReactNode, label: string, shortcut: string) => (
-    <button
-      key={value}
-      onClick={() => setTool(value)}
-      disabled={disabled}
-      title={`${label} (${shortcut})`}
-      aria-pressed={tool === value}
-      className={`p-1.5 rounded-md disabled:opacity-40 ${tool === value ? "bg-indigo-600 text-white" : "text-gray-300 hover:bg-gray-800"}`}
-    >
-      {icon}
-    </button>
-  );
 
   return (
     <section className="flex-1 min-w-0 min-h-0 flex flex-col">
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-gray-800">
-        {toolbarStart}
-        <div className="flex items-center rounded-md border border-gray-700 overflow-hidden text-xs" role="group" aria-label="Edit mode">
-          {([
-            { value: "regions", icon: <Shapes size={14} />, label: "Regions", hint: "Regions (L toggles): draw and edit detection areas, paint the mask" },
-            { value: "lettering", icon: <Type size={14} />, label: "Lettering", hint: "Lettering (L toggles): move, resize, rotate and edit the translated text on the page" },
-          ] as const).map(({ value, icon, label, hint }) => (
-            <button
-              key={value}
-              onClick={() => setMode(value)}
-              aria-pressed={mode === value}
-              title={hint}
-              className={`flex items-center gap-1.5 px-2.5 py-1 ${mode === value ? "bg-violet-600 text-white" : "text-gray-400 hover:bg-gray-800"}`}
-            >
-              {icon}
-              {label}
-            </button>
-          ))}
-        </div>
-        {mode === "regions" && (
-        <>
-        <div className="flex items-center gap-0.5" role="toolbar" aria-label="Region tools">
-          {toolButton("select", <MousePointer2 size={15} />, "Select", "V")}
-          {toolButton("rect", <Square size={15} />, "Rectangle", "R")}
-          {toolButton("ellipse", <EllipseIcon size={15} />, "Ellipse", "E")}
-          {toolButton("polygon", <Pentagon size={15} />, "Polygon", "P")}
-          {toolButton("brush", <Brush size={15} />, "Mask brush", "B")}
-        </div>
-        {tool === "brush" ? (
-          <div className="flex items-center gap-2 text-xs">
-            <div className="flex items-center rounded-md border border-gray-700 overflow-hidden" role="group" aria-label="Brush paints">
-              {([
-                { value: "add", label: "Add", color: "#22c55e", hint: "Paint text the detector missed" },
-                { value: "erase", label: "Erase", color: "#ef4444", hint: "Paint art the detector wrongly took for text" },
-              ] as const).map(({ value, label, color, hint }) => (
-                <button
-                  key={value}
-                  onClick={() => setBrushLayer(value)}
-                  aria-pressed={brushLayer === value}
-                  title={`${hint} (X swaps)`}
-                  className={`px-2 py-1 ${brushLayer === value ? "bg-gray-700 text-gray-50" : "text-gray-400 hover:bg-gray-800"}`}
-                  style={brushLayer === value ? { boxShadow: `inset 0 -2px 0 ${color}` } : undefined}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <label className="flex items-center gap-1 text-gray-400" title="Brush size in page pixels ([ and ])">
-              <input
-                type="range"
-                aria-label="Brush size"
-                min={MIN_BRUSH}
-                max={MAX_BRUSH}
-                value={brushSize}
-                onChange={(e) => setBrushSize(Number(e.target.value))}
-                // Hand the keyboard back to the canvas so the shortcuts keep working
-                onPointerUp={(e) => e.currentTarget.blur()}
-                className="w-20"
-              />
-              <span className="w-10 tabular-nums">{brushSize}px</span>
-            </label>
-          </div>
-        ) : (
-          <div className="flex items-center rounded-md border border-gray-700 overflow-hidden text-xs" role="group" aria-label="New region kind">
-            {(["text", "sfx"] as const).map((value) => (
-              <button
-                key={value}
-                onClick={() => setKind(value)}
-                aria-pressed={kind === value}
-                title={KIND_HINTS[value]}
-                className={`px-2 py-1 ${kind === value ? "bg-gray-700 text-gray-50" : "text-gray-400 hover:bg-gray-800"}`}
-                style={kind === value ? { boxShadow: `inset 0 -2px 0 ${REGION_COLORS[value].stroke}` } : undefined}
-              >
-                {value === "text" ? "Text" : "SFX"}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setShowMask((shown) => !shown)}
-            disabled={tool === "brush"}
-            aria-pressed={showMask || tool === "brush"}
-            title="Show the text mask (M): blue detected, green painted in, red erased"
-            aria-label="Show the text mask"
-            className="p-1.5 rounded-md text-gray-300 hover:bg-gray-800 disabled:opacity-60"
-          >
-            {showMask || tool === "brush" ? <Eye size={15} /> : <EyeOff size={15} />}
-          </button>
-          <button
-            onClick={() => setShowText((shown) => !shown)}
-            disabled={!textPreviewAvailable}
-            aria-pressed={showTextLayer}
-            aria-label="Show the lettering preview"
-            title={textPreviewAvailable
-              ? "Show the lettering as the burn would draw it"
-              : "The lettering preview shows over a cleaned page: pick Cleaned text or Cleaned SFX as the background"}
-            className={`p-1.5 rounded-md hover:bg-gray-800 disabled:opacity-40 ${showTextLayer ? "text-violet-300" : "text-gray-400"}`}
-          >
-            <ALargeSmall size={15} />
-          </button>
-          <button
-            onClick={reclean}
-            disabled={disabled || recleaning || recleanTargets.length === 0}
-            title={recleanTitle}
-            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-gray-200 bg-gray-800 hover:bg-gray-700 disabled:opacity-40"
-          >
-            <WandSparkles size={14} />
-            Re-clean{paintedAreas.length > 0 ? ` (${paintedAreas.length})` : ""}
-          </button>
-        </div>
-        </>
-        )}
-        <div className="flex items-center gap-0.5">
-          <button
-            onClick={() => enqueue(() => history.undo())}
-            disabled={!history.canUndo || busyCount > 0}
-            title={history.undoLabel ? `Undo: ${history.undoLabel} (Ctrl+Z)` : "Undo (Ctrl+Z)"}
-            className="p-1.5 rounded-md text-gray-300 hover:bg-gray-800 disabled:opacity-40"
-          >
-            <Undo2 size={15} />
-          </button>
-          <button
-            onClick={() => enqueue(() => history.redo())}
-            disabled={!history.canRedo || busyCount > 0}
-            title={history.redoLabel ? `Redo: ${history.redoLabel} (Ctrl+Shift+Z)` : "Redo (Ctrl+Shift+Z)"}
-            className="p-1.5 rounded-md text-gray-300 hover:bg-gray-800 disabled:opacity-40"
-          >
-            <Redo2 size={15} />
-          </button>
-          <button
-            onClick={() => actionsRef.current?.deleteSelected()}
-            disabled={disabled || selectedId === null}
-            title="Delete selected region (Delete)"
-            aria-label="Delete selected region"
-            className="p-1.5 rounded-md text-gray-300 hover:bg-red-900/60 hover:text-red-200 disabled:opacity-40"
-          >
-            <Trash2 size={15} />
-          </button>
-        </div>
-        <div className="flex items-center gap-1 text-xs text-gray-400" role="group" aria-label="Mouse wheel action">
-          <span className="hidden md:inline">Wheel</span>
-          <div className="flex items-center rounded-md border border-gray-700 overflow-hidden">
-            {([
-              { mode: "zoom", icon: <ZoomIn size={14} />, label: "Wheel zooms (Shift+wheel scrolls up/down)" },
-              { mode: "vertical", icon: <MoveVertical size={14} />, label: "Wheel scrolls up/down (Shift+wheel scrolls sideways)" },
-              { mode: "horizontal", icon: <MoveHorizontal size={14} />, label: "Wheel scrolls sideways (Shift+wheel scrolls up/down)" },
-            ] as const).map(({ mode, icon, label }) => (
-              <button
-                key={mode}
-                onClick={() => setWheelMode(mode)}
-                title={`${label}. Ctrl+wheel always zooms.`}
-                aria-label={label}
-                aria-pressed={wheelMode === mode}
-                className={`px-1.5 py-1 ${wheelMode === mode ? "bg-gray-700 text-gray-50" : "text-gray-400 hover:bg-gray-800"}`}
-              >
-                {icon}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-0.5 text-xs text-gray-400">
-          <button onClick={() => actionsRef.current?.zoomBy(1 / 1.2)} title="Zoom out (-)" className="p-1.5 rounded-md hover:bg-gray-800">
-            <ZoomOut size={15} />
-          </button>
-          <ZoomField zoom={zoom} onZoom={(value) => actionsRef.current?.zoomTo(value)} />
-          <button onClick={() => actionsRef.current?.zoomBy(1.2)} title="Zoom in (+)" className="p-1.5 rounded-md hover:bg-gray-800">
-            <ZoomIn size={15} />
-          </button>
-          <button onClick={() => actionsRef.current?.fit()} title="Fit page (F)" className="p-1.5 rounded-md hover:bg-gray-800">
-            <Maximize size={15} />
-          </button>
-        </div>
-        <span className="ml-auto text-xs truncate max-w-full">
-          {error ? <span className="text-red-400">{error}</span> : busyCount > 0 ? <span className="text-gray-400">{recleaning ? "Re-cleaning…" : "Saving…"}</span> : <span className="text-gray-500">{mode === "lettering" ? LETTERING_HINT : TOOL_HINTS[tool]} · {WHEEL_HINTS[wheelMode]}, Ctrl+wheel zooms, Space-drag pans</span>}
-        </span>
-      </div>
+      <CanvasToolbar
+        toolbarStart={toolbarStart}
+        mode={mode}
+        setMode={setMode}
+        tool={tool}
+        setTool={setTool}
+        disabled={disabled}
+        brushLayer={brushLayer}
+        setBrushLayer={setBrushLayer}
+        brushSize={brushSize}
+        setBrushSize={setBrushSize}
+        kind={kind}
+        setKind={setKind}
+        showMask={showMask}
+        setShowMask={setShowMask}
+        setShowText={setShowText}
+        textPreviewAvailable={textPreviewAvailable}
+        showTextLayer={showTextLayer}
+        reclean={reclean}
+        recleaning={recleaning}
+        recleanTargets={recleanTargets}
+        recleanTitle={recleanTitle}
+        paintedAreas={paintedAreas}
+        enqueue={enqueue}
+        history={history}
+        busyCount={busyCount}
+        actionsRef={actionsRef}
+        selectedId={selectedId}
+        wheelMode={wheelMode}
+        setWheelMode={setWheelMode}
+        zoom={zoom}
+        error={error}
+      />
       <div ref={panelHostRef} className="relative flex-1 min-h-0 overflow-hidden">
         <div ref={hostRef} className="absolute inset-0" />
         {mode === "lettering" && panelPosition && panelSpot && selectedId !== null && renderLetteringPanel && (
-          <div
-            className="absolute z-20 w-[300px] rounded-lg border border-violet-500/40 bg-gray-900/95 shadow-2xl backdrop-blur flex flex-col"
-            style={{ left: panelSpot.left, top: panelSpot.top }}
-          >
-            <div
-              onPointerDown={startPanelDrag}
-              onPointerMove={movePanel}
-              onPointerUp={endPanelDrag}
-              onPointerCancel={endPanelDrag}
-              title="Drag to move this panel out of the way"
-              className="flex items-center gap-1.5 px-2 py-1 border-b border-gray-800 text-[11px] text-gray-500 cursor-grab active:cursor-grabbing select-none touch-none"
-            >
-              <GripHorizontal size={14} />
-              {panelPin ? "Moved" : "Drag to move"}
-              {panelPin && (
-                <button
-                  type="button"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={() => setPanelPin(null)}
-                  title="Put the panel back next to the selected lettering"
-                  className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-violet-300 hover:bg-gray-800"
-                >
-                  <LocateFixed size={12} />
-                  Follow
-                </button>
-              )}
-            </div>
-            <div className="max-h-[340px] overflow-y-auto">{renderLetteringPanel(selectedId)}</div>
-          </div>
+          <LetteringPanelFrame spot={panelSpot} pinned={panelPin !== null} onPin={setPanelPin} hostRef={panelHostRef}>
+            {renderLetteringPanel(selectedId)}
+          </LetteringPanelFrame>
         )}
       </div>
     </section>
-  );
-}
-
-/**
- * The zoom percentage, typed into: Enter or leaving the field applies it (100 for actual size), Escape puts back the
- * current zoom. Anything that isn't a positive number is ignored.
- */
-function ZoomField({ zoom, onZoom }: { zoom: number; onZoom: (value: number) => void }) {
-  const shown = String(Math.round(zoom * 100));
-  const [draft, setDraft] = useState<string | null>(null);
-  // Escape blurs the field, and the blur must not apply what Escape just threw away
-  const cancelled = useRef(false);
-  const apply = () => {
-    if (cancelled.current) {
-      cancelled.current = false;
-      setDraft(null);
-      return;
-    }
-    if (draft === null) return;
-    const percent = Number.parseFloat(draft.replace("%", ""));
-    setDraft(null);
-    if (Number.isFinite(percent) && percent > 0) onZoom(percent / 100);
-  };
-  return (
-    <label className="flex items-center rounded-md px-1 hover:bg-gray-800 focus-within:bg-gray-800" title="Zoom: type a percentage, 100 for actual size">
-      <input
-        value={draft ?? shown}
-        onChange={(e) => setDraft(e.target.value)}
-        onFocus={(e) => e.currentTarget.select()}
-        onBlur={apply}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            apply();
-            e.currentTarget.blur();
-          } else if (e.key === "Escape") {
-            cancelled.current = true;
-            e.currentTarget.blur();
-          }
-        }}
-        inputMode="decimal"
-        aria-label="Zoom percentage"
-        className="w-9 bg-transparent text-right tabular-nums focus:outline-none"
-      />
-      <span>%</span>
-    </label>
   );
 }
