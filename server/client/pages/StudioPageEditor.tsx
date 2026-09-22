@@ -13,6 +13,7 @@ import {
   placeText,
   publishPage,
   rollbackPage,
+  rerunPage,
   runStage,
   updateBlock,
   type FontVariant,
@@ -129,6 +130,11 @@ export function StudioPageEditor() {
   const cleanTextM = useMutation({ mutationFn: () => runStage(id, "clean_text"), onSuccess: afterClean });
   const cleanSfxM = useMutation({ mutationFn: () => runStage(id, "clean_sfx"), onSuccess: afterClean });
   const publishM = useMutation({ mutationFn: () => publishPage(id), onSuccess: onPublished });
+  // The whole pipeline again from the original; the page turns busy and the processing view follows the job
+  const rerunM = useMutation({
+    mutationFn: () => rerunPage(id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["studio-page", id] }),
+  });
   const navigate = useNavigate();
   const [discarding, setDiscarding] = useState(false);
   const [filing, setFiling] = useState(false);
@@ -271,7 +277,7 @@ export function StudioPageEditor() {
   const sfxBlocks = blocks.filter((b) => b.kind !== "text");
   const version = `${page.updated_at}-${page.revision}-${renderStage?.updated_at ?? ""}-${imagesNonce}`;
   const cleaning = cleanTextM.isPending || cleanSfxM.isPending;
-  const actionError = cleanTextM.error ?? cleanSfxM.error ?? renderM.error ?? translateAllM.error ?? publishM.error ?? deleteBlockM.error;
+  const actionError = cleanTextM.error ?? cleanSfxM.error ?? renderM.error ?? translateAllM.error ?? publishM.error ?? rerunM.error ?? deleteBlockM.error;
 
   /** A stage's status in the latest page data: queued actions re-check it, since the saves they waited for can outdate it. */
   const latestStageStatus = (name: string) =>
@@ -356,6 +362,26 @@ export function StudioPageEditor() {
       hint: page.location ? "Copy this page into another chapter" : "Copy this draft into a chapter so it can be read",
       onSelect: () => setFiling(true),
       unavailable: unavailableWhen(translating),
+      separated: true,
+    },
+    {
+      key: "rerun",
+      label: "Run again…",
+      icon: <RotateCcw size={14} />,
+      hint: "Detect, read, translate and clean the page again from its original",
+      onSelect: () => {
+        void (async () => {
+          const ok = await confirm({
+            title: "Run this page again?",
+            message: "Every stage runs again from the original image. Regions you drew, text you edited and lettering styles are replaced by what the run finds. What readers see doesn't change until you publish.",
+            confirmLabel: "Run again",
+            danger: true,
+          });
+          if (ok) rerunM.mutate();
+        })();
+      },
+      unavailable: unavailableWhen(translating, [rerunM.isPending, "Starting…"]),
+      pending: rerunM.isPending,
       separated: true,
     },
     {
