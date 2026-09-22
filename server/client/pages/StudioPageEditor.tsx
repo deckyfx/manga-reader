@@ -17,6 +17,7 @@ import {
   RotateCcw,
   Send,
   Trash2,
+  TriangleAlert,
 } from "lucide-react";
 import {
   deleteBlock,
@@ -44,7 +45,7 @@ import { PageCanvas, type PageCanvasHandle } from "../studio/canvas/PageCanvas";
 import { buildLettering, relayoutBlock, useTypesetter } from "../studio/text/typesetter";
 import { readToolset, saveToolset, toolsetScope } from "../studio/toolset";
 import { ProcessingView, StageCompare, FinalizedView } from "../studio/editor/views";
-import { BlockEditor, SfxBlockRow } from "../studio/editor/BlockRows";
+import { BlockEditor, blockCheck, SfxBlockRow } from "../studio/editor/BlockRows";
 import { LetteringPanel } from "../studio/editor/StyleEditor";
 import { HistoryPanel } from "../studio/editor/HistoryPanel";
 
@@ -289,6 +290,8 @@ export function StudioPageEditor() {
   const busy = isBusy(page.status);
   const textBlocks = blocks.filter((b) => b.kind === "text");
   const sfxBlocks = blocks.filter((b) => b.kind !== "text");
+  // The self-check after cleaning: blocks whose lettering still shows, or that were read as empty
+  const toCheck = blocks.filter((block) => blockCheck(block) !== null);
   const version = `${page.updated_at}-${page.revision}-${renderStage?.updated_at ?? ""}-${imagesNonce}`;
   const cleaning = cleanTextM.isPending || cleanSfxM.isPending;
   const actionError = cleanTextM.error ?? cleanSfxM.error ?? renderM.error ?? translateAllM.error ?? publishM.error ?? rerunM.error ?? deleteBlockM.error;
@@ -529,6 +532,14 @@ export function StudioPageEditor() {
               <StatusBadge status={s.status} label={s.stage} />
             </span>
           ))}
+          {toCheck.length > 0 && (
+            <span
+              className="flex items-center gap-1 rounded-full bg-amber-900/50 px-2 py-0.5 text-xs text-amber-300"
+              title={`After the clean: ${toCheck.map((b) => `#${b.id} ${blockCheck(b)!.label}`).join(", ")}`}
+            >
+              <TriangleAlert size={12} /> {toCheck.length} to check
+            </span>
+          )}
         </div>
 
         <div className="flex items-center rounded-md border border-gray-700 overflow-hidden text-xs" role="group" aria-label="Editor view">

@@ -44,12 +44,17 @@ export interface InpaintOutput {
   processingTimeMs: number;
 }
 
+/** How a region was cleaned: painted with the background colour, or redrawn by LaMa. */
+export type CleanMethod = "flat" | "lama";
+
 export interface InpaintResult {
   rgb: Buffer;
   /** Regions painted with their background colour. */
   flat: number;
   /** Regions sent to LaMa. */
   lama: number;
+  /** How each region given was cleaned, in the order they were given. */
+  methods: CleanMethod[];
 }
 
 /**
@@ -165,7 +170,8 @@ export class MangaInpainter {
     const ring = dilateMask(pending, width, height, RING);
     const result = Buffer.from(rgb);
 
-    const lamaRegions = regions.filter((region) => !flatFill(rgb, result, width, height, pending, ring, region));
+    const methods: CleanMethod[] = regions.map((region) => (flatFill(rgb, result, width, height, pending, ring, region) ? "flat" : "lama"));
+    const lamaRegions = regions.filter((_, i) => methods[i] === "lama");
     const windows = mergeWindows(lamaRegions.map((region) => expand(region, CONTEXT_MARGIN, width, height)));
 
     for (const win of windows) {
@@ -209,7 +215,7 @@ export class MangaInpainter {
         }
       }
     }
-    return { rgb: result, flat: regions.length - lamaRegions.length, lama: lamaRegions.length };
+    return { rgb: result, flat: regions.length - lamaRegions.length, lama: lamaRegions.length, methods };
   }
 }
 

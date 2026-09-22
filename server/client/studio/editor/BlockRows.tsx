@@ -142,6 +142,10 @@ export function IncludeToggle({ pageId, block, disabled, onChanged, trackSave, t
  * say a stage is out of date; this says which blocks made it so.
  */
 export function BlockNeeds({ block }: { block: StudioBlock }) {
+  const check = blockCheck(block);
+  if (check) {
+    return <span className="rounded-full bg-amber-900/50 px-1.5 text-[10px] text-amber-300" title={check.detail}>{check.label}</span>;
+  }
   if (block.needs_translate) {
     return <span className="rounded-full bg-amber-900/50 px-1.5 text-[10px] text-amber-300" title="Its text changed since it was translated">translate</span>;
   }
@@ -205,4 +209,26 @@ export function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, sel
       )}
     </div>
   );
+}
+
+/** Share of a block's lettering that may still show after a clean before it is worth a look. */
+const INK_LEFT = 0.12;
+
+/**
+ * What the last clean and read left worth checking on this block: lettering the clean didn't remove, or a text block
+ * OCR found nothing in. Null when there is nothing to say.
+ */
+export function blockCheck(block: StudioBlock): { label: string; detail: string } | null {
+  if (block.clean && block.clean.ink > INK_LEFT) {
+    return {
+      label: "ink left",
+      detail: `About ${Math.round(block.clean.ink * 100)}% of this block's lettering still shows after the clean (${
+        block.clean.method === "flat" ? "filled with the background colour" : "redrawn by LaMa"
+      }). Paint the missed strokes with the mask brush and re-clean, or check the region.`,
+    };
+  }
+  if (block.kind === "text" && block.include && (block.source_text ?? "").trim() === "" && block.clean) {
+    return { label: "no text read", detail: "This block was cleaned, but reading it found no text. Check the region, or read it again." };
+  }
+  return null;
 }

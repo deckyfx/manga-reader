@@ -1,0 +1,1 @@
+ALTER TABLE `page_blocks` ADD `clean_json` text;

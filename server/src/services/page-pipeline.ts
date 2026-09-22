@@ -15,7 +15,8 @@ import { join } from "node:path";
 import { labelComponents, maskFromImage, maskToPng, selectBlockMask, type BlockKind, type Box } from "@/lib/mask";
 import { getTextSegmenter, textSegModelPath } from "@/services/text-seg-service";
 import { getBubbleDetector } from "@/services/bubble-service";
-import { getInpainter, inpaintModelPath } from "@/services/inpaint-service";
+import { getInpainter, inpaintModelPath, type CleanMethod } from "@/services/inpaint-service";
+import { leftoverInk } from "@/services/clean-check";
 import { getTypesetter, isDarkBackground, separateAreas, textAreaFor, type TextArea } from "@/services/typeset-service";
 import { sfxExclusion } from "@/services/sfx-filter";
 import { rectArea, shiftArea, storedArea, typesetPage, type StoredArea, type TextStyle, type TypesetEntry } from "@/shared/typeset";
@@ -46,6 +47,8 @@ export interface PageBlock extends Box {
   style?: TextStyle;
   /** Filled by `render`: where the text was placed, reused by the Studio's live preview. */
   area?: StoredArea;
+  /** Filled by `clean`: how this block was cleaned, and how much of its lettering still shows. */
+  clean?: { method: CleanMethod; ink: number };
   /** Changed since the last translation of it (its source text did): set by edits and OCR, cleared by `translate`. */
   needs_translate?: boolean;
   /** Changed since the last render (text, style, shape, cleaning): set by edits, cleared by `render`. */
@@ -330,8 +333,18 @@ export class PagePipeline {
     }
 
     const inpainter = await getInpainter();
-    const { rgb: cleaned, flat, lama } = await inpainter.inpaintRgb(rgb, width, height, target, [...regions, ...paintedRegions]);
+    const { rgb: cleaned, flat, lama, methods } = await inpainter.inpaintRgb(rgb, width, height, target, [...regions, ...paintedRegions]);
     await sharp(cleaned, { raw: { width, height, channels: 3 } }).png().toFile(this.path(output));
+
+    // The self-check: how each block was cleaned, and how much of its lettering still shows on the page just written.
+    // Measured against the mask the clean actually removed, painted additions included
+    const maskPng = await maskToPng(target, width, height);
+    const ink = await leftoverInk(this.path(output), maskPng, regions);
+    for (const [i, block] of regions.entries()) {
+      block.clean = { method: methods[i] ?? "lama", ink: ink[i]?.ink ?? 0 };
+    }
+    // The other stages save the job themselves; this one has the self-check to record
+    await this.writeJob(job);
     const painted = paintedRegions.length > 0 ? ` and ${paintedRegions.length} painted area${paintedRegions.length === 1 ? "" : "s"}` : "";
     this.report({ stage: "cleaning", message: `Cleaned ${regions.length} ${label}${painted} (${flat} flat fill, ${lama} LaMa)`, fraction: 1 });
     // Painted areas count as cleaned regions too (a page may have nothing but painted areas)
@@ -404,6 +417,20 @@ export class PagePipeline {
     await sharp(cleaned, { raw: { width, height, channels: 3 } }).png().toFile(this.path(output));
     this.report({ stage: "cleaning", message: `Re-cleaned ${clipped.length} area${clipped.length === 1 ? "" : "s"} (${flat} flat fill, ${lama} LaMa)`, fraction: 1 });
     return { output, regions: clipped.length, total: clipped.length, flat, lama };
+  }
+
+  /**
+   * Measures the blocks' leftover ink again on the page as it is now, keeping how each was cleaned. For after a
+   * re-clean of a few areas, which fixes what the blocks' own clean left behind.
+   */
+  async refreshCleanCheck(job: PageJob): Promise<void> {
+    const output = existsSync(this.path("clean-sfx.png")) ? "clean-sfx.png" : "clean-text.png";
+    if (!existsSync(this.path(output))) return;
+    const checked = job.blocks.filter((b) => b.clean);
+    if (checked.length === 0) return;
+    const { mask, width, height } = await this.effectiveMask();
+    const ink = await leftoverInk(this.path(output), await maskToPng(mask, width, height), checked);
+    for (const [i, block] of checked.entries()) block.clean = { method: block.clean!.method, ink: ink[i]?.ink ?? 0 };
   }
 
   /**
