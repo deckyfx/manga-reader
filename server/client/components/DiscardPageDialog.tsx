@@ -40,7 +40,9 @@ export function DiscardPageDialog({ page, onClose, onDone }: DiscardPageDialogPr
     mutationFn: () => deletePage(page.id, filed !== null),
     // Gone from every list at once rather than after the next fetch; put back if the server refuses
     onMutate: async (): Promise<Restore> => {
+      // Every list forgetPage edits: a fetch still landing would put the page back
       await qc.cancelQueries({ queryKey: ["studio-pages"] });
+      await qc.cancelQueries({ queryKey: ["inbox"] });
       await qc.cancelQueries({ queryKey: ["workspace"] });
       return forgetPage(qc, page.id);
     },
