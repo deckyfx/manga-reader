@@ -10,15 +10,17 @@ const W = 100, H = 100;
 const LETTERING = { x: 40, y: 40, w: 20, h: 20 };
 
 /** A page of one grey level, with the lettering square drawn in another (or not at all). */
-async function page(background: number, ink: number | null, inkShare = 1): Promise<Buffer> {
-  const pixels = Buffer.alloc(W * H * 3, background);
+async function page(background: number | [number, number, number], ink: number | [number, number, number] | null, inkShare = 1): Promise<Buffer> {
+  const pixels = Buffer.alloc(W * H * 3);
+  const bg = typeof background === "number" ? [background, background, background] : background;
+  for (let p = 0; p < W * H; p++) pixels.set(bg, p * 3);
   if (ink !== null) {
     let drawn = 0;
     const total = LETTERING.w * LETTERING.h;
     for (let y = LETTERING.y; y < LETTERING.y + LETTERING.h; y++) {
       for (let x = LETTERING.x; x < LETTERING.x + LETTERING.w; x++) {
         if (drawn++ >= total * inkShare) continue;
-        pixels.fill(ink, (y * W + x) * 3, (y * W + x) * 3 + 3);
+        pixels.set(typeof ink === "number" ? [ink, ink, ink] : ink, (y * W + x) * 3);
       }
     }
   }
@@ -43,6 +45,12 @@ describe("leftover ink", () => {
   test("works the same on a dark bubble with white lettering", async () => {
     expect((await leftoverInk(await page(20, 240), await mask(), [block]))[0]?.ink).toBe(1);
     expect((await leftoverInk(await page(20, null), await mask(), [block]))[0]?.ink).toBe(0);
+  });
+
+  test("coloured lettering left on a bubble of the same brightness still counts as ink", async () => {
+    // Red on green: both about 76 bright, so a brightness comparison would call this clean
+    const [report] = await leftoverInk(await page([0, 130, 0], [255, 0, 0]), await mask(), [block]);
+    expect(report?.ink).toBe(1);
   });
 
   test("a partial clean scores in between, and blocks average by how much each had to clean", async () => {

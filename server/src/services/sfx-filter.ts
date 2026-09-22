@@ -12,18 +12,22 @@ import type { Box } from "@/lib/mask";
 const MIN_AREA_SHARE = 0.0003;
 /** …or whose longer side is under this share of the page's shorter side. */
 const MIN_SIDE_SHARE = 0.015;
-/** Page numbers sit in the top or bottom margin: the block's centre within this share of the page height of an edge. */
-const MARGIN_SHARE = 0.07;
-/** …and are small: under these shares of the page's height and width. */
-const PAGE_NUMBER_MAX_HEIGHT = 0.04;
+/**
+ * Page numbers sit in the top or bottom margin — the block's centre within this share of the page's shorter side of
+ * an edge — and are small: under these shares of the shorter side. Measured against the shorter side, so a tall
+ * webtoon strip doesn't get a margin (and a "page number") hundreds of pixels deep.
+ */
+const MARGIN_SHARE = 0.1;
+const PAGE_NUMBER_MAX_HEIGHT = 0.05;
 const PAGE_NUMBER_MAX_WIDTH = 0.12;
 
 /** Why a sound-effect block is left out of cleaning by default, or null when it should be cleaned. */
 export function sfxExclusion(block: Box, width: number, height: number): "speck" | "page number" | null {
   // The page number first: it is small too, and the more specific name is the useful one
+  const scale = Math.min(width, height);
   const centreY = block.y + block.h / 2;
-  const inMargin = centreY < height * MARGIN_SHARE || centreY > height * (1 - MARGIN_SHARE);
-  if (inMargin && block.h < height * PAGE_NUMBER_MAX_HEIGHT && block.w < width * PAGE_NUMBER_MAX_WIDTH) return "page number";
+  const inMargin = centreY < scale * MARGIN_SHARE || centreY > height - scale * MARGIN_SHARE;
+  if (inMargin && block.h < scale * PAGE_NUMBER_MAX_HEIGHT && block.w < scale * PAGE_NUMBER_MAX_WIDTH) return "page number";
   const area = block.w * block.h;
   if (area < width * height * MIN_AREA_SHARE || Math.max(block.w, block.h) < Math.min(width, height) * MIN_SIDE_SHARE) return "speck";
   return null;

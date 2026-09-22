@@ -14,6 +14,12 @@ describe("sound effects left out of cleaning", () => {
     expect(sfxExclusion({ x: 60, y: 30, w: 50, h: 32 }, W, H)).toBe("page number");
   });
 
+  test("on a tall webtoon strip, a big sound effect near the top is not taken for a page number", () => {
+    // 800 wide, 12000 tall: a height-based margin would be 840px deep
+    expect(sfxExclusion({ x: 200, y: 150, w: 300, h: 260 }, 800, 12000)).toBeNull();
+    expect(sfxExclusion({ x: 380, y: 11960, w: 40, h: 28 }, 800, 12000)).toBe("page number");
+  });
+
   test("a speck of texture is too small to be lettering", () => {
     expect(sfxExclusion({ x: 300, y: 900, w: 12, h: 9 }, W, H)).toBe("speck");
   });

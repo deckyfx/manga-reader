@@ -12,7 +12,11 @@
 import sharp from "sharp";
 import type { Box } from "@/lib/mask";
 
-/** How far (0–255 luminance) a marked pixel may sit from the background and still count as cleaned. */
+/**
+ * How far a marked pixel may sit from the background and still count as cleaned: the largest difference on any one
+ * colour channel (0–255). Colour, not brightness, so red lettering left on a green bubble of the same brightness
+ * still counts as ink.
+ */
 const INK_DELTA = 48;
 /** Fewer unmarked pixels than this in a box, and the whole box's median stands in for the background. */
 const MIN_BACKGROUND_PIXELS = 32;
@@ -25,12 +29,13 @@ export interface InkReport {
   marked: number;
 }
 
-const luma = (r: number, g: number, b: number): number => (r * 299 + g * 587 + b * 114) / 1000;
-
-function median(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)] ?? 0;
+/** The per-channel median colour of these pixels (indices into an RGB buffer). */
+function medianColour(rgb: Buffer, pixels: readonly number[]): [number, number, number] {
+  const channel = (c: number) => {
+    const values = pixels.map((p) => rgb[p * 3 + c]!).sort((a, b) => a - b);
+    return values[Math.floor(values.length / 2)] ?? 0;
+  };
+  return [channel(0), channel(1), channel(2)];
 }
 
 /**
@@ -43,7 +48,8 @@ export async function leftoverInk(cleaned: string | Buffer, mask: string | Buffe
   const { width, height } = image.info;
   if (marks.info.width !== width || marks.info.height !== height) throw new Error("the mask and the cleaned image differ in size");
   const rgb = image.data;
-  const lumaAt = (p: number) => luma(rgb[p * 3]!, rgb[p * 3 + 1]!, rgb[p * 3 + 2]!);
+  const distance = (p: number, colour: readonly number[]) =>
+    Math.max(Math.abs(rgb[p * 3]! - colour[0]!), Math.abs(rgb[p * 3 + 1]! - colour[1]!), Math.abs(rgb[p * 3 + 2]! - colour[2]!));
 
   return blocks.map((block) => {
     const x0 = Math.max(0, Math.floor(block.x)), y0 = Math.max(0, Math.floor(block.y));
@@ -54,15 +60,14 @@ export async function leftoverInk(cleaned: string | Buffer, mask: string | Buffe
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         const p = y * width + x;
-        const value = lumaAt(p);
-        everything.push(value);
-        if (marks.data[p]! > 127) marked.push(value);
-        else background.push(value);
+        everything.push(p);
+        if (marks.data[p]! > 127) marked.push(p);
+        else background.push(p);
       }
     }
     if (marked.length === 0) return { blockId: block.id, ink: 0, marked: 0 };
-    const bg = median(background.length >= MIN_BACKGROUND_PIXELS ? background : everything);
-    const inked = marked.filter((value) => Math.abs(value - bg) > INK_DELTA).length;
+    const bg = medianColour(rgb, background.length >= MIN_BACKGROUND_PIXELS ? background : everything);
+    const inked = marked.filter((p) => distance(p, bg) > INK_DELTA).length;
     return { blockId: block.id, ink: inked / marked.length, marked: marked.length };
   });
 }
