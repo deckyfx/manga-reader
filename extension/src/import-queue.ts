@@ -229,12 +229,14 @@ async function downloadPage(url: string, minIntervalMs: number): Promise<File> {
       if (attempt < DOWNLOAD_ATTEMPTS - 1) await delay(RETRY_BACKOFF_MS * 2 ** attempt);
     }
   }
-  throw new Error(`${lastError.message} (after ${DOWNLOAD_ATTEMPTS} attempts)`);
+  // Still failing after the retries: the site is down or limiting, which the next page would meet too. Pause with
+  // this page pending rather than fail it and the rest one by one; a 404 or a non-image already failed it above
+  throw new Pause(`${lastError.message} (after ${DOWNLOAD_ATTEMPTS} attempts) — press Try again when the site is back`);
 }
 
 /**
  * Something that would fail every page after this one, too: the server is unreachable, the gallery tab has gone, the
- * site's image limit is spent. The import stops taking new pages and pauses — the page stays pending, not failed, so
+ * site's image limit is spent, the site keeps failing downloads. The import stops taking new pages and pauses — the page stays pending, not failed, so
  * Try again picks it up.
  */
 class Pause extends Error {}
