@@ -17,7 +17,8 @@
     "db:studio": "drizzle-kit studio",
     "embed:migrations": "bun run scripts/embed-migrations.ts",
     "ocr:compare": "bun run scripts/ocr-compare.ts",
-    "page": "bun run scripts/page.ts"
+    "page": "bun run scripts/page.ts",
+    "regress": "bun run scripts/regress.ts"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.2",

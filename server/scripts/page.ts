@@ -19,11 +19,10 @@
 import { existsSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { env } from "@/env";
-import { inferenceHandlers } from "@/queue/inference-queue";
-import { PagePipeline, type PageJob, type PipelineEngines } from "@/services/page-pipeline";
+import { PagePipeline, type PageJob } from "@/services/page-pipeline";
+import { ocrEngine, translateEngine } from "./engines";
 
 const WORK_DIR = "data/pages/work";
-const signal = new AbortController().signal;
 
 function fail(message: string): never {
   console.error(message);
@@ -52,24 +51,6 @@ function printBlocks(job: PageJob): void {
     const clean = (b.include ? "yes" : "no").padEnd(5);
     console.log(`${String(b.id).padStart(3)}  ${b.kind.padEnd(4)}  ${box} ${clean}  ${clip(b.source_text)} → ${clip(b.translated_text, 40)}`);
   }
-}
-
-async function ocrEngine(): Promise<PipelineEngines["ocr"]> {
-  process.env.OCR_DEBUG = "false";
-  const load = env.OCR_ENGINE === "baberu"
-    ? (await import("@/services/baberu-ocr-service")).loadBaberuOcrModel
-    : (await import("@/services/ocr-service")).loadOcrModel;
-  await load();
-  return async (image) => ((await inferenceHandlers.ocr({ imageBuffer: image }, signal)) as { text: string }).text;
-}
-
-async function translateEngine(): Promise<PipelineEngines["translate"]> {
-  const { loadTranslateModel } = await import("@/services/translate-service");
-  await loadTranslateModel();
-  return async (text) => {
-    const out = (await inferenceHandlers.translate({ text }, signal)) as { translatedText: string; engine: string };
-    return { text: out.translatedText, engine: out.engine };
-  };
 }
 
 async function detect([image, nameArg]: string[]): Promise<void> {
