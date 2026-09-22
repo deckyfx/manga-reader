@@ -44,9 +44,12 @@ function medianColour(rgb: Buffer, pixels: readonly number[]): [number, number, 
  */
 export async function leftoverInk(cleaned: string | Buffer, mask: string | Buffer, blocks: readonly (Box & { id: number })[]): Promise<InkReport[]> {
   const image = await sharp(cleaned).removeAlpha().toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
-  const marks = await sharp(mask).greyscale().raw().toBuffer({ resolveWithObject: true });
+  // One byte per pixel whatever the mask file holds: greyscale() alone keeps an alpha channel, which would halve the
+  // stride the loop below assumes
+  const marks = await sharp(mask).removeAlpha().greyscale().raw().toBuffer({ resolveWithObject: true });
   const { width, height } = image.info;
   if (marks.info.width !== width || marks.info.height !== height) throw new Error("the mask and the cleaned image differ in size");
+  if (marks.info.channels !== 1) throw new Error("the mask is not single-channel");
   const rgb = image.data;
   const distance = (p: number, colour: readonly number[]) =>
     Math.max(Math.abs(rgb[p * 3]! - colour[0]!), Math.abs(rgb[p * 3 + 1]! - colour[1]!), Math.abs(rgb[p * 3 + 2]! - colour[2]!));

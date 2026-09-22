@@ -59,6 +59,12 @@ describe("leftover ink", () => {
     expect(overallInk([{ blockId: 1, ink: 1, marked: 300 }, { blockId: 2, ink: 0, marked: 100 }])).toBe(0.75);
   });
 
+  test("a mask saved with an alpha channel reads the same as a plain one", async () => {
+    const withAlpha = await sharp(await mask()).ensureAlpha().png().toBuffer();
+    expect((await sharp(withAlpha).metadata()).channels).toBe(4);
+    expect((await leftoverInk(await page(250, 10), withAlpha, [block]))[0]).toMatchObject({ ink: 1, marked: 400 });
+  });
+
   test("a block with nothing marked has nothing to clean", async () => {
     const [empty] = await leftoverInk(await page(250, 10), await mask(), [{ id: 2, x: 0, y: 0, w: 20, h: 20 }]);
     expect(empty).toEqual({ blockId: 2, ink: 0, marked: 0 });
