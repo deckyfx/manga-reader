@@ -5,17 +5,33 @@
  * reader, all present in the HTML (a 2026-09-18 probe found 25 without running any JavaScript). Looking only inside
  * the reader means a layout change breaks loudly — no images, so the popup says so — instead of quietly importing the
  * sidebar's thumbnails.
+ *
+ * Re-checked live on 2026-09-22: the site moved to a new theme. The pages now sit in `<section data-image-data>`
+ * (23 plain `src` images for chapter 17.1 of a sample series, still all in the HTML) on a new image host,
+ * kuma.kyut.dev, which serves with no Referer, the site's, or a wrong one. The page has no og:title any more, so the
+ * title comes from `<title>`: "<Series> Chapter 17.1 – Rawkuma".
  */
 import { chapterOf, collectCandidates, largestGroup, titleOf } from "./generic";
 import type { ChapterExtract, ExtractContext, Extractor } from "./types";
 
-/** Where the pages live. More than one, because the theme has been renamed before. */
-const READER_SELECTORS = ["#readerarea", ".reading-content", "#chapter_body"] as const;
+/** Where the pages live, newest theme first. More than one, because the theme has been changed before. */
+const READER_SELECTORS = ["[data-image-data]", "#readerarea", ".reading-content", "#chapter_body"] as const;
 
 /** `rawkuma.net/manga/<slug>/chapter-<n>.<id>/`, with or without `www`. */
 function matches(url: URL): boolean {
   if (!/(^|\.)rawkuma\.net$/i.test(url.hostname)) return false;
   return /\/manga\/[^/]+\/chapter-/i.test(url.pathname);
+}
+
+/**
+ * The series name from a chapter's title, which reads "<Series> Chapter 17.1 – Rawkuma": the site's name and the
+ * chapter are dropped, since the chapter number is reported separately and the popup adds it back once.
+ */
+export function seriesTitle(title: string): string {
+  return title
+    .replace(/\s*[–—|-]\s*rawkuma\s*$/i, "")
+    .replace(/\s+(?:chapter|ch\.?)\s*[\d.]+\s*$/i, "")
+    .trim();
 }
 
 /**
@@ -46,7 +62,8 @@ export const rawkumaExtractor: Extractor = {
     const images = largestGroup(collectCandidates(reader, ctx.url));
     ctx.log(`${images.length} page(s) in the reader`);
 
-    const title = titleOf(ctx.document);
+    const full = titleOf(ctx.document);
+    const title = full === undefined ? undefined : seriesTitle(full) || full;
     const chapter = chapterNumber(ctx.url);
     return Promise.resolve({
       images,

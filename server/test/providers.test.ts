@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { parseHTML } from "linkedom";
 import { genericExtractor } from "@/shared/providers/generic";
 import { createExhentaiExtractor } from "@/shared/providers/exhentai";
-import { rawkumaExtractor } from "@/shared/providers/rawkuma";
+import { rawkumaExtractor, seriesTitle } from "@/shared/providers/rawkuma";
 import { extractorById, extractorFor } from "@/shared/providers/registry";
 import { FetchStatusError, type ChapterExtract, type ExtractContext } from "@/shared/providers/types";
 import { MAX_SERIES_TAGS, tagProblem } from "@/shared/tags";
@@ -143,6 +143,26 @@ describe("the rawkuma extractor", () => {
       "https://cdn.test/ch14/003.jpg",
     ]);
     expect(result.chapter).toBe("14");
+  });
+
+  test("reads the theme the site moved to in September 2026", async () => {
+    // As the live page has it: a sidebar cover, then the pages in a section marked data-image-data
+    const ctx = contextFor(
+      `<img src="https://rawkuma.net/wp-content/uploads/2025/10/cover.jpg" class="wp-post-image">
+       <section class="w-full flex flex-col" data-image-data="1">${PAGES(3)}</section>`,
+      "https://rawkuma.net/manga/shitai-katsugi-no-nemu/chapter-17.1.411312/",
+    );
+    ctx.document.title = "Shitai Katsugi No Nemu Chapter 17.1 – Rawkuma";
+    const result = await rawkumaExtractor.extract(ctx);
+    expect(result.images).toEqual(["https://cdn.test/ch14/001.jpg", "https://cdn.test/ch14/002.jpg", "https://cdn.test/ch14/003.jpg"]);
+    // The series alone: the popup adds "Chapter 17.1" itself, so it isn't said twice, and the site's name goes
+    expect(result).toMatchObject({ title: "Shitai Katsugi No Nemu", chapter: "17.1" });
+  });
+
+  test("keeps a title that doesn't follow the site's pattern as it is", () => {
+    expect(seriesTitle("Some Series – Rawkuma")).toBe("Some Series");
+    expect(seriesTitle("Some Series Chapter 3 – Rawkuma")).toBe("Some Series");
+    expect(seriesTitle("Just A Title")).toBe("Just A Title");
   });
 
   test("breaks loudly when the reader isn't where it used to be", async () => {
