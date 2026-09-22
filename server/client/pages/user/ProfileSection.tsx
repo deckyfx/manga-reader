@@ -74,7 +74,13 @@ function AdultToggle({ account }: { account: Account }) {
   return (
     <section className="rounded-xl border border-gray-800 bg-gray-900 p-5">
       <h3 className="text-sm font-semibold text-gray-100">What you see in the reader</h3>
-      <Toggle checked={account.show_adult} onChange={(show) => save.mutate(show)} className="mt-3 text-sm text-gray-300">
+      {/* One save at a time: two in flight could answer out of order, and the older answer would win */}
+      <Toggle
+        checked={account.show_adult}
+        onChange={(show) => save.mutate(show)}
+        disabled={save.isPending}
+        className="mt-3 text-sm text-gray-300"
+      >
         Show adult series
         {save.isPending && <Loader2 size={13} className="animate-spin text-gray-500" />}
       </Toggle>
