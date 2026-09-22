@@ -14,6 +14,7 @@
  * pager, and `#img` holding an absolute H@H address — was checked against live e-hentai galleries on 2026-09-21 (same
  * markup as exhentai, which needs a signed-in browser to fetch). The fixtures pin it, so a redesign fails loudly.
  */
+import { MAX_SERIES_TAGS, MAX_TAG_LENGTH } from "../tags";
 import { isTransientFetchError, type ChapterExtract, type ExtractContext, type Extractor, type Resolved } from "./types";
 
 /** exhentai has asked for a second between requests for years; the walk is slow by design. */
@@ -87,8 +88,6 @@ function imagePageLinks(document: Document, base: URL): string[] {
   return links;
 }
 
-/** Tags offered at most, so a gallery tagged exhaustively doesn't bury the suggestions. */
-const MAX_TAGS = 60;
 
 /**
  * The gallery's tags as the site shows them, `namespace:tag` — `parody:azur lane`, `character:…`. Checked against a
@@ -100,9 +99,11 @@ export function galleryTags(document: Document): string[] {
   for (const cell of Array.from(document.querySelectorAll('#taglist [id^="td_"]'))) {
     const id = cell.getAttribute("id")?.slice("td_".length) ?? "";
     // The id spells spaces as underscores; the library keeps tags lower case and short
-    const tag = id.replace(/_/g, " ").trim().toLowerCase().slice(0, 40);
+    const tag = id.replace(/_/g, " ").trim().toLowerCase().slice(0, MAX_TAG_LENGTH);
     if (tag.includes(":") && tag.length > 2) tags.add(tag);
-    if (tags.size >= MAX_TAGS) break;
+    // No more than a series can carry, so the suggestions go straight into one; the site lists the most telling
+    // namespaces (parody, character, group, artist) first
+    if (tags.size >= MAX_SERIES_TAGS) break;
   }
   return [...tags];
 }

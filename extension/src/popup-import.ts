@@ -9,6 +9,7 @@ import { findWorkspaceBySource, type WorkspaceRef } from "./api";
 import { ensureContentScript } from "./inject";
 import type { ChapterExtractResult, SeriesExtractResult } from "./chapter-extract";
 import type { SeriesInfo } from "../../server/src/shared/providers/series-info";
+import { MAX_SERIES_TAGS, splitTags, tagProblem } from "../../server/src/shared/tags";
 import { loadServerAccess } from "./settings-store";
 import type { ExtractProgressMsg, ImportRequest } from "./types";
 
@@ -178,7 +179,7 @@ function renderSeries(info: SeriesInfo): void {
 
   // The page's own tags, as suggestions the person edits — comma-separated, since that is how anyone types a list
   const tags = el("input", "import-input") as HTMLInputElement;
-  tags.value = (info.tags ?? []).join(", ");
+  tags.value = (info.tags ?? []).slice(0, MAX_SERIES_TAGS).join(", ");
   tags.placeholder = "Tags, comma-separated";
   tags.setAttribute("aria-label", "Tags");
 
@@ -207,9 +208,15 @@ function renderSeries(info: SeriesInfo): void {
       failed("Give the series a title.");
       return;
     }
+    // Checked here, with the limits the server applies, so an over-long list is fixed in the form rather than refused
+    const tagList = splitTags(tags.value);
+    const problem = tagProblem(tagList);
+    if (problem) {
+      failed(problem);
+      return;
+    }
     failure.hidden = true;
     create.setAttribute("disabled", "true");
-    const tagList = tags.value.split(",").map((tag) => tag.trim()).filter(Boolean);
     void send<{ ok: boolean; error?: string; series?: { id: number; title: string; coverError?: string } }>({
       type: "create-series",
       request: {

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, Loader2, Plus, Search } from "lucide-react";
 import { copyPageIntoChapter, createChapter, createSeries, fileWorkspace, getSeries, listSeries, seriesCoverUrl } from "../api";
+import { MAX_SERIES_TAGS, splitTags, tagProblem } from "../../src/shared/tags";
 import { Modal } from "./Modal";
 
 interface ChapterPickerProps {
@@ -23,11 +24,6 @@ interface ChapterPickerProps {
 }
 
 const INPUT = "w-full rounded-lg border border-gray-700 bg-gray-950 px-2 py-1.5 text-sm focus:border-indigo-500 focus:outline-none";
-
-/** Splits a comma-separated tag field into the tags it names, dropping blanks and repeats. */
-function tagList(text: string): string[] {
-  return [...new Set(text.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean))];
-}
 
 /**
  * Files a Studio draft into a chapter: pick the series, then the chapter — or make either on the spot. The draft is
@@ -78,7 +74,7 @@ export function ChapterPicker({
 
   const seriesM = useMutation({
     mutationFn: (form: { title: string; tags: string; adult: boolean }) =>
-      createSeries({ title: form.title.trim(), adult: form.adult, tags: tagList(form.tags) }),
+      createSeries({ title: form.title.trim(), adult: form.adult, tags: splitTags(form.tags) }),
     onSuccess: (series) => {
       qc.setQueryData(["series", series.series.id], series);
       void qc.invalidateQueries({ queryKey: ["series"], refetchType: "none" });
@@ -107,6 +103,8 @@ export function ChapterPicker({
 
   const chapters = detailQ.data ? [...detailQ.data.volumes.flatMap((volume) => volume.chapters), ...detailQ.data.unsorted] : [];
   const busy = fileM.isPending || seriesM.isPending || chapterM.isPending;
+  // The server's own tag limits, checked as the field is typed in so the form says what's wrong before sending
+  const seriesTagProblem = newSeries ? tagProblem(splitTags(newSeries.tags)) : null;
   const error = fileM.error ?? seriesM.error ?? chapterM.error;
 
   return (
@@ -146,7 +144,7 @@ export function ChapterPicker({
               />
             </label>
             <button
-              onClick={() => setNewSeries({ title: search.trim() || pageLabel || "", tags: (suggestedTags ?? []).join(", "), adult })}
+              onClick={() => setNewSeries({ title: search.trim() || pageLabel || "", tags: (suggestedTags ?? []).slice(0, MAX_SERIES_TAGS).join(", "), adult })}
               disabled={newSeries !== null}
               className="flex items-center gap-1.5 rounded-lg border border-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-800 disabled:opacity-40"
             >
@@ -159,7 +157,7 @@ export function ChapterPicker({
               className="space-y-2 rounded-lg border border-indigo-900/60 bg-gray-950 p-3"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (newSeries.title.trim()) seriesM.mutate(newSeries);
+                if (newSeries.title.trim() && !seriesTagProblem) seriesM.mutate(newSeries);
               }}
             >
               <input
@@ -176,6 +174,7 @@ export function ChapterPicker({
                 placeholder="Tags, separated by commas"
                 className={INPUT}
               />
+              {seriesTagProblem && <p className="text-xs text-red-400">{seriesTagProblem}</p>}
               {(suggestedTags?.length ?? 0) > 0 && (
                 <p className="text-xs text-gray-500">The tags came from the page this workspace was imported from; edit them as you like.</p>
               )}
@@ -194,7 +193,7 @@ export function ChapterPicker({
                 </button>
                 <button
                   type="submit"
-                  disabled={!newSeries.title.trim() || busy}
+                  disabled={!newSeries.title.trim() || seriesTagProblem !== null || busy}
                   className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1 text-sm font-medium hover:bg-indigo-500 disabled:opacity-40"
                 >
                   {seriesM.isPending && <Loader2 size={13} className="animate-spin" />} Create series

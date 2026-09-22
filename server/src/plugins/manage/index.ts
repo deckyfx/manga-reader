@@ -45,6 +45,7 @@
 import Elysia, { t } from "elysia";
 import { childLogger } from "@/lib/logger";
 import { ErrBody, optionalEnum } from "@/lib/schemas";
+import { MAX_SERIES_TAGS, MAX_TAG_LENGTH } from "@/shared/tags";
 import { chapterRun, pagesToRun, startChapterRun } from "@/services/chapter-batch";
 import { exportChapter } from "@/services/chapter-export";
 import { importIntoChapter, type ImportSource } from "@/services/chapter-import";
@@ -86,7 +87,7 @@ import {
 const log = childLogger("manage");
 
 const Title = t.String({ minLength: 1, maxLength: 200 });
-const Tags = t.Array(t.String({ maxLength: 40 }), { maxItems: 30 });
+const Tags = t.Array(t.String({ maxLength: MAX_TAG_LENGTH }), { maxItems: MAX_SERIES_TAGS });
 
 /** Progress of a chapter batch run (in memory; a restart cancels it). */
 const ServerPolicySchema = t.Object({

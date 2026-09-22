@@ -12,6 +12,7 @@ import { createExhentaiExtractor } from "@/shared/providers/exhentai";
 import { rawkumaExtractor } from "@/shared/providers/rawkuma";
 import { extractorById, extractorFor } from "@/shared/providers/registry";
 import { FetchStatusError, type ChapterExtract, type ExtractContext } from "@/shared/providers/types";
+import { MAX_SERIES_TAGS, tagProblem } from "@/shared/tags";
 
 /** An extract context over fixture HTML; `fetchDocument` throws, since no fixture needs a second page yet. */
 function contextFor(html: string, href: string): ExtractContext & { logs: string[] } {
@@ -220,6 +221,14 @@ describe("the exhentai extractor", () => {
       const result = await extractor.extract(ctx);
       // Underscores back to spaces, the namespace kept, a tag listed twice offered once
       expect(result.tags).toEqual(["parody:azur lane", "character:some name"]);
+    });
+
+    test("offers no more tags than a series can carry, so the suggestions go straight into one", async () => {
+      const cells = Array.from({ length: 50 }, (_, i) => `<div id="td_female:tag_${i}"><a>tag ${i}</a></div>`).join("");
+      const ctx = galleryContext(`<h1 id="gn">A Gallery</h1><a href="/s/aaa111/123456-1">1</a><div id="taglist">${cells}</div>`, {}, GALLERY);
+      const result = await extractor.extract(ctx);
+      expect(result.tags).toHaveLength(MAX_SERIES_TAGS);
+      expect(tagProblem(result.tags ?? [])).toBeNull();
     });
 
     test("includes the pages before the open one, and each exactly once", async () => {
