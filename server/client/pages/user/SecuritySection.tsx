@@ -14,6 +14,7 @@ import { useConfirm } from "../../components/ConfirmDialog";
 import { ListError } from "../../components/ListError";
 import { when } from "../../lib/format";
 import { fieldClass } from "../../lib/styles";
+import { useAuth } from "../../auth/AuthProvider";
 
 const field = `w-full ${fieldClass}`;
 
@@ -80,9 +81,11 @@ function AuthenticatorCard() {
   const [codes, setCodes] = useState<string[] | null>(null);
   const [password, setPassword] = useState("");
 
+  const { refresh: refreshAccount } = useAuth();
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["authenticators"] });
-    void qc.invalidateQueries({ queryKey: ["me"] });
+    // What guards the account changed: the sign-in screen and Passkeys read it from the account
+    void refreshAccount();
   };
 
   const startM = useMutation({

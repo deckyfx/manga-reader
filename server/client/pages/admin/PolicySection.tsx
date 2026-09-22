@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { getServerPolicy, updateServerPolicy, type RegistrationRole } from "../../api";
 import { fieldClass } from "../../lib/styles";
 import { Toggle } from "../../components/Toggle";
+import { useAuth } from "../../auth/AuthProvider";
 
 /** Self-registration can't mint admins, so the default-role picker doesn't offer it. */
 const REGISTRATION_ROLES: RegistrationRole[] = ["contributor", "reader"];
@@ -11,12 +12,13 @@ const REGISTRATION_ROLES: RegistrationRole[] = ["contributor", "reader"];
 export function PolicySection() {
   const qc = useQueryClient();
   const policyQ = useQuery({ queryKey: ["server-policy"], queryFn: getServerPolicy });
+  const { refresh: refreshAccount } = useAuth();
   const saveM = useMutation({
     mutationFn: (changes: { registration_enabled?: boolean; default_role?: RegistrationRole }) => updateServerPolicy(changes),
     onSuccess: (policy) => {
       qc.setQueryData(["server-policy"], policy);
       // The sign-in screen offers "create an account" based on this
-      void qc.invalidateQueries({ queryKey: ["me"] });
+      void refreshAccount();
     },
   });
 
