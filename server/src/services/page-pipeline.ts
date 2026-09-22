@@ -17,6 +17,7 @@ import { getTextSegmenter, textSegModelPath } from "@/services/text-seg-service"
 import { getBubbleDetector } from "@/services/bubble-service";
 import { getInpainter, inpaintModelPath } from "@/services/inpaint-service";
 import { getTypesetter, isDarkBackground, separateAreas, textAreaFor, type TextArea } from "@/services/typeset-service";
+import { sfxExclusion } from "@/services/sfx-filter";
 import { rectArea, shiftArea, storedArea, typesetPage, type StoredArea, type TextStyle, type TypesetEntry } from "@/shared/typeset";
 
 export type PageStage = "detecting" | "ocr" | "translating" | "cleaning" | "typesetting";
@@ -206,7 +207,14 @@ export class PagePipeline {
       source,
       width: result.width,
       height: result.height,
-      blocks: result.blocks.map((b, i) => ({ id: i + 1, ...b, include: true, source_text: null, translated_text: null })),
+      // Page numbers and texture specks the detector took for sound effects start out of cleaning (see sfx-filter)
+      blocks: result.blocks.map((b, i) => ({
+        id: i + 1,
+        ...b,
+        include: b.kind !== "sfx" || sfxExclusion(b, result.width, result.height) === null,
+        source_text: null,
+        translated_text: null,
+      })),
     };
     await this.writeJob(job);
     await this.renderDetectOverlay(job);
