@@ -99,7 +99,7 @@ export function CoverGallery({ seriesId }: { seriesId: number }) {
                   disabled={busy}
                   title={cover.pinned ? "Stop pinning, and show the newest" : "Always show this one"}
                   aria-label={cover.pinned ? "Unpin this cover" : "Pin this cover"}
-                  className="ml-auto rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-white disabled:opacity-40"
+                  className="ml-auto rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-gray-50 disabled:opacity-40"
                 >
                   {cover.pinned ? <PinOff size={12} /> : <Pin size={12} />}
                 </button>

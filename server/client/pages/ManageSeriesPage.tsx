@@ -114,7 +114,7 @@ export function ManageSeriesPage() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b border-gray-800 px-4 py-3">
-        <Link to="/manage" className="text-gray-400 hover:text-white" title="Back to the library">
+        <Link to="/manage" className="text-gray-400 hover:text-gray-50" title="Back to the library">
           <ArrowLeft size={18} />
         </Link>
         <h1 className="max-w-[min(36rem,60vw)] truncate text-base font-semibold" title={series.title}>{series.title}</h1>
@@ -260,7 +260,7 @@ function VolumeSection({ volume, volumeOptions, onRename, onDelete, onAddChapter
               {volume.title}
             </h2>
             <span className="text-xs text-gray-500">{volume.chapters.length} chapter{volume.chapters.length === 1 ? "" : "s"}</span>
-            <button onClick={() => setRenaming(true)} aria-label={`Rename ${volume.title}`} title="Rename" className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-white">
+            <button onClick={() => setRenaming(true)} aria-label={`Rename ${volume.title}`} title="Rename" className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-gray-50">
               <SquarePen size={13} />
             </button>
             <button onClick={onDelete} aria-label={`Delete ${volume.title}`} title="Delete volume" className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-red-300">
@@ -322,11 +322,11 @@ function ChapterRows({ chapters, volumeOptions, onEditChapter, onDeleteChapter }
                   ))}
                 </select>
               )}
-              <button onClick={() => setRenaming(chapter.id)} aria-label={`Rename ${chapter.title}`} title="Rename" className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-white">
+              <button onClick={() => setRenaming(chapter.id)} aria-label={`Rename ${chapter.title}`} title="Rename" className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-gray-50">
                 <SquarePen size={13} />
               </button>
               {chapter.pages > 0 && (
-                <Link to={`/read/chapters/${chapter.id}/pages/1`} aria-label={`Read ${chapter.title}`} title="Read" className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-white">
+                <Link to={`/read/chapters/${chapter.id}/pages/1`} aria-label={`Read ${chapter.title}`} title="Read" className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-gray-50">
                   <BookOpen size={13} />
                 </Link>
               )}
@@ -379,7 +379,7 @@ function NameFields({ title, number, onSave, onCancel }: { title: string; number
       <button onClick={save} disabled={!draftTitle.trim()} aria-label="Save" title="Save" className="rounded p-1.5 text-emerald-400 hover:bg-gray-800 disabled:opacity-40">
         <Check size={14} />
       </button>
-      <button onClick={onCancel} aria-label="Cancel" title="Cancel" className="rounded p-1.5 text-gray-500 hover:bg-gray-800 hover:text-white">
+      <button onClick={onCancel} aria-label="Cancel" title="Cancel" className="rounded p-1.5 text-gray-500 hover:bg-gray-800 hover:text-gray-50">
         <X size={14} />
       </button>
     </div>

@@ -174,14 +174,14 @@ export function StudioWorkspacePage() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b border-gray-800 px-4 py-3">
-        <Link to="/studio" className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white">
+        <Link to="/studio" className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-50">
           <ArrowLeft size={16} /> Studio
         </Link>
 
         {renaming === null ? (
           <h1 className="flex min-w-0 max-w-[min(36rem,60vw)] items-center gap-2 text-base font-semibold" title={workspace.name}>
             <span className="truncate">{workspace.name}</span>
-            <button onClick={() => setRenaming(workspace.name)} aria-label="Rename workspace" className="text-gray-500 hover:text-white">
+            <button onClick={() => setRenaming(workspace.name)} aria-label="Rename workspace" className="text-gray-500 hover:text-gray-50">
               <Pencil size={14} />
             </button>
           </h1>
@@ -201,7 +201,7 @@ export function StudioWorkspacePage() {
               aria-label="Workspace name"
               className="w-full max-w-[40rem] rounded-lg border border-gray-700 bg-gray-900 px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none"
             />
-            <button type="submit" disabled={!renaming.trim()} aria-label="Save name" className="text-gray-300 hover:text-white disabled:opacity-40">
+            <button type="submit" disabled={!renaming.trim()} aria-label="Save name" className="text-gray-300 hover:text-gray-50 disabled:opacity-40">
               <Check size={16} />
             </button>
           </form>

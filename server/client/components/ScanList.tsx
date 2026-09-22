@@ -66,7 +66,7 @@ export function ScanList({ userId, showWho }: { userId?: number; showWho?: boole
                 setSearch("");
               }}
               aria-label="Clear the search"
-              className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-gray-500 hover:text-white"
+              className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-gray-500 hover:text-gray-50"
             >
               <X size={13} />
             </button>

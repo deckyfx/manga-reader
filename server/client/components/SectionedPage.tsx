@@ -52,7 +52,7 @@ export function SectionedPage({
                 to={`${basePath}/${entry.id}`}
                 className={({ isActive }) =>
                   `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm whitespace-nowrap transition-colors ${
-                    isActive ? "bg-indigo-600 text-white" : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                    isActive ? "bg-indigo-600 text-white" : "text-gray-400 hover:bg-gray-800 hover:text-gray-50"
                   }`
                 }
               >

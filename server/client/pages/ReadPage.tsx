@@ -56,7 +56,7 @@ export function ReadPage() {
             className="bg-transparent text-sm focus:outline-none w-44"
           />
           {search && (
-            <button onClick={() => setSearch("")} aria-label="Clear search" className="text-gray-500 hover:text-white">
+            <button onClick={() => setSearch("")} aria-label="Clear search" className="text-gray-500 hover:text-gray-50">
               <X size={13} />
             </button>
           )}
@@ -114,7 +114,7 @@ export function ReadPage() {
                 setStatus("");
                 setSearch("");
               }}
-              className="ml-auto text-gray-400 hover:text-white"
+              className="ml-auto text-gray-400 hover:text-gray-50"
             >
               Clear filters
             </button>

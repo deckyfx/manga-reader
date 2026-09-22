@@ -373,7 +373,7 @@ export function StudioPageEditor() {
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-800">
         <Link
           to={workspaceId !== null ? `/studio/w/${workspaceId}` : page.location ? `/manage/chapters/${page.location.chapter_id}` : "/studio"}
-          className="text-gray-400 hover:text-white"
+          className="text-gray-400 hover:text-gray-50"
           title={workspaceId !== null ? "Back to the workspace" : page.location ? "Back to the chapter" : "All pages"}
         >
           <ArrowLeft size={18} />
@@ -381,7 +381,7 @@ export function StudioPageEditor() {
         {workspaceId === null && page.location ? (
           <>
             <h1 className="flex min-w-0 max-w-[min(36rem,60vw)] items-center gap-1.5 text-base font-semibold">
-              <Link to={`/read/series/${page.location.series_id}`} title={page.location.series_title} className="min-w-0 max-w-[50%] truncate text-gray-400 hover:text-white">{page.location.series_title}</Link>
+              <Link to={`/read/series/${page.location.series_id}`} title={page.location.series_title} className="min-w-0 max-w-[50%] truncate text-gray-400 hover:text-gray-50">{page.location.series_title}</Link>
               <span className="text-gray-600">›</span>
               <Link to={`/manage/chapters/${page.location.chapter_id}`} title={page.location.chapter_title} className="min-w-0 truncate hover:text-indigo-300">{page.location.chapter_title}</Link>
             </h1>
@@ -391,7 +391,7 @@ export function StudioPageEditor() {
                 aria-disabled={!previousPage}
                 title="Previous page in the chapter"
                 aria-label="Previous page in the chapter"
-                className={`rounded p-1 ${previousPage ? "hover:bg-gray-800 hover:text-white" : "pointer-events-none opacity-30"}`}
+                className={`rounded p-1 ${previousPage ? "hover:bg-gray-800 hover:text-gray-50" : "pointer-events-none opacity-30"}`}
               >
                 <ChevronLeft size={14} />
               </Link>
@@ -401,7 +401,7 @@ export function StudioPageEditor() {
                 aria-disabled={!nextPage}
                 title="Next page in the chapter"
                 aria-label="Next page in the chapter"
-                className={`rounded p-1 ${nextPage ? "hover:bg-gray-800 hover:text-white" : "pointer-events-none opacity-30"}`}
+                className={`rounded p-1 ${nextPage ? "hover:bg-gray-800 hover:text-gray-50" : "pointer-events-none opacity-30"}`}
               >
                 <ChevronRight size={14} />
               </Link>
@@ -410,7 +410,7 @@ export function StudioPageEditor() {
         ) : workspaceId !== null ? (
           <>
             <h1 className="flex min-w-0 max-w-[min(36rem,60vw)] items-center gap-1.5 text-base font-semibold">
-              <Link to={`/studio/w/${workspaceId}`} title={workspaceQ.data?.workspace.name} className="min-w-0 max-w-[60%] truncate text-gray-400 hover:text-white">
+              <Link to={`/studio/w/${workspaceId}`} title={workspaceQ.data?.workspace.name} className="min-w-0 max-w-[60%] truncate text-gray-400 hover:text-gray-50">
                 {workspaceQ.data?.workspace.name ?? "Workspace"}
               </Link>
               <span className="text-gray-600">›</span>
@@ -423,7 +423,7 @@ export function StudioPageEditor() {
                   aria-disabled={!previousPage}
                   title="Previous page in the workspace"
                   aria-label="Previous page in the workspace"
-                  className={`rounded p-1 ${previousPage ? "hover:bg-gray-800 hover:text-white" : "pointer-events-none opacity-30"}`}
+                  className={`rounded p-1 ${previousPage ? "hover:bg-gray-800 hover:text-gray-50" : "pointer-events-none opacity-30"}`}
                 >
                   <ChevronLeft size={14} />
                 </Link>
@@ -433,7 +433,7 @@ export function StudioPageEditor() {
                   aria-disabled={!nextPage}
                   title="Next page in the workspace"
                   aria-label="Next page in the workspace"
-                  className={`rounded p-1 ${nextPage ? "hover:bg-gray-800 hover:text-white" : "pointer-events-none opacity-30"}`}
+                  className={`rounded p-1 ${nextPage ? "hover:bg-gray-800 hover:text-gray-50" : "pointer-events-none opacity-30"}`}
                 >
                   <ChevronRight size={14} />
                 </Link>
@@ -562,7 +562,7 @@ export function StudioPageEditor() {
             onClick={() => setPanelCollapsed(false)}
             title="Show the side panel"
             aria-label="Show the side panel"
-            className="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800"
+            className="p-1.5 rounded-md text-gray-400 hover:text-gray-50 hover:bg-gray-800"
           >
             <PanelRightOpen size={16} />
           </button>
@@ -577,7 +577,7 @@ export function StudioPageEditor() {
               onClick={() => setPanelCollapsed(true)}
               title="Hide the side panel for more room"
               aria-label="Hide the side panel"
-              className="ml-auto p-1 rounded-md text-gray-400 hover:text-white hover:bg-gray-800"
+              className="ml-auto p-1 rounded-md text-gray-400 hover:text-gray-50 hover:bg-gray-800"
             >
               <PanelRightClose size={15} />
             </button>
@@ -1094,7 +1094,7 @@ function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockSt
                 aria-pressed={(style.align ?? "center") === value}
                 aria-label={`Align ${value}`}
                 onClick={() => change({ align: value === "center" ? undefined : value })}
-                className={`px-1.5 py-1 ${(style.align ?? "center") === value ? "bg-gray-700 text-white" : "hover:bg-gray-800"}`}
+                className={`px-1.5 py-1 ${(style.align ?? "center") === value ? "bg-gray-700 text-gray-50" : "hover:bg-gray-800"}`}
               >
                 {icon}
               </button>
@@ -1126,7 +1126,7 @@ function StyleEditor({ pageId, block, disabled, onChanged, trackSave, setBlockSt
           type="button"
           disabled={disabled || !custom}
           onClick={() => change({ font: undefined, font_size: undefined, fill: undefined, stroke: undefined, stroke_width: undefined, align: undefined, line_height: undefined, uppercase: undefined, rotation: undefined, box: undefined, offset: undefined })}
-          className="col-span-2 justify-self-start text-gray-400 hover:text-white disabled:opacity-40"
+          className="col-span-2 justify-self-start text-gray-400 hover:text-gray-50 disabled:opacity-40"
         >
           Reset to automatic
         </button>
@@ -1290,7 +1290,7 @@ function IconButton({ title, disabled, onClick, children }: { title: string; dis
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className="p-1 rounded text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-40"
+      className="p-1 rounded text-gray-400 hover:text-gray-50 hover:bg-gray-800 disabled:opacity-40"
     >
       {children}
     </button>
@@ -1330,7 +1330,7 @@ function HistoryPanel({ pageId, currentRevision, disabled, onRolledBack }: {
                   title="Publish this revision again"
                   disabled={disabled || rollbackM.isPending}
                   onClick={() => rollbackM.mutate(entry.revision)}
-                  className="text-gray-400 hover:text-white disabled:opacity-40"
+                  className="text-gray-400 hover:text-gray-50 disabled:opacity-40"
                 >
                   <RotateCcw size={12} />
                 </button>

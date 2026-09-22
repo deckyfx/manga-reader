@@ -90,7 +90,7 @@ export function ApiKeySection({ canUse }: { canUse: boolean }) {
             >
               {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? "Copied" : "Copy"}
             </button>
-            <button onClick={() => setFresh(null)} className="text-xs text-gray-400 hover:text-white">Done</button>
+            <button onClick={() => setFresh(null)} className="text-xs text-gray-400 hover:text-gray-50">Done</button>
           </div>
         </div>
       )}

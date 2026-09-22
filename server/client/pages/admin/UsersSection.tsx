@@ -82,7 +82,7 @@ export function UsersSection({ myId }: { myId: number }) {
                 disabled={updateM.isPending || user.id === myId}
                 title={user.id === myId ? "You can't suspend yourself" : user.disabled ? "Let them back in" : "Suspend this account"}
                 aria-label={`${user.disabled ? "Restore" : "Suspend"} ${user.username}`}
-                className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 hover:text-white disabled:opacity-40"
+                className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-50 disabled:opacity-40"
               >
                 {user.disabled ? "Restore" : "Suspend"}
               </button>
@@ -90,7 +90,7 @@ export function UsersSection({ myId }: { myId: number }) {
               <button
                 onClick={() => setResetting({ id: user.id, value: "" })}
                 aria-label={`Set a password for ${user.username}`}
-                className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 hover:text-white"
+                className="rounded px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-50"
               >
                 Set password
               </button>

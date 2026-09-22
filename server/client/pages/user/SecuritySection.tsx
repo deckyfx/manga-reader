@@ -239,7 +239,7 @@ function RecoveryCodes({ codes, onClose }: { codes: string[]; onClose: () => voi
       <div className="flex items-center gap-2">
         <Shield size={14} className="text-amber-300" />
         <span className="text-sm font-medium text-amber-200">Recovery codes — you won't see these again</span>
-        <button onClick={onClose} aria-label="Dismiss" className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white">
+        <button onClick={onClose} aria-label="Dismiss" className="ml-auto rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-50">
           <X size={13} />
         </button>
       </div>

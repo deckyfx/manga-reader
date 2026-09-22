@@ -166,7 +166,7 @@ export function ManageChapterPage() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b border-gray-800 px-4 py-3">
-        <Link to={`/manage/series/${series.id}`} className="text-gray-400 hover:text-white" title="Back to the series">
+        <Link to={`/manage/series/${series.id}`} className="text-gray-400 hover:text-gray-50" title="Back to the series">
           <ArrowLeft size={18} />
         </Link>
         <h1 className="max-w-[min(36rem,60vw)] truncate text-base font-semibold" title={chapter.title}>
@@ -360,7 +360,7 @@ export function ManageChapterPage() {
                     to={`/studio/pages/${page.id}`}
                     title="Open in the Studio"
                     aria-label="Open in the Studio"
-                    className="rounded bg-gray-900/90 p-1 text-gray-300 hover:text-white"
+                    className="rounded bg-gray-900/90 p-1 text-gray-300 hover:text-gray-50"
                   >
                     <SquarePen size={13} />
                   </Link>
@@ -380,7 +380,7 @@ export function ManageChapterPage() {
                     disabled={rerunM.isPending || running}
                     title="Translate this page again"
                     aria-label="Translate this page again"
-                    className="rounded bg-gray-900/90 p-1 text-gray-300 hover:text-white disabled:opacity-40"
+                    className="rounded bg-gray-900/90 p-1 text-gray-300 hover:text-gray-50 disabled:opacity-40"
                   >
                     <RefreshCw size={13} />
                   </button>

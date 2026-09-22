@@ -21,7 +21,7 @@ export function SeriesPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-800">
-        <Link to="/read" className="text-gray-400 hover:text-white" title="Library">
+        <Link to="/read" className="text-gray-400 hover:text-gray-50" title="Library">
           <ArrowLeft size={18} />
         </Link>
         <h1 className="max-w-[min(36rem,60vw)] truncate text-base font-semibold" title={series.title}>{series.title}</h1>

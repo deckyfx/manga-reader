@@ -65,7 +65,7 @@ export function NewPageDialog({ onClose, onCreated }: { onClose: () => void; onC
       onClick={() => setSource(value)}
       disabled={submitting || running}
       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors disabled:opacity-50 ${
-        source === value ? "bg-gray-800 text-white" : "text-gray-400 hover:text-white"
+        source === value ? "bg-gray-800 text-white" : "text-gray-400 hover:text-gray-50"
       }`}
     >
       {icon} {label}
@@ -77,7 +77,7 @@ export function NewPageDialog({ onClose, onCreated }: { onClose: () => void; onC
       <div className="w-full max-w-lg bg-gray-900 border border-gray-800 rounded-xl shadow-xl">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
           <h2 className="text-sm font-semibold">New page</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-white" title={running ? "Close (the job keeps running)" : "Close"}>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-50" title={running ? "Close (the job keeps running)" : "Close"}>
             <X size={16} />
           </button>
         </div>

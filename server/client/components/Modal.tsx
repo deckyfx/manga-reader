@@ -64,7 +64,7 @@ export function Modal({ title, onClose, children, footer, width = "max-w-lg" }: 
       >
         <div className="flex items-center gap-3 border-b border-gray-800 px-5 py-3">
           <h2 id={titleId} className="text-sm font-semibold text-gray-100">{title}</h2>
-          <button onClick={onClose} aria-label="Close" className="ml-auto rounded-md p-1 text-gray-400 hover:bg-gray-800 hover:text-white">
+          <button onClick={onClose} aria-label="Close" className="ml-auto rounded-md p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-50">
             <X size={16} />
           </button>
         </div>

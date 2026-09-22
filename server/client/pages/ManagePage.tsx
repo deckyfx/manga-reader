@@ -62,7 +62,7 @@ export function ManagePage() {
             className="w-44 bg-transparent text-sm focus:outline-none"
           />
           {search && (
-            <button onClick={() => setSearch("")} aria-label="Clear search" className="text-gray-500 hover:text-white">
+            <button onClick={() => setSearch("")} aria-label="Clear search" className="text-gray-500 hover:text-gray-50">
               <X size={13} />
             </button>
           )}
@@ -126,7 +126,7 @@ export function ManagePage() {
                       onClick={() => setEditing(entry)}
                       title="Edit this series"
                       aria-label={`Edit ${entry.title}`}
-                      className="rounded-md p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
+                      className="rounded-md p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-50"
                     >
                       <SquarePen size={14} />
                     </button>
@@ -134,7 +134,7 @@ export function ManagePage() {
                       to={`/read/series/${entry.id}`}
                       title="Open in Read"
                       aria-label={`Read ${entry.title}`}
-                      className="rounded-md p-1 text-gray-400 hover:bg-gray-800 hover:text-white"
+                      className="rounded-md p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-50"
                     >
                       <BookOpen size={14} />
                     </Link>

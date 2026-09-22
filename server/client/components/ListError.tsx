@@ -3,7 +3,7 @@ export function ListError({ error, onRetry }: { error: Error; onRetry: () => voi
   return (
     <p className="text-sm text-red-400">
       Couldn't load this list: {error.message}{" "}
-      <button type="button" onClick={onRetry} className="text-gray-300 underline hover:text-white">Try again</button>
+      <button type="button" onClick={onRetry} className="text-gray-300 underline hover:text-gray-50">Try again</button>
     </p>
   );
 }

@@ -160,7 +160,7 @@ export function ReaderPage() {
       aria-pressed={fit === mode}
       title={label}
       aria-label={label}
-      className={`p-1.5 rounded-md ${fit === mode ? "bg-gray-700 text-white" : "text-gray-400 hover:bg-gray-800"}`}
+      className={`p-1.5 rounded-md ${fit === mode ? "bg-gray-700 text-gray-50" : "text-gray-400 hover:bg-gray-800"}`}
     >
       {icon}
     </button>
@@ -169,7 +169,7 @@ export function ReaderPage() {
   return (
     <div ref={frameRef} className="flex flex-col h-full bg-gray-950">
       <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-gray-800">
-        <Link to={`/read/series/${chapterQ.data.series.id}`} className="text-gray-400 hover:text-white" title="Back to the series">
+        <Link to={`/read/series/${chapterQ.data.series.id}`} className="text-gray-400 hover:text-gray-50" title="Back to the series">
           <ArrowLeft size={18} />
         </Link>
         <span className="text-sm font-medium truncate">{chapterQ.data.chapter.title}</span>
