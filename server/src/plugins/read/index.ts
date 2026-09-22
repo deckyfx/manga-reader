@@ -160,7 +160,7 @@ export const toPage = (page: Page) => ({
   height: page.height,
   has_result: hasResult(page),
   published: publishedFile(page.id) !== null,
-  has_edits: hasUnpublishedEdits(page.id),
+  has_edits: hasUnpublishedEdits(page),
   revision: page.revision,
   updated_at: page.updatedAt,
 });

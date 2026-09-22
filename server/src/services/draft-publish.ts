@@ -57,6 +57,8 @@ export async function publishDraft(draft: Page): Promise<PublishOutcome> {
     await copyPageImages(draft.id, origin.id);
     await PageStore.copyStagesAndBlocks(draft.id, origin.id);
     const { revision, notified } = await publishPage(origin.id);
+    // The draft's work is what readers now see, so the draft has nothing left to publish until it is edited again
+    await PageStore.markResultPublished(draft.id);
     log.info({ draftId: draft.id, originPageId: origin.id, revision }, "Published a draft over its chapter page");
     return { ok: true, revision, notified, pageId: origin.id };
   });

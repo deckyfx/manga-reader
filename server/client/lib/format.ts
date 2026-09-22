@@ -32,3 +32,15 @@ export function onDay(value: string | Date | null | undefined, never = "never"):
   const date = toDate(value);
   return Number.isNaN(date.getTime()) ? never : date.toLocaleDateString();
 }
+
+/** A size in bytes as people read it: "812 B", "4.2 MB". */
+export function bytes(size: number): string {
+  const units = ["B", "KB", "MB", "GB"];
+  let value = size;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${unit === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}

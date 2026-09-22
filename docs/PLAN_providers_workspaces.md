@@ -25,7 +25,7 @@ Cloudflare. The server doesn't scrape, doesn't hold site accounts and doesn't ne
 |---|---|---|---|
 | P3 | Workspaces (+ Send chapter to Studio, File into chapter) | M | **Done** — PR #25 |
 | P4 | **Extension: import a chapter as a workspace** (generic extractor + rawkuma) | M–L | **Done** — PR #27 |
-| P5 | exhentai extractor + adult flag | S–M | Adult flag **done** (this PR); extractor with the extension session |
+| P5 | exhentai extractor + adult flag | S–M | **Done** — adult flag PR #28, extractor PRs #29–#31; checked live 2026-09-21 |
 | P0 | Settings areas: sub-menus, full width | S | **Done** — PR #26 |
 | P1 | Add pages by URL (Studio and chapter, many at once) | S | **Done** — PR #28 |
 | P2 | Region scan log | S–M | **Done** — PR #26 |
@@ -33,11 +33,9 @@ Cloudflare. The server doesn't scrape, doesn't hold site accounts and doesn't ne
 | P6b | Several cover arts | M | **Done** — PR #28 |
 | P6c | Reviews and ratings | M | **Done** — PR #28 |
 
-Two sessions are working through this in parallel: one on P4 → P1 → P5 (the extension side), one on P6 (the library
-side). Migrations are not reserved ahead — generate at push time, and whoever merges second rebases and re-runs
-`bun run db:generate`.
-
-P0–P2 can be picked up whenever. They don't block P3 and P4, and P3 and P4 don't block them.
+**Every phase is done** (2026-09-22), and the import flow was checked in a browser against live exhentai and rawkuma
+pages. Two sessions built it in parallel, one on the extension side (P4 → P1 → P5) and one on the library (P6); what
+changed from this plan on the way is noted in each section.
 
 ## 2. P0: settings areas as sub-menus
 
@@ -201,23 +199,18 @@ published, and then that copy's result replaces the chapter page.
 | Download images | background worker `fetch` (host permission covers CORS) | CDNs are cross-origin; the worker isn't bound by the page's CSP |
 | Upload to the server | background worker, typed Eden client (`extension/src/api.ts`) | Existing API key + server URL; the same "don't send the key over plain http" and "no redirects" rules apply |
 
-- **Referer — settled for rawkuma (2026-09-20):** its CDN (`kuma.kyut.dev`) doesn't check it. Tested by the other
-  session against a real chapter image: no Referer, no user agent, a wrong Referer and the right one all returned the
-  same 200 and the same 318,148 bytes. So the downloader sends no spoofed headers and needs **no**
-  `declarativeNetRequest` permission; a plain worker `fetch` under the existing `<all_urls>` grant is enough. Add the
-  rule only when a provider turns out to need it, and re-test for exhentai's H@H nodes (P5), which are a different
-  animal.
-  If one ever does: `fetch()` can't set `Referer` (a forbidden header name — silently dropped), so the only MV3 route
-  is a `declarativeNetRequest` session rule with `modifyHeaders`, using `declarativeNetRequestWithHostAccess` (the
-  narrower permission, since `<all_urls>` is already granted). **Still unconfirmed:** whether such a rule matches the
-  extension's *own* fetches rather than only page-initiated ones — isolate that with one rule and one fetch before
-  building on it.
-- **Worker lifetime:** MV3 workers sleep when idle. The import is a queue persisted in `chrome.storage.session`
-  (chapter, address list, per-page status, workspace id), so a woken worker resumes where it stopped. A long gallery
-  runs in an **offscreen document** if the spike shows the worker gets cut off mid-download.
-- **Pacing:** images download 2 at a time, with the extractor's `minIntervalMs` between requests, which matters for
-  exhentai's image quota. Batches of about 5 pages are uploaded as they arrive, so the server sees progress early and
-  the extension doesn't hold the whole chapter in memory.
+- **Referer — settled (rawkuma 2026-09-20, exhentai 2026-09-21):** neither site's image host checks it. rawkuma's CDN
+  (`kuma.kyut.dev`) returned the same 200 and bytes with no Referer, no user agent, a wrong Referer and the right one,
+  and exhentai's H@H nodes served imports with none. So the downloader sends no spoofed headers and the extension has
+  **no** `declarativeNetRequest` permission; a plain worker `fetch` under the existing `<all_urls>` grant is enough.
+  (Should a future provider need one: `fetch()` can't set `Referer`, a forbidden header name, so it would take a
+  `declarativeNetRequest` session rule — to be tested against the extension's own fetches before relying on it.)
+- **Worker lifetime — settled:** MV3 workers sleep when idle. The import is a job persisted in `chrome.storage.session`
+  (address list, per-page status, workspace id), so a woken worker resumes from the first pending page. Long galleries
+  import this way without an offscreen document.
+- **Pacing — as built:** a page at a time through resolve → download → upload, five in flight, with one pacing clock
+  per site at the extractor's `minIntervalMs` (galleries pace the page lookups; readers pace the downloads). Each page
+  uploads as soon as it is downloaded, so the server sees progress at once and translation follows the pages in.
 
 ### 6.3 Extractors (pluggable)
 
@@ -267,8 +260,13 @@ interface Extractor {
 
 - `matches`: `rawkuma.net/manga/<slug>/chapter-<n>.<id>/`.
 - The images are plain `<img>` tags in the reader, served from `kuma.kyut.dev`, and all of them are in the HTML: the
-  2026-09-18 probe found 25 with no JavaScript run, and they downloaded with only a `Referer`.
-- The title comes from the breadcrumb or `og:title`, and the chapter from the URL.
+  2026-09-18 probe found 25 with no JavaScript run.
+- **2026-09-22:** the site moved to a new theme. The pages now sit in `<section data-image-data>` (still plain `src`,
+  still all in the HTML), and the image host serves them with no `Referer`, the site's, or a wrong one. The old reader
+  selectors are kept as fallbacks.
+- The title comes from `og:title`, or from `<title>` ("<Series> Chapter 17.1 – Rawkuma", trimmed to the series name,
+  since the new theme has no `og:title`). The chapter comes from the URL, where `chapter-17.1.411312` is 17.1: the
+  trailing run of four or more digits is the site's post id.
 - Keep this a thin wrapper over `generic` with a fixed selector, so a layout change breaks loudly instead of picking the
   wrong images.
 
@@ -295,16 +293,15 @@ reported rather than failing the series.
 - No stored credentials: the user is signed in to exhentai in their browser, so the content script's same-origin
   fetches carry their cookies. If the page is the "sad panda" (no access), the popup says so.
 - `matches`: `exhentai.org/g/<gid>/<token>/` and `e-hentai.org/g/…` (same markup).
-- `extract`:
-  1. Read the page count from the gallery's pager. For each gallery page `?p=0..N`, `fetchDocument` it and collect the
-     `/s/<key>/<gid>-<n>` links in order.
-  2. For each link, `fetchDocument` the image page and read `#img[src]`. The images come from H@H nodes on arbitrary
-     hosts, which `<all_urls>` covers.
-  3. That's 1 + pages/40 + page-count requests at `minIntervalMs` ≥ 1000. The popup shows "reading page 37/120" while
-     collecting.
-  4. The title comes from `#gn` (or `#gj` for the Japanese title), with `adult: true`.
-- **Quota:** a 509 image ("bandwidth exceeded") or an error page stops the import with "image limit reached". Pages
-  already imported stay, and a retry later continues from the next page.
+- `extract` (as built, PRs #29–#31) only lists: it walks the gallery's pager `?p=0..N`, 20 thumbnails a page (not the 40
+  first assumed), and collects the `/s/<key>/<gid>-<n>` image-page links in order, with the title from `#gj` or `#gn`,
+  the gallery's `#taglist` as tag suggestions, and `adult: true`. Listing a long gallery takes seconds, not a minute.
+- `resolve` turns one image page into its image (`#img[src]`, an H@H node on any host). It runs in the gallery tab,
+  so the user's cookies never leave the browser; the tab has to stay open while an import resolves, the popup doesn't.
+- The import goes a page at a time — resolve, download, upload, five in flight, one pace per site — and translation
+  follows the pages as they land, rather than listing everything before the first upload.
+- **Quota and outages:** the image-limit notice, a timeout, a dropped network, 408, 429 or 5xx pause the import with the
+  page still pending, and Try again carries on from there. A 404 or a page with no image fails only that page.
 
 ### Adult flag (done)
 
@@ -366,10 +363,10 @@ Decided 2026-09-19:
    user's browser is already signed in and already cleared by Cloudflare.
 6. **The goal is chapter → Studio workspace in one step**. Filing into the library is a later, separate action (§5).
 
-To settle in the P4 spike (on rawkuma first):
-- Does Chrome send the site's cookies on the worker's cross-site image fetches? It only matters for CDNs that need
-  them; rawkuma's don't.
-- Does the `declarativeNetRequest` Referer rule apply to the extension's own fetches? Still open, but no longer
-  blocking: rawkuma needs no Referer at all (see §6.2), so P4 is built without the rule. The question returns with
-  exhentai in P5.
-- Does the worker survive a 100-page import, or does it need the offscreen document?
+Answered by building it (2026-09-21/22):
+- Cookies on the worker's image fetches: not needed. rawkuma's and exhentai's image hosts serve without them, and the
+  one step that needs exhentai's cookies (resolving an image page) runs in the gallery tab itself.
+- The `declarativeNetRequest` Referer rule: not needed either. Neither site's image host checks the Referer, so no
+  rule was ever added.
+- A long import and the MV3 worker: imports go a page at a time with the job kept in `chrome.storage.session`, so a
+  worker that sleeps resumes from the first pending page. No offscreen document.

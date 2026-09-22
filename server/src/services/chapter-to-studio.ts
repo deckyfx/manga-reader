@@ -65,6 +65,11 @@ export async function sendChapterToStudio(chapter: Chapter, createdBy: number | 
         report.skipped.push({ pageId: page.id, reason: "still being translated" });
         continue;
       }
+      // Its working state is gone, so a draft of it would have nothing to edit
+      if (page.finalizedAt !== null) {
+        report.skipped.push({ pageId: page.id, reason: page.rawDeleted ? "finalized without its original" : "finalized — redo it first" });
+        continue;
+      }
       try {
         // Under the source's lock, so a copy is never taken while that page is being edited — and re-read there,
         // since a run finishing since the listing changes its size, status and images

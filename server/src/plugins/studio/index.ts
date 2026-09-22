@@ -37,6 +37,7 @@ import { runExclusiveResult, withPageLock } from "@/queue/page-queue";
 import { fetchImage } from "@/services/image-fetch";
 import { enginesNotReady, pageEngines } from "@/services/page-engines";
 import { historyFile, listHistory, restoreResult } from "@/services/page-history";
+import { finalizePage, planFinalize } from "@/services/page-finalize";
 import { pageLocation, pageLocations } from "@/services/page-location";
 import { publishBlocker, publishDraft } from "@/services/draft-publish";
 import { discardPage } from "@/services/page-discard";
@@ -44,7 +45,7 @@ import { publishPage } from "@/services/page-publish";
 import { decodeBase64Image, runStoredPage, submitPageJob } from "@/services/page-jobs";
 import { MASK_LAYER_FILES, PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
 import { FONT_FILES } from "@/services/typeset-service";
-import { FONT_VARIANTS, TEXT_ALIGNS } from "@/shared/typeset";
+import { FONT_VARIANTS, TEXT_ALIGNS, type TextStyle } from "@/shared/typeset";
 import { imageSize, maskFromImage, maskToPng } from "@/lib/mask";
 import { pageDir, PageStore, type StageName } from "@/stores/page-store";
 import { PageSummary, toSummary } from "@/plugins/studio/page-summary";
@@ -67,6 +68,15 @@ const RUNNABLE = {
   clean_sfx: ["render"],
   render: [],
 } as const satisfies Record<string, readonly StageName[]>;
+
+/** Two lettering styles are the same whatever order their keys were written in (null = automatic). */
+function sameStyle(a: TextStyle | null, b: TextStyle | null): boolean {
+  const canonical = (value: unknown): unknown =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined).sort(([x], [y]) => x.localeCompare(y)).map(([k, v]) => [k, canonical(v)]))
+      : value;
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
 
 /** Largest encoded mask layer accepted (a 1-bit page PNG is far smaller). */
 const MAX_MASK_BYTES = 8 * 1024 * 1024;
@@ -179,18 +189,44 @@ const BlockSchema = t.Object({
   style: t.Nullable(StyleSchema),
   /** Where the last render placed the text (run-length mask), for the live preview; null before a render. */
   area: t.Nullable(StoredAreaSchema),
+  /** Its source text changed since it was last translated. */
+  needs_translate: t.Boolean(),
+  /** It changed since the page was last rendered: this block is why the render is out of date. */
+  needs_render: t.Boolean(),
 });
 
 const PageDetail = t.Object({ page: PageSummary, stages: t.Array(StageSchema), blocks: t.Array(BlockSchema) });
 
 const PublishResult = t.Object({ revision: t.Integer(), notified: t.Integer() });
 
+const FinalizeResult = t.Object({
+  pages: t.Array(t.Object({
+    id: t.String(),
+    ok: t.Boolean(),
+    /** Why this page was left as it was; null when it was (or, on a dry run, would be) finalized. */
+    reason: t.Nullable(t.String()),
+    /** What was (or would be) deleted, relative to the page's folder. */
+    files: t.Array(t.String()),
+    bytes: t.Integer(),
+  })),
+  /** Space freed (or that would be) across all of them. */
+  bytes: t.Integer(),
+});
+
 function toStage(row: PageStageRow) {
   return { stage: row.stage, status: row.status, file: row.file, error: row.errorMessage, updated_at: row.updatedAt };
 }
 
 function toBlock(block: PageBlock) {
-  return { ...block, render: block.render ?? null, shape: block.shape ?? null, style: block.style ?? null, area: block.area ?? null };
+  return {
+    ...block,
+    render: block.render ?? null,
+    shape: block.shape ?? null,
+    style: block.style ?? null,
+    area: block.area ?? null,
+    needs_translate: block.needs_translate ?? false,
+    needs_render: block.needs_render ?? false,
+  };
 }
 
 /** Everything the page editor shows, or null when the page doesn't exist. */
@@ -202,10 +238,18 @@ async function pageDetail(id: string) {
 }
 
 /** Why a page can't be edited right now (missing, or still running in the pipeline), as a status + message. */
-async function editablePage(id: string): Promise<{ page: Page } | { code: 404 | 409; error: string }> {
+/**
+ * The page, if it can be worked on now. A finalized page can't — its working state is gone — except that one which
+ * kept its original may be redone (`redo`), which runs every stage again from that original.
+ */
+async function editablePage(id: string, { redo = false } = {}): Promise<{ page: Page } | { code: 404 | 409; error: string }> {
   const page = await PageStore.findById(id);
   if (!page) return { code: 404, error: "page not found" };
   if (page.status === "queued" || page.status === "running") return { code: 409, error: "page is still being translated" };
+  if (page.finalizedAt !== null) {
+    if (page.rawDeleted) return { code: 409, error: "this page is finalized without its original, so it can't be changed" };
+    if (!redo) return { code: 409, error: "this page is finalized — redo it to work on it again" };
+  }
   return { page };
 }
 
@@ -333,16 +377,18 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       // A new source text makes its translation stale too; a new translation only needs typesetting again; toggling
       // whether a block is cleaned affects its clean pass (text cleaning also feeds the sfx pass) and the result.
       // The edit and the stale marking commit together.
+      // Only what actually changes: saving a field back unchanged (a blur on an untouched box, a re-save of the same
+      // style) leaves the stages as they were, instead of asking for a re-render that would produce the same image
       const stale = new Set<StageName>();
-      if (body.source_text !== undefined) stale.add("translate").add("render");
-      if (body.translated_text !== undefined) stale.add("render");
+      if (body.source_text !== undefined && body.source_text !== (block.source_text ?? "")) stale.add("translate").add("render");
+      if (body.translated_text !== undefined && body.translated_text !== (block.translated_text ?? "")) stale.add("render");
+      // An empty style is the automatic layout: stored as none
+      const style = body.style === undefined ? undefined : body.style && Object.keys(body.style).length > 0 ? body.style : null;
       // Lettering changes only need the text burned again
-      if (body.style !== undefined) stale.add("render");
+      if (style !== undefined && !sameStyle(style, block.style ?? null)) stale.add("render");
       if (body.include !== undefined && body.include !== block.include) {
         for (const s of block.kind === "sfx" ? (["clean_sfx", "render"] as const) : (["clean_text", "clean_sfx", "render"] as const)) stale.add(s);
       }
-      // An empty style is the automatic layout: stored as none
-      const style = body.style === undefined ? undefined : body.style && Object.keys(body.style).length > 0 ? body.style : null;
       const fields = { sourceText: body.source_text, translatedText: body.translated_text, include: body.include, style };
       if (!(await PageStore.updateBlock(params.id, params.idx, fields, [...stale]))) return status(404, { error: "block not found" });
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
@@ -452,33 +498,39 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       try {
         // The page lock keeps edits out while this reads, processes and writes the blocks; the global queue shares the CPU
         // Whether this run covered every block the stage applies to; a partial run can't vouch for the whole stage
-        const wholeStage = await runExclusiveResult(async (): Promise<boolean> => {
+        // …and whether it changed any text: a re-read or re-translation that comes back the same leaves the stages
+        // after it as they were, rather than asking for work that would produce the same result
+        const { wholeStage, changed } = await runExclusiveResult(async (): Promise<{ wholeStage: boolean; changed: boolean }> => {
           const pipeline = new PagePipeline(pageDir(params.id), () => {}, PageStore.repository(params.id));
           const job = await pipeline.readJob();
           if (!job) throw new Error("page has no detected blocks");
           const ids = body.block_ids;
           if (ids?.some((id) => !job.blocks.some((b) => b.id === id))) throw new Error("unknown block id");
           const covers = (targets: PageBlock[]): boolean => !ids || targets.every((b) => ids.includes(b.id));
+          const texts = (field: "source_text" | "translated_text"): string => JSON.stringify(job.blocks.map((b) => [b.id, b[field] ?? ""]));
           if (stage === "ocr") {
             const covered = covers(job.blocks.filter((b) => b.kind === "text"));
+            const before = texts("source_text");
             await pipeline.ocr(job, pageEngines.ocr, ids);
-            return covered;
+            return { wholeStage: covered, changed: texts("source_text") !== before };
           }
           if (stage === "translate") {
             const covered = covers(job.blocks.filter((b) => b.kind === "text" && b.source_text?.trim()));
+            const before = texts("translated_text");
             await pipeline.translate(job, pageEngines.translate, ids);
-            return covered;
+            return { wholeStage: covered, changed: texts("translated_text") !== before };
           }
-          // Cleaning always covers the whole kind; to fix part of the page use POST …/reclean with areas
+          // Cleaning always covers the whole kind; to fix part of the page use POST …/reclean with areas. A new image
+          // is always a change for what's built on it
           if (stage === "clean_text" || stage === "clean_sfx") {
             await pipeline.clean(job, stage === "clean_text" ? "text" : "sfx");
-            return true;
+            return { wholeStage: true, changed: true };
           }
           await pipeline.render(job);
-          return true;
+          return { wholeStage: true, changed: true };
         });
         if (wholeStage) await PageStore.setStage(params.id, stage, "fresh");
-        if (RUNNABLE[stage].length > 0) await PageStore.markStale(params.id, [...RUNNABLE[stage]]);
+        if (changed && RUNNABLE[stage].length > 0) await PageStore.markStale(params.id, [...RUNNABLE[stage]]);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error({ err, pageId: params.id, stage }, "Studio run failed");
@@ -616,21 +668,51 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
   )
 
   .post(
+    "/pages/finalize",
+    async ({ body }) => {
+      const deleteRaw = body.delete_raw ?? false;
+      const pages: { id: string; ok: boolean; reason: string | null; files: string[]; bytes: number }[] = [];
+      // One page at a time, each under its own lock, read fresh there: a page may have been edited, run or finalized
+      // since the list was shown
+      for (const id of [...new Set(body.ids)]) {
+        const plan = await withPageLock(id, async () => {
+          const page = await PageStore.findById(id);
+          if (!page) return { ok: false as const, reason: "page not found" };
+          return body.dry_run ? planFinalize(page, deleteRaw) : finalizePage(page, deleteRaw);
+        });
+        pages.push(plan.ok ? { id, ok: true, reason: null, files: plan.files, bytes: plan.bytes } : { id, ok: false, reason: plan.reason, files: [], bytes: 0 });
+      }
+      return { pages, bytes: pages.reduce((sum, page) => sum + page.bytes, 0) };
+    },
+    {
+      body: t.Object({
+        ids: t.Array(IdParam, { minItems: 1, maxItems: 200 }),
+        /** Delete the original too: the page becomes read-only for good, and the image is no longer recognised. */
+        delete_raw: t.Optional(t.Boolean()),
+        /** Report what would be deleted and the space freed, changing nothing. */
+        dry_run: t.Optional(t.Boolean()),
+      }),
+      response: { 200: FinalizeResult },
+    },
+  )
+
+  .post(
     "/pages/:id/rerun",
     async ({ params, body, status }) => {
       // Admission under the page's lock: it marks the page queued, and a publish holding the lock must finish
       // deciding on the page it read before that happens. The run itself queues behind, outside this lock.
       const check = await withPageLock(params.id, async () => {
-        const editable = await editablePage(params.id);
+        // Running again is also how a finalized page (original kept) is redone
+        const editable = await editablePage(params.id, { redo: true });
         if ("code" in editable) return editable;
-        return {
-          ...editable,
-          result: await runStoredPage(params.id, {
-            source: editable.page.source,
-            cleanSfx: body?.clean_sfx ?? editable.page.cleanSfx,
-            force: true,
-          }),
-        };
+        const result = await runStoredPage(params.id, {
+          source: editable.page.source,
+          cleanSfx: body?.clean_sfx ?? editable.page.cleanSfx,
+          force: true,
+        });
+        // Only once the run is really under way: a refused start leaves the page finalized as it was
+        if (result.ok && editable.page.finalizedAt !== null) await PageStore.clearFinalized(params.id);
+        return { ...editable, result };
       });
       if ("code" in check) return status(check.code, { error: check.error });
       const { result } = check;
@@ -689,6 +771,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
       if (!(await restoreResult(params.id, body.revision))) return status(404, { error: "revision not found" });
+      await PageStore.noteResultChanged(params.id);
       // The restored image no longer matches the blocks: a later re-render would replace it with the current text.
       // Rollback publishes on purpose despite the stale render (the one exception to the publish check).
       await PageStore.markStale(params.id, ["render"]);

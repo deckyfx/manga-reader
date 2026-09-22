@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlignCenter, AlignLeft, AlignRight, ArrowLeft, ChevronLeft, ChevronRight, Eraser, FolderInput, History, Languages, Loader2, Megaphone, PanelRightClose, PanelRightOpen, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, ChevronLeft, ChevronRight, Eraser, FolderInput, History, Languages, Loader2, Megaphone, PanelRightClose, PanelRightOpen, RefreshCw, RotateCcw, ScanText, Send, Trash2, TriangleAlert } from "lucide-react";
 import {
   deleteBlock,
   getChapter,
@@ -13,6 +13,7 @@ import {
   placeText,
   publishPage,
   rollbackPage,
+  rerunPage,
   runStage,
   updateBlock,
   type FontVariant,
@@ -25,6 +26,7 @@ import {
 } from "../api";
 import { ActionsMenu, type MenuAction } from "../components/ActionsMenu";
 import { ChapterPicker } from "../components/ChapterPicker";
+import { FinalizeDialog } from "../components/FinalizeDialog";
 import { DiscardPageDialog } from "../components/DiscardPageDialog";
 import { useConfirm } from "../components/ConfirmDialog";
 import { JobProgress } from "../components/JobProgress";
@@ -129,9 +131,16 @@ export function StudioPageEditor() {
   const cleanTextM = useMutation({ mutationFn: () => runStage(id, "clean_text"), onSuccess: afterClean });
   const cleanSfxM = useMutation({ mutationFn: () => runStage(id, "clean_sfx"), onSuccess: afterClean });
   const publishM = useMutation({ mutationFn: () => publishPage(id), onSuccess: onPublished });
+  // The whole pipeline again from the original; the page turns busy and the processing view follows the job
+  const rerunM = useMutation({
+    mutationFn: () => rerunPage(id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["studio-page", id] }),
+  });
   const navigate = useNavigate();
   const [discarding, setDiscarding] = useState(false);
   const [filing, setFiling] = useState(false);
+  /** The finalize dialog: finalizing the page, or (already finalized) deleting its original too. */
+  const [finalizing, setFinalizing] = useState<"finalize" | "raw" | null>(null);
   const confirm = useConfirm();
   // A page inside a chapter can be walked through in reading order, without going back to Manage each time
   const chapterId = pageQ.data?.page.location?.chapter_id ?? null;
@@ -271,7 +280,7 @@ export function StudioPageEditor() {
   const sfxBlocks = blocks.filter((b) => b.kind !== "text");
   const version = `${page.updated_at}-${page.revision}-${renderStage?.updated_at ?? ""}-${imagesNonce}`;
   const cleaning = cleanTextM.isPending || cleanSfxM.isPending;
-  const actionError = cleanTextM.error ?? cleanSfxM.error ?? renderM.error ?? translateAllM.error ?? publishM.error ?? deleteBlockM.error;
+  const actionError = cleanTextM.error ?? cleanSfxM.error ?? renderM.error ?? translateAllM.error ?? publishM.error ?? rerunM.error ?? deleteBlockM.error;
 
   /** A stage's status in the latest page data: queued actions re-check it, since the saves they waited for can outdate it. */
   const latestStageStatus = (name: string) =>
@@ -359,6 +368,34 @@ export function StudioPageEditor() {
       separated: true,
     },
     {
+      key: "finalize",
+      label: "Finalize…",
+      icon: <Archive size={14} />,
+      hint: "Remove the working files, keeping the final image",
+      onSelect: () => setFinalizing("finalize"),
+      unavailable: unavailableWhen(translating, [!page.has_result, "No finished image yet"]),
+    },
+    {
+      key: "rerun",
+      label: page.finalized ? "Redo job…" : "Run again…",
+      icon: <RotateCcw size={14} />,
+      hint: "Detect, read, translate and clean the page again from its original",
+      onSelect: () => {
+        void (async () => {
+          const ok = await confirm({
+            title: "Run this page again?",
+            message: "Every stage runs again from the original image. Regions you drew, text you edited and lettering styles are replaced by what the run finds. What readers see doesn't change until you publish.",
+            confirmLabel: "Run again",
+            danger: true,
+          });
+          if (ok) rerunM.mutate();
+        })();
+      },
+      unavailable: unavailableWhen(translating, [rerunM.isPending, "Starting…"]),
+      pending: rerunM.isPending,
+      separated: true,
+    },
+    {
       key: "delete",
       label: page.location ? "Discard…" : "Delete page",
       icon: <Trash2 size={14} />,
@@ -368,6 +405,24 @@ export function StudioPageEditor() {
       danger: true,
     },
   ];
+
+  // A finalized page has no working state left: redo it (original kept), delete its original, or delete it
+  const menuActions: MenuAction[] = page.finalized
+    ? [
+        ...pageActions.filter((action) => action.key === "rerun" && page.raw_kept),
+        ...(page.raw_kept
+          ? [{
+              key: "delete-raw",
+              label: "Delete the original…",
+              icon: <Archive size={14} />,
+              hint: "Free its space; the page becomes read-only for good",
+              onSelect: () => setFinalizing("raw"),
+              unavailable: unavailableWhen(translating),
+            }]
+          : []),
+        ...pageActions.filter((action) => action.key === "delete"),
+      ]
+    : pageActions;
 
   return (
     <div className="flex flex-col h-full">
@@ -485,11 +540,13 @@ export function StudioPageEditor() {
               Published rev {published.revision} · {published.notified} open tab{published.notified === 1 ? "" : "s"} updated
             </span>
           )}
-          <ActionsMenu actions={pageActions} />
+          <ActionsMenu actions={menuActions} />
         </div>
       </div>
 
-      {busy ? (
+      {page.finalized && !busy ? (
+        <FinalizedView pageId={page.id} rawKept={page.raw_kept} version={version} />
+      ) : busy ? (
         <ProcessingView pageId={page.id} status={page.status} version={version} job={job} />
       ) : (
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
@@ -608,6 +665,15 @@ export function StudioPageEditor() {
         </aside>
         )}
       </div>
+      )}
+
+      {finalizing && (
+        <FinalizeDialog
+          pageIds={[page.id]}
+          onlyRaw={finalizing === "raw"}
+          onClose={() => setFinalizing(null)}
+          onDone={() => setFinalizing(null)}
+        />
       )}
 
       {filing && (
@@ -792,6 +858,7 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
     >
       <div className="flex items-center gap-2 text-xs">
         <span className="font-semibold text-sky-400">#{block.id}</span>
+        <BlockNeeds block={block} />
         {block.render && !block.render.fits && (
           <span className="flex items-center gap-1 text-amber-400" title="The text did not fit its area">
             <TriangleAlert size={12} /> overflow
@@ -866,6 +933,35 @@ function IncludeToggle({ pageId, block, disabled, onChanged, trackSave, title }:
   );
 }
 
+/**
+ * What this block is waiting for since it changed: a new translation, or just burning again. The page's stage tags
+ * say a stage is out of date; this says which blocks made it so.
+ */
+function BlockNeeds({ block }: { block: StudioBlock }) {
+  if (block.needs_translate) {
+    return <span className="rounded-full bg-amber-900/50 px-1.5 text-[10px] text-amber-300" title="Its text changed since it was translated">translate</span>;
+  }
+  if (block.needs_render) {
+    return <span className="rounded-full bg-amber-900/50 px-1.5 text-[10px] text-amber-300" title="Changed since the page was last burned">re-burn</span>;
+  }
+  return null;
+}
+
+/** A finalized page: only its final image is left, and what can still be done with it. */
+function FinalizedView({ pageId, rawKept, version }: { pageId: string; rawKept: boolean; version: string | number }) {
+  return (
+    <div className="flex flex-1 min-h-0 flex-col items-center gap-3 overflow-y-auto p-6">
+      <p className="max-w-xl text-center text-sm text-gray-400">
+        This page is finalized: its working files, regions and stages were removed, and this is its final image.{" "}
+        {rawKept
+          ? "The original is kept, so Redo job in the actions menu can rebuild it."
+          : "Its original was deleted too, so it is read-only."}
+      </p>
+      <img src={pageFileUrl(pageId, "result.png", version)} alt="The finished page" className="max-h-[80vh] max-w-full object-contain" />
+    </div>
+  );
+}
+
 /** One sound-effect region: selectable, with its include-in-cleaning toggle and optional new lettering. */
 function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, onSelect, setBlockStyle, onDelete }: {
   pageId: string;
@@ -895,6 +991,7 @@ function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, 
     >
       <div className="flex items-center gap-2">
         <span className="font-semibold text-orange-400">#{block.id}</span>
+        <BlockNeeds block={block} />
         <span className="text-gray-500 tabular-nums">{block.w}×{block.h}</span>
         {saveM.isPending && <Loader2 size={12} className="animate-spin text-gray-500" />}
         <span className="ml-auto">

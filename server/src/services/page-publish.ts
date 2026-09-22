@@ -21,13 +21,12 @@ const log = childLogger("publish");
  * The snapshot is written before the revision is committed, so a failure leaves the page exactly as it was: a
  * committed revision whose snapshot never landed would point readers and extension tabs at a missing image.
  */
-export async function publishPage(id: string, { keepResultTime = false } = {}): Promise<{ revision: number; notified: number }> {
+export async function publishPage(id: string): Promise<{ revision: number; notified: number }> {
   const page = await PageStore.findById(id);
   if (!page) throw new Error("page not found");
   const revision = page.revision + 1;
 
-  // `keepResultTime` is for the backfill, which records burns made long ago rather than publishing new work
-  await snapshotResult(id, revision, { keepTime: keepResultTime });
+  await snapshotResult(id, revision);
   try {
     await PageStore.bumpRevision(id);
   } catch (err) {

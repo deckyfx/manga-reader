@@ -488,7 +488,9 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       }
       // A page that arrives already translated is published at once: readers only ever see published snapshots, and a
       // page nobody has read yet has nothing to protect from a publish
-      if (hasUnpublishedEdits(filed.id)) await withPageLock(filed.id, () => publishPage(filed.id));
+      // Read again: the copy or move just changed what it has and what it has published
+      const arrived = await PageStore.findById(filed.id);
+      if (arrived && hasUnpublishedEdits(arrived)) await withPageLock(arrived.id, () => publishPage(arrived.id));
       return (await chapterDetail(params.id)) ?? status(404, { error: "chapter not found" });
     },
     {
@@ -578,7 +580,7 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       if (!(await ChapterStore.findById(params.id))) return status(404, { error: "chapter not found" });
       const pages = await PageStore.listByChapter(params.id);
       // Only pages holding work readers can't see yet; a page still in the pipeline is left for the next publish
-      const pending = pages.filter((page) => page.status !== "queued" && page.status !== "running" && hasUnpublishedEdits(page.id));
+      const pending = pages.filter((page) => page.status !== "queued" && page.status !== "running" && hasUnpublishedEdits(page));
       for (const page of pending) await withPageLock(page.id, () => publishPage(page.id));
       const detail = await chapterDetail(params.id);
       if (!detail) return status(404, { error: "chapter not found" });
@@ -773,7 +775,7 @@ export const managePlugin = new Elysia({ prefix: "/manage/api" })
       const page = await PageStore.findById(params.id);
       if (!page) return status(404, { error: "page not found" });
       if (page.status === "queued" || page.status === "running") return status(409, { error: "page is still being translated" });
-      if (!hasUnpublishedEdits(params.id)) return status(409, { error: "this page has nothing new to publish" });
+      if (!hasUnpublishedEdits(page)) return status(409, { error: "this page has nothing new to publish" });
       await withPageLock(params.id, () => publishPage(params.id));
       const updated = await PageStore.findById(params.id);
       return updated ? toPage(updated) : status(404, { error: "page not found" });

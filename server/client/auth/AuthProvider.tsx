@@ -43,9 +43,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const refresh = useCallback(async () => {
-    // Waits for the answer (invalidating refetches the mounted query and settles once it has), so a caller acts on
-    // what comes back rather than on what was cached
-    await qc.invalidateQueries({ queryKey: ["me"] });
+    // Fetched and written into the cache outright, not invalidated: invalidating after an account change was seen to
+    // leave the old answer in place (the adult switch saved but kept showing "off"), and a direct fetch can't be
+    // skipped. Awaited, so a caller acts on what comes back; a 401 lands on the query as the guest answer
+    await qc.fetchQuery({ queryKey: ["me"], queryFn: getMe, staleTime: 0 }).catch(() => undefined);
   }, [qc]);
 
   const signOut = useCallback(async () => {

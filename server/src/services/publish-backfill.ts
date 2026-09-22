@@ -118,10 +118,7 @@ export async function backfillPublishes(): Promise<BackfillReport> {
         if (!page) return false;
         if (publishedFile(pageId) !== null) return false;
         if (publishBlocker(page, await PageStore.listStages(pageId)) !== null) return false;
-        // The snapshot keeps the burn's own timestamp. Whether a Studio draft still has work to publish is decided by
-        // comparing it against its chapter page's newest snapshot, so dating these "now" would date an old burn later
-        // than a draft rendered since, and that draft's edits would quietly stop being offered
-        await publishPage(pageId, { keepResultTime: true });
+        await publishPage(pageId);
         return true;
       });
       if (done) report.published.push(pageId);

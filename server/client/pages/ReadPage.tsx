@@ -4,6 +4,8 @@ import { BookOpen, Library, Loader2, Search, X } from "lucide-react";
 import { listSeries, listSeriesTags, seriesCoverUrl, type SeriesQuery, type SeriesStatus } from "../api";
 
 const STATUS_LABEL: Record<string, string> = { ongoing: "Ongoing", completed: "Completed", hiatus: "Hiatus" };
+/** Tags shown on a library card; the rest are counted and live on the series page. */
+const CARD_TAGS = 4;
 
 const STATUSES: readonly SeriesStatus[] = ["ongoing", "completed", "hiatus"];
 
@@ -152,28 +154,57 @@ export function ReadPage() {
         ) : (
           <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(160px,1fr))]">
             {series.map((entry) => (
-              <Link
+              // Two parts, since a link can't hold links: the cover and title open the series, the tags filter here
+              <div
                 key={entry.id}
-                to={`/read/series/${entry.id}`}
-                className="group rounded-lg overflow-hidden bg-gray-900 border border-gray-800 hover:border-indigo-500/60 transition-colors"
+                className="group flex flex-col rounded-lg overflow-hidden bg-gray-900 border border-gray-800 hover:border-indigo-500/60 transition-colors"
               >
-                <div className="aspect-2/3 bg-gray-950 flex items-center justify-center">
-                  {entry.has_cover ? (
-                    <img src={seriesCoverUrl(entry.id, entry.updated_at)} alt="" loading="lazy" className="w-full h-full object-cover" />
-                  ) : (
-                    <BookOpen size={28} className="text-gray-700" />
+                <Link to={`/read/series/${entry.id}`} className="block">
+                  <div className="aspect-2/3 bg-gray-950 flex items-center justify-center">
+                    {entry.has_cover ? (
+                      <img src={seriesCoverUrl(entry.id, entry.updated_at)} alt="" loading="lazy" className="w-full h-full object-cover" />
+                    ) : (
+                      <BookOpen size={28} className="text-gray-700" />
+                    )}
+                  </div>
+                  <div className="px-2 pt-2 space-y-1">
+                    <div className="text-sm font-medium truncate group-hover:text-indigo-300" title={entry.title}>{entry.title}</div>
+                    <div className="flex items-center gap-2 text-[11px] text-gray-500">
+                      <span>{entry.chapters} ch</span>
+                      <span>{STATUS_LABEL[entry.status] ?? entry.status}</span>
+                      <span className="ml-auto">{entry.reading_direction.toUpperCase()}</span>
+                    </div>
+                  </div>
+                </Link>
+                <div className="flex flex-wrap gap-1 px-2 pt-1 pb-2">
+                  {entry.tags.slice(0, CARD_TAGS).map((tag) => {
+                    const active = tags.includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => !active && update({ tag: [...tags, tag], not: exclude.filter((t) => t !== tag) })}
+                        title={active ? `Already showing “${tag}”` : `Show only series tagged “${tag}”`}
+                        aria-pressed={active}
+                        className={`max-w-full truncate rounded-full border px-1.5 text-[10px] transition-colors ${
+                          active ? "border-indigo-500 text-indigo-300" : "border-gray-800 text-gray-500 hover:border-indigo-500 hover:text-indigo-300"
+                        }`}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                  {entry.tags.length > CARD_TAGS && (
+                    <Link
+                      to={`/read/series/${entry.id}`}
+                      title={entry.tags.slice(CARD_TAGS).join(", ")}
+                      className="rounded-full px-1 text-[10px] text-gray-500 hover:text-indigo-300"
+                    >
+                      +{entry.tags.length - CARD_TAGS}
+                    </Link>
                   )}
                 </div>
-                <div className="p-2 space-y-1">
-                  <div className="text-sm font-medium truncate group-hover:text-indigo-300">{entry.title}</div>
-                  <div className="flex items-center gap-2 text-[11px] text-gray-500">
-                    <span>{entry.chapters} ch</span>
-                    <span>{STATUS_LABEL[entry.status] ?? entry.status}</span>
-                    <span className="ml-auto">{entry.reading_direction.toUpperCase()}</span>
-                  </div>
-                  {entry.tags.length > 0 && <div className="text-[11px] text-gray-600 truncate">{entry.tags.join(" · ")}</div>}
-                </div>
-              </Link>
+              </div>
             ))}
           </div>
         )}

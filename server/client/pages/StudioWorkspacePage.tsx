@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, BookOpen, Check, FolderInput, ImageUp, Link2, Loader2, Pencil, Play, Send, Trash2 } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, CheckSquare, FolderInput, ImageUp, Link2, Loader2, Pencil, Play, Send, Trash2 } from "lucide-react";
 import {
   deleteWorkspace,
   getWorkspace,
@@ -14,6 +14,9 @@ import {
 } from "../api";
 import { AddPageUrlsDialog } from "../components/AddPageUrlsDialog";
 import { ChapterPicker } from "../components/ChapterPicker";
+import { FinalizeDialog } from "../components/FinalizeDialog";
+import { SelectionBar } from "../components/SelectionBar";
+import { usePageSelection } from "../hooks/usePageSelection";
 import { LoadFailure } from "../components/LoadFailure";
 import { Modal } from "../components/Modal";
 import { forgetWorkspace } from "../lib/optimistic";
@@ -36,6 +39,8 @@ export function StudioWorkspacePage() {
   const [filing, setFiling] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [importingUrls, setImportingUrls] = useState(false);
+  const selection = usePageSelection();
+  const [finalizingIds, setFinalizingIds] = useState<string[] | null>(null);
   // Where the address list's first send started, so sending the same list again fills the same positions
   const urlStart = useRef<{ workspaceId: number; index: number } | null>(null);
   // Where the next batch goes (files or addresses), from the last import's own answer: the cached workspace may not
@@ -122,6 +127,8 @@ export function StudioWorkspacePage() {
   const detail = workspaceQ.data;
   if (!detail) return <LoadFailure message="This workspace is gone." onRetry={() => navigate("/studio")} />;
   const { workspace, pages } = detail;
+  // Only picks still in the workspace count: a page deleted meanwhile mustn't be sent to finalize
+  const picked = pages.filter((page) => selection.selected.has(page.id)).map((page) => page.id);
   const run = runQ.data && "running" in runQ.data ? runQ.data : null;
   const pending = runQ.data && "pending" in runQ.data ? runQ.data.pending : null;
   // A draft's badge is measured against the chapter page it replaces, so this counts what readers can't see yet
@@ -221,6 +228,17 @@ export function StudioWorkspacePage() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => (selection.selecting ? selection.stop() : selection.start())}
+            aria-pressed={selection.selecting}
+            disabled={pages.length === 0}
+            title="Pick pages to finalize together"
+            className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors disabled:opacity-40 ${
+              selection.selecting ? "border-indigo-500 text-indigo-300" : "border-gray-700 text-gray-300 hover:bg-gray-800"
+            }`}
+          >
+            <CheckSquare size={14} /> Select
+          </button>
           <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => void addPages(e.target.files)} />
           <button
             onClick={() => fileRef.current?.click()}
@@ -304,13 +322,30 @@ export function StudioWorkspacePage() {
         </div>
       )}
 
+      {selection.selecting && (
+        <SelectionBar
+          count={picked.length}
+          total={pages.length}
+          onSelectAll={() => selection.selectAll(pages.map((page) => page.id))}
+          onFinalize={() => setFinalizingIds(picked)}
+          onCancel={selection.stop}
+        />
+      )}
+
       <div className="flex-1 overflow-y-auto p-4">
         {pages.length === 0 ? (
           <p className="text-sm text-gray-500">No pages yet. Add some with “Add pages”, or import a chapter from the extension.</p>
         ) : (
           <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
             {pages.map((page, index) => (
-              <StudioPageCard key={page.id} page={page} caption={`page ${index + 1} of ${pages.length}`} />
+              <StudioPageCard
+                key={page.id}
+                page={page}
+                caption={`page ${index + 1} of ${pages.length}`}
+                selecting={selection.selecting}
+                selected={selection.selected.has(page.id)}
+                onToggleSelect={() => selection.toggle(page.id)}
+              />
             ))}
           </div>
         )}
@@ -330,6 +365,20 @@ export function StudioWorkspacePage() {
             toast.info("Filed into the chapter");
             // Pages that moved but couldn't be published, or were left behind: say so rather than look complete
             for (const entry of skipped ?? []) toast.error(entry.reason);
+          }}
+        />
+      )}
+
+      {finalizingIds && (
+        <FinalizeDialog
+          pageIds={finalizingIds}
+          onClose={() => setFinalizingIds(null)}
+          onDone={(report) => {
+            setFinalizingIds(null);
+            selection.stop();
+            refresh();
+            const done = report.pages.filter((page) => page.ok).length;
+            toast.info(`Finalized ${done} page${done === 1 ? "" : "s"}`);
           }}
         />
       )}

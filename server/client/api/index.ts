@@ -503,6 +503,15 @@ export const publishPageEdits = (id: string) => unwrap(api.manage.api.pages({ id
 export const publishChapterEdits = (id: number) => unwrap(api.manage.api.chapters({ id }).publish.post());
 
 /** Runs the whole pipeline again for one page, from its stored original. */
+/**
+ * Finalizes pages: their working files, stages and blocks go, the final image (and the original, unless `delete_raw`)
+ * stays. `dry_run` reports what would go and the space freed, changing nothing. Each page answers for itself.
+ */
+export const finalizePages = (ids: string[], options: { delete_raw?: boolean; dry_run?: boolean } = {}) =>
+  unwrap(api.studio.api.pages.finalize.post({ ids, ...options }));
+
+export type FinalizeReport = Awaited<ReturnType<typeof finalizePages>>;
+
 export const rerunPage = (id: string, body?: { clean_sfx?: boolean }) =>
   unwrap(api.studio.api.pages({ id }).rerun.post(body ?? {}));
 
