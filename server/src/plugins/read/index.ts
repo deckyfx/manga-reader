@@ -319,7 +319,11 @@ export const seesAdult = (principal: Principal | null | undefined, library = fal
  * contributor then sees adult series whatever their own reading preference — they file into them and edit them, and a
  * series they just made adult must not vanish from under them. A reader asking the same gets nothing extra.
  */
-const LibraryQuery = t.Object({ library: t.Optional(t.String()) });
+const LibraryQuery = t.Object({
+  library: t.Optional(t.String()),
+  /** Cache-buster the client adds to image addresses (a revision or a timestamp); not read. */
+  v: t.Optional(t.String()),
+});
 const asLibrary = (query: { library?: string } | undefined): boolean => query?.library === "true";
 
 /**
