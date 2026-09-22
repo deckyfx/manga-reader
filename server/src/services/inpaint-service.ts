@@ -24,7 +24,7 @@ const MASK_DILATE = 4;
 const STRIDE = 8;
 /** Width of the ring around the mask sampled to decide whether a region sits on a plain background. */
 const RING = 6;
-/** Grey levels from the ring median still counted as background. */
+/** How far (per colour channel, 0–255) from the ring's median colour a pixel may be and still count as background. */
 const FLAT_TOLERANCE = 24;
 /** Share of ring pixels that must be background for a flat fill. */
 const FLAT_SHARE = 0.9;
@@ -52,7 +52,20 @@ export interface InpaintResult {
   lama: number;
 }
 
-const luma = (rgb: Buffer, p: number): number => (rgb[p * 3] * 299 + rgb[p * 3 + 1] * 587 + rgb[p * 3 + 2] * 114) / 1000;
+/**
+ * How far a pixel's colour is from `colour`: the largest difference on any one channel. On a grey page that is the
+ * brightness difference; on a colour page, red and green of the same brightness are as far apart as they look.
+ */
+const colourDistance = (rgb: Buffer, p: number, colour: readonly number[]): number =>
+  Math.max(Math.abs(rgb[p * 3]! - colour[0]!), Math.abs(rgb[p * 3 + 1]! - colour[1]!), Math.abs(rgb[p * 3 + 2]! - colour[2]!));
+
+/** The per-channel median colour of these pixels. */
+function medianColour(rgb: Buffer, pixels: readonly number[]): number[] {
+  return [0, 1, 2].map((c) => {
+    const values = pixels.map((p) => rgb[p * 3 + c]!).sort((a, b) => a - b);
+    return values[Math.floor(values.length / 2)]!;
+  });
+}
 
 function expand(box: Box, margin: number, width: number, height: number): Box {
   const x = Math.max(0, box.x - margin), y = Math.max(0, box.y - margin);
@@ -87,8 +100,11 @@ function mergeWindows(windows: Box[]): Box[] {
  * Plain-background fast path: when the ring around the region's mask is near-uniform, paint the masked
  * pixels — and faint anti-aliasing halos in the ring — with the background colour. On flat white LaMa
  * leaves specks and ghost strokes; this is exact and instant. Dark pixels (bubble outlines) are untouched.
+ *
+ * "Near-uniform" is judged in colour, not brightness: a colour page's two-tone or patterned background can be one
+ * brightness and several colours, and filling it with one of them is the wrong clean. Exported for its tests.
  */
-function flatFill(source: Buffer, result: Buffer, width: number, height: number, pending: Uint8Array, ring: Uint8Array, region: Box): boolean {
+export function flatFill(source: Buffer, result: Buffer, width: number, height: number, pending: Uint8Array, ring: Uint8Array, region: Box): boolean {
   const area = expand(region, MASK_DILATE + RING, width, height);
   const samples: number[] = [];
   for (let y = area.y; y < area.y + area.h; y++) {
@@ -99,19 +115,15 @@ function flatFill(source: Buffer, result: Buffer, width: number, height: number,
   }
   if (samples.length < MIN_RING_PIXELS) return false;
 
-  const levels = samples.map((p) => luma(source, p)).sort((a, b) => a - b);
-  const median = levels[Math.floor(levels.length / 2)];
-  const background = samples.filter((p) => Math.abs(luma(source, p) - median) <= FLAT_TOLERANCE);
+  const ringColour = medianColour(source, samples);
+  const background = samples.filter((p) => colourDistance(source, p, ringColour) <= FLAT_TOLERANCE);
   if (background.length / samples.length < FLAT_SHARE) return false;
 
-  const colour = [0, 1, 2].map((c) => {
-    const values = background.map((p) => source[p * 3 + c]).sort((a, b) => a - b);
-    return values[Math.floor(values.length / 2)];
-  });
+  const colour = medianColour(source, background);
   for (let y = area.y; y < area.y + area.h; y++) {
     for (let x = area.x; x < area.x + area.w; x++) {
       const p = y * width + x;
-      if (!pending[p] && !(ring[p] && Math.abs(luma(source, p) - median) <= FLAT_TOLERANCE)) continue;
+      if (!pending[p] && !(ring[p] && colourDistance(source, p, ringColour) <= FLAT_TOLERANCE)) continue;
       result[p * 3] = colour[0];
       result[p * 3 + 1] = colour[1];
       result[p * 3 + 2] = colour[2];
