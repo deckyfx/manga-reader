@@ -57,7 +57,11 @@ export function finalizeBlocker(page: Page, deleteRaw: boolean): string | null {
   }
   if (!existsSync(join(pageDir(page.id), "result.png"))) return "it has no finished image yet";
   if (page.chapterId !== null && page.revision === 0) return "it has never been published, and readers are only served published pages";
-  if (page.revision > 0 && hasUnpublishedEdits(page)) return "it has edits nobody has published — publish or roll them back first";
+  // A page that has been published — or a draft, which publishes over its chapter page — mustn't be frozen with work
+  // readers haven't got: a finalized page can't publish any more, so that work would never reach them
+  if ((page.revision > 0 || page.originPageId !== null) && hasUnpublishedEdits(page)) {
+    return "it has edits nobody has published — publish or roll them back first";
+  }
   return null;
 }
 

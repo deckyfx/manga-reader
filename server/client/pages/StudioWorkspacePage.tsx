@@ -127,6 +127,8 @@ export function StudioWorkspacePage() {
   const detail = workspaceQ.data;
   if (!detail) return <LoadFailure message="This workspace is gone." onRetry={() => navigate("/studio")} />;
   const { workspace, pages } = detail;
+  // Only picks still in the workspace count: a page deleted meanwhile mustn't be sent to finalize
+  const picked = pages.filter((page) => selection.selected.has(page.id)).map((page) => page.id);
   const run = runQ.data && "running" in runQ.data ? runQ.data : null;
   const pending = runQ.data && "pending" in runQ.data ? runQ.data.pending : null;
   // A draft's badge is measured against the chapter page it replaces, so this counts what readers can't see yet
@@ -322,10 +324,10 @@ export function StudioWorkspacePage() {
 
       {selection.selecting && (
         <SelectionBar
-          count={selection.selected.size}
+          count={picked.length}
           total={pages.length}
           onSelectAll={() => selection.selectAll(pages.map((page) => page.id))}
-          onFinalize={() => setFinalizingIds([...selection.selected])}
+          onFinalize={() => setFinalizingIds(picked)}
           onCancel={selection.stop}
         />
       )}

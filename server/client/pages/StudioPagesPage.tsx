@@ -73,6 +73,8 @@ export function StudioPagesPage() {
   const query = { filed: scope, ...(search.trim() ? { q: search.trim() } : {}) };
   const pagesQ = useQuery({ queryKey: ["studio-pages", query], queryFn: () => listPages(query), refetchInterval: 5000 });
   const pages = pagesQ.data ?? [];
+  // Only picks still on screen count: a search or scope change can hide a picked page, and it mustn't be finalized unseen
+  const picked = pages.filter((page) => selection.selected.has(page.id)).map((page) => page.id);
   // Workspaces hold their own pages, so they are listed above the loose ones rather than among them
   const workspacesQ = useQuery({ queryKey: ["workspaces"], queryFn: () => listWorkspaces(), refetchInterval: 10_000 });
   const workspaces = workspacesQ.data ?? [];
@@ -156,10 +158,10 @@ export function StudioPagesPage() {
 
       {selection.selecting && (
         <SelectionBar
-          count={selection.selected.size}
+          count={picked.length}
           total={pages.length}
           onSelectAll={() => selection.selectAll(pages.map((page) => page.id))}
-          onFinalize={() => setFinalizingIds([...selection.selected])}
+          onFinalize={() => setFinalizingIds(picked)}
           onCancel={selection.stop}
         />
       )}

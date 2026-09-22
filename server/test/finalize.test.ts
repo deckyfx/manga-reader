@@ -8,6 +8,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { historyFile } from "@/services/page-history";
 import { pageDir, PageStore } from "@/stores/page-store";
+import { WorkspaceStore } from "@/stores/workspace-store";
 import { call, png, signedIn } from "./harness";
 
 /** A Studio page with a block, working files and a burnt result, as a translated page has. */
@@ -127,6 +128,25 @@ describe("finalizing", () => {
       [false, "it has no"],
     ]);
     expect((await PageStore.findById(edited))?.finalizedAt).toBeNull();
+  });
+
+  test("refuses a Studio draft whose work hasn't been published over its chapter page", async () => {
+    const { cookie } = await signedIn("contributor");
+    const series = await call<{ series: { id: number } }>("POST", "/manage/api/series", { title: `Draft ${crypto.randomUUID()}` }, { cookie });
+    const chapter = await call<{ chapter_id: number }>("POST", "/manage/api/chapters", { series_id: series.body.series.id, title: "One" }, { cookie });
+    const form = new FormData();
+    form.append("files", new File([await png()], "1.png", { type: "image/png" }));
+    await call("POST", `/manage/api/chapters/${chapter.body.chapter_id}/pages`, form, { cookie });
+    const [origin] = await PageStore.listByChapter(chapter.body.chapter_id);
+    const sent = await call<{ workspace_id: number }>("POST", `/manage/api/chapters/${chapter.body.chapter_id}/to-studio`, undefined, { cookie });
+    const [copy] = (await WorkspaceStore.pages(sent.body.workspace_id)).filter((page) => page.originPageId === origin!.id);
+    // Edited and burnt in the Studio, not yet published over the chapter page
+    await copyFile(join(pageDir(copy!.id), "original.png"), join(pageDir(copy!.id), "result.png"));
+    await PageStore.noteResultChanged(copy!.id);
+
+    const result = await finalize(cookie, [copy!.id]);
+    expect(result.body.pages[0]).toMatchObject({ ok: false });
+    expect(result.body.pages[0]?.reason).toContain("nobody has published");
   });
 
   test("batch runs pass finalized pages by, even when forced", async () => {
