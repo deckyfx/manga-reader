@@ -235,6 +235,17 @@ export const pages = sqliteTable("pages", {
   /** Bumped on every publish so open extension tabs reload the result. */
   revision: integer("revision").notNull().default(0),
   /**
+   * Bumped whenever this page's result.png changes: a render, a rollback, a copy onto it. Together with
+   * `publishedSeq` it answers "has this page got work readers can't see yet" as a recorded fact rather than by
+   * comparing file times.
+   */
+  resultSeq: integer("result_seq").notNull().default(0),
+  /**
+   * The `resultSeq` that was last published — from this page, or, for a Studio draft, over the chapter page it
+   * replaces. Null when this result has never been published. Unpublished work = a result exists and the two differ.
+   */
+  publishedSeq: integer("published_seq"),
+  /**
    * The Studio workspace this page is being worked on in; null = loose. Deleting a workspace never deletes its pages:
    * they fall back to loose. Within a workspace, `sortOrder` is the order the pages were imported in.
    */

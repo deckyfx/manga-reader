@@ -5,7 +5,7 @@ import { t } from "elysia";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@/db/schema";
-import { hasUnpublishedEdits, hasUnpublishedEditsAgainst, publishedFile } from "@/services/page-history";
+import { hasUnpublishedEdits, publishedFile } from "@/services/page-history";
 import { pageDir } from "@/stores/page-store";
 
 export const PageLocationSchema = t.Object({
@@ -61,7 +61,8 @@ export function toSummary(page: Page) {
     has_result: existsSync(join(pageDir(page.id), "result.png")),
     // A draft of a chapter page is measured against that page: it is what readers actually get
     published: publishedFile(page.originPageId ?? page.id) !== null,
-    has_edits: page.originPageId === null ? hasUnpublishedEdits(page.id) : hasUnpublishedEditsAgainst(page.id, page.originPageId),
+    // A draft's `publishedSeq` records publishes over its chapter page too, so one rule answers for both
+    has_edits: hasUnpublishedEdits(page),
     chapter_id: page.chapterId,
     name: page.name,
     workspace_id: page.workspaceId,

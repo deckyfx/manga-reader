@@ -143,6 +143,8 @@ function matchBubble(block: Box, bubbles: Box[]): Box | null {
 export interface JobRepository {
   read(): Promise<PageJob | null>;
   write(job: PageJob): Promise<void>;
+  /** result.png was just rewritten, so it holds work nobody has published; the CLI has nothing to publish and skips it. */
+  resultChanged?(): Promise<void>;
 }
 
 /** Stores the job as blocks.json inside the job directory. */
@@ -478,6 +480,7 @@ export class PagePipeline {
     }
 
     await sharp(page).composite(patches).png().toFile(this.path("result.png"));
+    await this.repository.resultChanged?.();
     await this.renderTypesetOverlay(rgb, width, height, laidOut, patches);
     await this.writeJob(job);
     this.report({ stage: "typesetting", message: `Typeset ${rendered.length} translations`, fraction: 1 });

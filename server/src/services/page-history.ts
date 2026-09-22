@@ -1,6 +1,7 @@
-import { copyFile, mkdir, readdir, rm, stat, utimes } from "node:fs/promises";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import type { Page } from "@/db/schema";
 import { pageDir } from "@/stores/page-store";
 
 /** Published results kept per page; older snapshots are deleted on publish. */
@@ -36,23 +37,10 @@ export async function listHistory(pageId: string): Promise<HistoryEntry[]> {
   })));
 }
 
-/**
- * Copies result.png as the snapshot of `revision`. Pruning is separate, so a publish that fails loses nothing.
- *
- * `keepTime` gives the snapshot the burn's own modification time instead of now. Whether a draft has work its
- * chapter page hasn't published is decided by comparing those times (see `hasUnpublishedEditsAgainst`), so a publish
- * that records an *old* burn — the backfill — has to say when that burn was made. Stamping it "now" would date a
- * two-week-old result later than a draft rendered yesterday, and that draft's edits would stop being offered.
- */
-export async function snapshotResult(pageId: string, revision: number, { keepTime = false } = {}): Promise<void> {
+/** Copies result.png as the snapshot of `revision`. Pruning is separate, so a publish that fails loses nothing. */
+export async function snapshotResult(pageId: string, revision: number): Promise<void> {
   await mkdir(historyDir(pageId), { recursive: true });
-  const source = join(pageDir(pageId), "result.png");
-  const target = historyFile(pageId, revision);
-  await copyFile(source, target);
-  if (keepTime) {
-    const { atime, mtime } = await stat(source);
-    await utimes(target, atime, mtime);
-  }
+  await copyFile(join(pageDir(pageId), "result.png"), historyFile(pageId, revision));
 }
 
 /** Drops snapshots beyond HISTORY_LIMIT. Call once the revision they belong to is committed. */
@@ -93,23 +81,14 @@ export function publishedFile(pageId: string): string | null {
   return existsSync(file) ? file : null;
 }
 
-/** True when result.png holds work that has not been published: newer than the last snapshot, or never published. */
-export function hasUnpublishedEdits(pageId: string): boolean {
-  return hasUnpublishedEditsAgainst(pageId, pageId);
-}
-
 /**
- * Whether `resultPageId`'s burnt result is newer than what `publishedPageId` last published. The two differ for a
- * draft of a chapter page: its work is unpublished until it has been copied over that page and published there.
+ * True when result.png holds work that has not been published.
+ *
+ * A recorded fact, not an inference: `resultSeq` moves whenever result.png changes and `publishedSeq` records which of
+ * those was published — by this page, or, for a Studio draft, over the chapter page it replaces (see draft-publish).
+ * File times used to stand in for this, which meant a publish recording an old burn had to fake its snapshot's time.
  */
-export function hasUnpublishedEditsAgainst(resultPageId: string, publishedPageId: string): boolean {
-  const result = join(pageDir(resultPageId), "result.png");
-  if (!existsSync(result)) return false;
-  const published = publishedFile(publishedPageId);
-  if (!published) return true;
-  try {
-    return statSync(result).mtimeMs > statSync(published).mtimeMs;
-  } catch {
-    return false;
-  }
+export function hasUnpublishedEdits(page: Pick<Page, "id" | "resultSeq" | "publishedSeq">): boolean {
+  if (!existsSync(join(pageDir(page.id), "result.png"))) return false;
+  return page.publishedSeq !== page.resultSeq;
 }

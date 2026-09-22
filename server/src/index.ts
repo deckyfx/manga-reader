@@ -42,6 +42,12 @@ async function migrateDb(): Promise<void> {
     purgeExpired().catch((err: unknown) => bootLog.error({ err }, "Purging expired sessions failed"));
   }, 15 * 60_000).unref();
 
+  // Publish state used to be guessed from file times; it is recorded now. Once, read the old answer for every page, so
+  // a library from before keeps what it had published and what it hadn't
+  const { adoptLegacyProvenanceOnce } = await import("@/services/publish-provenance");
+  const adopted = await adoptLegacyProvenanceOnce();
+  if (adopted !== null) bootLog.info(`Recorded the publish state of ${adopted} existing page(s)`);
+
   // Pages burnt before the publish gate existed: publish what they are already serving, so the reader no longer has
   // to fall back to a burn. Once per server, not once per boot — afterwards, an unpublished render means somebody
   // chose not to publish it yet, and republishing it behind them is exactly what the gate exists to prevent

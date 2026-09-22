@@ -6,6 +6,7 @@
 import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { childLogger } from "@/lib/logger";
+import { hasUnpublishedEdits } from "@/services/page-history";
 import { pageDir, PageStore } from "@/stores/page-store";
 import type { Page } from "@/db/schema";
 
@@ -52,6 +53,9 @@ async function fillCopy(source: Page, copy: Page, chapterId: number | null): Pro
   });
 
   await copyPageImages(source.id, copy.id);
+  // A draft of a chapter page starts as exactly what that page has published, so it has nothing of its own to publish
+  // until it is edited. A copy into a chapter is a new page there, unpublished until it is published in its new home
+  if (copy.originPageId === source.id && !hasUnpublishedEdits(source)) await PageStore.markResultPublished(copy.id);
 
   await PageStore.copyStagesAndBlocks(source.id, copy.id);
   log.info({ from: source.id, to: copy.id, chapterId }, chapterId === null ? "Copied a page into the Studio as a draft" : "Copied a page into a chapter");
@@ -78,6 +82,8 @@ export async function copyPageImages(fromId: string, toId: string): Promise<void
   for (const file of pngs) {
     await cp(join(from, file), join(to, file), { recursive: false, force: true });
   }
+  // The target's result is new content as far as its own publishes go
+  if (pngs.includes("result.png")) await PageStore.noteResultChanged(toId);
 
   // Images the source no longer has (a mask the draft cleared, say) must not survive on the target, or a later run
   // would build on state that was deliberately removed. The history folder isn't touched: it isn't an image here.

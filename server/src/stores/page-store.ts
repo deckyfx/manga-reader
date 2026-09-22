@@ -286,14 +286,36 @@ export class PageStore {
   }
 
   /** Increments the publish revision and returns the new value. */
+  /**
+   * Commits a publish: the next revision, and this result recorded as the published one — in one update, so a page
+   * can never be on a new revision with its result still counted as unpublished.
+   */
   static async bumpRevision(id: string): Promise<number> {
     const [row] = await db
       .update(pages)
-      .set({ revision: sql`${pages.revision} + 1`, updatedAt: sql`(datetime('now'))` })
+      .set({ revision: sql`${pages.revision} + 1`, publishedSeq: sql`${pages.resultSeq}`, updatedAt: sql`(datetime('now'))` })
       .where(eq(pages.id, id))
       .returning({ revision: pages.revision });
     if (!row) throw new Error("page not found");
     return row.revision;
+  }
+
+  /** Pages whose publish state was never recorded: every page of a library from before it was, and none after. */
+  static async listUnrecordedPublishState(): Promise<Page[]> {
+    return db.select().from(pages).where(isNull(pages.publishedSeq)).all();
+  }
+
+  /** result.png changed (rendered, rolled back, copied onto): its content is new until it is published. */
+  static async noteResultChanged(id: string): Promise<void> {
+    await db.update(pages).set({ resultSeq: sql`${pages.resultSeq} + 1` }).where(eq(pages.id, id));
+  }
+
+  /**
+   * Records this page's current result as published without a publish of its own: a draft whose work was just
+   * published over its chapter page, or a copy made of something already published.
+   */
+  static async markResultPublished(id: string): Promise<void> {
+    await db.update(pages).set({ publishedSeq: sql`${pages.resultSeq}` }).where(eq(pages.id, id));
   }
 
   // ── Stages ─────────────────────────────────────────────────────────────────
@@ -497,6 +519,7 @@ export class PageStore {
     return {
       read: () => PageStore.readJob(pageId),
       write: async (job) => PageStore.writeJob(pageId, job),
+      resultChanged: () => PageStore.noteResultChanged(pageId),
     };
   }
 }

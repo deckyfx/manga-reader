@@ -689,6 +689,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       const check = await editablePage(params.id);
       if ("code" in check) return status(check.code, { error: check.error });
       if (!(await restoreResult(params.id, body.revision))) return status(404, { error: "revision not found" });
+      await PageStore.noteResultChanged(params.id);
       // The restored image no longer matches the blocks: a later re-render would replace it with the current text.
       // Rollback publishes on purpose despite the stale render (the one exception to the publish check).
       await PageStore.markStale(params.id, ["render"]);

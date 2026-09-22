@@ -9,7 +9,7 @@ import { copyFile, mkdir, utimes } from "node:fs/promises";
 
 import { join } from "node:path";
 import { pageImagePath } from "@/plugins/read/index";
-import { hasUnpublishedEditsAgainst, publishedFile } from "@/services/page-history";
+import { hasUnpublishedEdits, publishedFile } from "@/services/page-history";
 import { backfillOnce, backfillPublishes, backfillRanAt, pagesBlockedFromPublish, pagesNeedingPublish } from "@/services/publish-backfill";
 import { pageDir, PageStore } from "@/stores/page-store";
 import { WorkspaceStore } from "@/stores/workspace-store";
@@ -35,6 +35,13 @@ async function chapterWithPages(cookie: string, count: number): Promise<{ chapte
 /** Puts a burnt result next to the original, the way the pipeline's render stage would, without publishing it. */
 async function burn(pageId: string): Promise<void> {
   await copyFile(join(pageDir(pageId), "original.png"), join(pageDir(pageId), "result.png"));
+  await PageStore.noteResultChanged(pageId);
+}
+
+/** Whether a page has work readers can't see yet, read fresh. */
+async function hasWork(pageId: string): Promise<boolean> {
+  const page = await PageStore.findById(pageId);
+  return page !== undefined && hasUnpublishedEdits(page);
 }
 
 /** Ages a file by `days`, so "burnt long ago" can be told apart from "burnt just now". */
@@ -217,13 +224,15 @@ describe("the backfill and Studio drafts", () => {
 
     // Somebody edits and re-renders the draft today
     await burn(draft!.id);
-    expect(hasUnpublishedEditsAgainst(draft!.id, origin)).toBe(true);
+    expect(await hasWork(draft!.id)).toBe(true);
 
     const report = await backfillPublishes();
     expect(report.published).toContain(origin);
 
-    // The snapshot records a fortnight-old burn, so the draft's work is still newer — and still offered
-    expect(hasUnpublishedEditsAgainst(draft!.id, origin)).toBe(true);
+    // Publishing the chapter page's old burn doesn't publish the draft's work: it is still offered. (The backdating
+    // above no longer matters — what was published is recorded, not guessed from file times — but it keeps the case
+    // that used to fail.)
+    expect(await hasWork(draft!.id)).toBe(true);
   });
 });
 
