@@ -24,6 +24,40 @@ async function pageWithBlock(cookie: string): Promise<{ pageId: string }> {
 
 const stageStatus = async (pageId: string, stage: string) => (await PageStore.listStages(pageId)).find((s) => s.stage === stage)?.status;
 
+/** Block 1's own flags, as the page editor gets them. */
+async function blockFlags(pageId: string, cookie: string): Promise<{ needs_translate: boolean; needs_render: boolean }> {
+  const detail = await call<{ blocks: { id: number; needs_translate: boolean; needs_render: boolean }[] }>("GET", `/studio/api/pages/${pageId}`, undefined, { cookie });
+  const block = detail.body.blocks.find((b) => b.id === 1)!;
+  return { needs_translate: block.needs_translate, needs_render: block.needs_render };
+}
+
+/** Clears block 1's flags, as a translate and a render of it would. */
+async function settle(pageId: string): Promise<void> {
+  const job = await PageStore.readJob(pageId);
+  for (const b of job!.blocks) b.needs_translate = b.needs_render = false;
+  PageStore.writeJob(pageId, job!);
+}
+
+describe("which block is out of date", () => {
+  test("each block says what it needs: a new translation, or just burning again", async () => {
+    const { cookie } = await signedIn("contributor");
+    const { pageId } = await pageWithBlock(cookie);
+    // Drawn with its text and translation: it needs burning, not translating
+    expect(await blockFlags(pageId, cookie)).toEqual({ needs_translate: false, needs_render: true });
+
+    await settle(pageId);
+    await call("PATCH", `/studio/api/pages/${pageId}/blocks/1`, { translated_text: "Hello", style: { uppercase: false, font_size: 14 } }, { cookie });
+    expect(await blockFlags(pageId, cookie)).toEqual({ needs_translate: false, needs_render: false });
+
+    await call("PATCH", `/studio/api/pages/${pageId}/blocks/1`, { translated_text: "Hi" }, { cookie });
+    expect(await blockFlags(pageId, cookie)).toEqual({ needs_translate: false, needs_render: true });
+
+    await settle(pageId);
+    await call("PATCH", `/studio/api/pages/${pageId}/blocks/1`, { source_text: "さようなら" }, { cookie });
+    expect(await blockFlags(pageId, cookie)).toEqual({ needs_translate: true, needs_render: true });
+  });
+});
+
 describe("stale marking", () => {
   test("saving a block back unchanged leaves the render fresh", async () => {
     const { cookie } = await signedIn("contributor");

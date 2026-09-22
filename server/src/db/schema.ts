@@ -328,6 +328,12 @@ export const pageBlocks = sqliteTable("page_blocks", {
   styleJson: text("style_json"),
   /** Text area JSON from the last render (bound, dark, run-length mask), reused by the Studio's live preview. */
   areaJson: text("area_json"),
+  /**
+   * This block changed since the page was last translated / rendered — its source text, or its translation, style,
+   * shape or cleaning. The page's stage state says *that* a stage is out of date; these say *which blocks* made it so.
+   */
+  needsTranslate: integer("needs_translate", { mode: "boolean" }).notNull().default(false),
+  needsRender: integer("needs_render", { mode: "boolean" }).notNull().default(false),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 }, (table) => ({
   pageBlockIdx: uniqueIndex("page_blocks_page_idx_idx").on(table.pageId, table.idx),

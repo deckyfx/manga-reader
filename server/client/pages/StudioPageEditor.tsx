@@ -818,6 +818,7 @@ function BlockEditor({ pageId, block, disabled, onChanged, trackSave, afterSaves
     >
       <div className="flex items-center gap-2 text-xs">
         <span className="font-semibold text-sky-400">#{block.id}</span>
+        <BlockNeeds block={block} />
         {block.render && !block.render.fits && (
           <span className="flex items-center gap-1 text-amber-400" title="The text did not fit its area">
             <TriangleAlert size={12} /> overflow
@@ -892,6 +893,20 @@ function IncludeToggle({ pageId, block, disabled, onChanged, trackSave, title }:
   );
 }
 
+/**
+ * What this block is waiting for since it changed: a new translation, or just burning again. The page's stage tags
+ * say a stage is out of date; this says which blocks made it so.
+ */
+function BlockNeeds({ block }: { block: StudioBlock }) {
+  if (block.needs_translate) {
+    return <span className="rounded-full bg-amber-900/50 px-1.5 text-[10px] text-amber-300" title="Its text changed since it was translated">translate</span>;
+  }
+  if (block.needs_render) {
+    return <span className="rounded-full bg-amber-900/50 px-1.5 text-[10px] text-amber-300" title="Changed since the page was last burned">re-burn</span>;
+  }
+  return null;
+}
+
 /** One sound-effect region: selectable, with its include-in-cleaning toggle and optional new lettering. */
 function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, onSelect, setBlockStyle, onDelete }: {
   pageId: string;
@@ -921,6 +936,7 @@ function SfxBlockRow({ pageId, block, disabled, onChanged, trackSave, selected, 
     >
       <div className="flex items-center gap-2">
         <span className="font-semibold text-orange-400">#{block.id}</span>
+        <BlockNeeds block={block} />
         <span className="text-gray-500 tabular-nums">{block.w}×{block.h}</span>
         {saveM.isPending && <Loader2 size={12} className="animate-spin text-gray-500" />}
         <span className="ml-auto">

@@ -141,6 +141,13 @@
       "when": 1790070996234,
       "tag": "0019_slimy_korg",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1790072446613,
+      "tag": "0020_misty_agent_brand",
+      "breakpoints": true
     }
   ]
 }

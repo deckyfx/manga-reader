@@ -45,6 +45,10 @@ export interface PageBlock extends Box {
   style?: TextStyle;
   /** Filled by `render`: where the text was placed, reused by the Studio's live preview. */
   area?: StoredArea;
+  /** Changed since the last translation of it (its source text did): set by edits and OCR, cleared by `translate`. */
+  needs_translate?: boolean;
+  /** Changed since the last render (text, style, shape, cleaning): set by edits, cleared by `render`. */
+  needs_render?: boolean;
 }
 
 export interface PageJob {
@@ -249,7 +253,13 @@ export class PagePipeline {
       this.report({ stage: "ocr", message: `Reading text ${i + 1}/${targets.length}`, fraction: i / targets.length, detail: true });
       const crop = await sharp(this.path("original.png")).extract({ left: b.x, top: b.y, width: b.w, height: b.h }).png().toBuffer();
       await Bun.write(this.path(`crops/${b.id}.png`), crop);
-      b.source_text = await readText(crop);
+      const read = await readText(crop);
+      // A new reading needs translating and lettering again; the same reading changes nothing
+      if (read !== b.source_text) {
+        b.needs_translate = true;
+        b.needs_render = true;
+      }
+      b.source_text = read;
     }
     await this.writeJob(job);
     this.report({ stage: "ocr", message: `Read ${targets.length} text blocks`, fraction: 1 });
@@ -263,7 +273,9 @@ export class PagePipeline {
     for (const [i, b] of targets.entries()) {
       this.report({ stage: "translating", message: `Translating ${i + 1}/${targets.length}`, fraction: i / targets.length, detail: true });
       const out = await translateText(b.source_text ?? "");
+      if (out.text !== b.translated_text) b.needs_render = true;
       b.translated_text = out.text;
+      b.needs_translate = false;
       engine = out.engine;
     }
     await this.writeJob(job);
@@ -481,6 +493,8 @@ export class PagePipeline {
 
     await sharp(page).composite(patches).png().toFile(this.path("result.png"));
     await this.repository.resultChanged?.();
+    // A render covers the whole page, so every block's lettering is now what was burned
+    for (const b of job.blocks) b.needs_render = false;
     await this.renderTypesetOverlay(rgb, width, height, laidOut, patches);
     await this.writeJob(job);
     this.report({ stage: "typesetting", message: `Typeset ${rendered.length} translations`, fraction: 1 });

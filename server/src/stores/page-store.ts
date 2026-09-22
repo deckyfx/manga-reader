@@ -370,6 +370,8 @@ export class PageStore {
         ...(r.shapeJson ? { shape: JSON.parse(r.shapeJson) as BlockShape } : {}),
         ...(r.styleJson ? { style: JSON.parse(r.styleJson) as TextStyle } : {}),
         ...(r.areaJson ? { area: JSON.parse(r.areaJson) as StoredArea } : {}),
+        ...(r.needsTranslate ? { needs_translate: true } : {}),
+        ...(r.needsRender ? { needs_render: true } : {}),
       })),
     };
   }
@@ -399,6 +401,8 @@ export class PageStore {
           shapeJson: shapeToJson(b.shape),
           styleJson: b.style ? JSON.stringify(b.style) : null,
           areaJson: b.area ? JSON.stringify(b.area) : null,
+          needsTranslate: b.needs_translate ?? false,
+          needsRender: b.needs_render ?? false,
         })))
         .run();
     });
@@ -414,6 +418,9 @@ export class PageStore {
     fields: { sourceText?: string; translatedText?: string; include?: boolean; style?: TextStyle | null },
     staleStages: readonly StageName[] = [],
   ): Promise<boolean> {
+    // The block is out of date for exactly the stages this edit makes stale; a flag already set stays set
+    const needsTranslate = staleStages.includes("translate") ? true : undefined;
+    const needsRender = staleStages.includes("render") ? true : undefined;
     return db.transaction((tx) => {
       const rows = tx
         .update(pageBlocks)
@@ -421,6 +428,8 @@ export class PageStore {
           sourceText: fields.sourceText,
           translatedText: fields.translatedText,
           include: fields.include,
+          needsTranslate,
+          needsRender,
           styleJson: fields.style === undefined ? undefined : fields.style === null ? null : JSON.stringify(fields.style),
           updatedAt: sql`(datetime('now'))`,
         })
@@ -466,6 +475,10 @@ export class PageStore {
           sourceText: text.sourceText ?? null,
           translatedText: text.translatedText ?? null,
           styleJson: text.style && Object.keys(text.style).length > 0 ? JSON.stringify(text.style) : null,
+          // A new region changes the cleaning and the lettering; it needs translating if it came with text and no
+          // translation of it
+          needsRender: true,
+          needsTranslate: kind === "text" && Boolean(text.sourceText?.trim()) && !text.translatedText?.trim(),
         })
         .run();
       markStaleIn(tx, pageId, staleStages);
@@ -489,6 +502,8 @@ export class PageStore {
           shapeJson: shapeToJson(geometry.shape),
           renderJson: null,
           areaJson: null,
+          // Moved or reshaped: its lettering has to be placed and burned again
+          needsRender: true,
           updatedAt: sql`(datetime('now'))`,
         })
         .where(and(eq(pageBlocks.pageId, pageId), eq(pageBlocks.idx, idx)))

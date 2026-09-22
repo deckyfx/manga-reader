@@ -188,6 +188,10 @@ const BlockSchema = t.Object({
   style: t.Nullable(StyleSchema),
   /** Where the last render placed the text (run-length mask), for the live preview; null before a render. */
   area: t.Nullable(StoredAreaSchema),
+  /** Its source text changed since it was last translated. */
+  needs_translate: t.Boolean(),
+  /** It changed since the page was last rendered: this block is why the render is out of date. */
+  needs_render: t.Boolean(),
 });
 
 const PageDetail = t.Object({ page: PageSummary, stages: t.Array(StageSchema), blocks: t.Array(BlockSchema) });
@@ -199,7 +203,15 @@ function toStage(row: PageStageRow) {
 }
 
 function toBlock(block: PageBlock) {
-  return { ...block, render: block.render ?? null, shape: block.shape ?? null, style: block.style ?? null, area: block.area ?? null };
+  return {
+    ...block,
+    render: block.render ?? null,
+    shape: block.shape ?? null,
+    style: block.style ?? null,
+    area: block.area ?? null,
+    needs_translate: block.needs_translate ?? false,
+    needs_render: block.needs_render ?? false,
+  };
 }
 
 /** Everything the page editor shows, or null when the page doesn't exist. */
