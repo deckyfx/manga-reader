@@ -44,7 +44,7 @@ import { publishPage } from "@/services/page-publish";
 import { decodeBase64Image, runStoredPage, submitPageJob } from "@/services/page-jobs";
 import { MASK_LAYER_FILES, PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
 import { FONT_FILES } from "@/services/typeset-service";
-import { FONT_VARIANTS, TEXT_ALIGNS } from "@/shared/typeset";
+import { FONT_VARIANTS, TEXT_ALIGNS, type TextStyle } from "@/shared/typeset";
 import { imageSize, maskFromImage, maskToPng } from "@/lib/mask";
 import { pageDir, PageStore, type StageName } from "@/stores/page-store";
 import { PageSummary, toSummary } from "@/plugins/studio/page-summary";
@@ -67,6 +67,15 @@ const RUNNABLE = {
   clean_sfx: ["render"],
   render: [],
 } as const satisfies Record<string, readonly StageName[]>;
+
+/** Two lettering styles are the same whatever order their keys were written in (null = automatic). */
+function sameStyle(a: TextStyle | null, b: TextStyle | null): boolean {
+  const canonical = (value: unknown): unknown =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined).sort(([x], [y]) => x.localeCompare(y)).map(([k, v]) => [k, canonical(v)]))
+      : value;
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
 
 /** Largest encoded mask layer accepted (a 1-bit page PNG is far smaller). */
 const MAX_MASK_BYTES = 8 * 1024 * 1024;
@@ -333,16 +342,18 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       // A new source text makes its translation stale too; a new translation only needs typesetting again; toggling
       // whether a block is cleaned affects its clean pass (text cleaning also feeds the sfx pass) and the result.
       // The edit and the stale marking commit together.
+      // Only what actually changes: saving a field back unchanged (a blur on an untouched box, a re-save of the same
+      // style) leaves the stages as they were, instead of asking for a re-render that would produce the same image
       const stale = new Set<StageName>();
-      if (body.source_text !== undefined) stale.add("translate").add("render");
-      if (body.translated_text !== undefined) stale.add("render");
+      if (body.source_text !== undefined && body.source_text !== (block.source_text ?? "")) stale.add("translate").add("render");
+      if (body.translated_text !== undefined && body.translated_text !== (block.translated_text ?? "")) stale.add("render");
+      // An empty style is the automatic layout: stored as none
+      const style = body.style === undefined ? undefined : body.style && Object.keys(body.style).length > 0 ? body.style : null;
       // Lettering changes only need the text burned again
-      if (body.style !== undefined) stale.add("render");
+      if (style !== undefined && !sameStyle(style, block.style ?? null)) stale.add("render");
       if (body.include !== undefined && body.include !== block.include) {
         for (const s of block.kind === "sfx" ? (["clean_sfx", "render"] as const) : (["clean_text", "clean_sfx", "render"] as const)) stale.add(s);
       }
-      // An empty style is the automatic layout: stored as none
-      const style = body.style === undefined ? undefined : body.style && Object.keys(body.style).length > 0 ? body.style : null;
       const fields = { sourceText: body.source_text, translatedText: body.translated_text, include: body.include, style };
       if (!(await PageStore.updateBlock(params.id, params.idx, fields, [...stale]))) return status(404, { error: "block not found" });
       return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
@@ -452,33 +463,39 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
       try {
         // The page lock keeps edits out while this reads, processes and writes the blocks; the global queue shares the CPU
         // Whether this run covered every block the stage applies to; a partial run can't vouch for the whole stage
-        const wholeStage = await runExclusiveResult(async (): Promise<boolean> => {
+        // …and whether it changed any text: a re-read or re-translation that comes back the same leaves the stages
+        // after it as they were, rather than asking for work that would produce the same result
+        const { wholeStage, changed } = await runExclusiveResult(async (): Promise<{ wholeStage: boolean; changed: boolean }> => {
           const pipeline = new PagePipeline(pageDir(params.id), () => {}, PageStore.repository(params.id));
           const job = await pipeline.readJob();
           if (!job) throw new Error("page has no detected blocks");
           const ids = body.block_ids;
           if (ids?.some((id) => !job.blocks.some((b) => b.id === id))) throw new Error("unknown block id");
           const covers = (targets: PageBlock[]): boolean => !ids || targets.every((b) => ids.includes(b.id));
+          const texts = (field: "source_text" | "translated_text"): string => JSON.stringify(job.blocks.map((b) => [b.id, b[field] ?? ""]));
           if (stage === "ocr") {
             const covered = covers(job.blocks.filter((b) => b.kind === "text"));
+            const before = texts("source_text");
             await pipeline.ocr(job, pageEngines.ocr, ids);
-            return covered;
+            return { wholeStage: covered, changed: texts("source_text") !== before };
           }
           if (stage === "translate") {
             const covered = covers(job.blocks.filter((b) => b.kind === "text" && b.source_text?.trim()));
+            const before = texts("translated_text");
             await pipeline.translate(job, pageEngines.translate, ids);
-            return covered;
+            return { wholeStage: covered, changed: texts("translated_text") !== before };
           }
-          // Cleaning always covers the whole kind; to fix part of the page use POST …/reclean with areas
+          // Cleaning always covers the whole kind; to fix part of the page use POST …/reclean with areas. A new image
+          // is always a change for what's built on it
           if (stage === "clean_text" || stage === "clean_sfx") {
             await pipeline.clean(job, stage === "clean_text" ? "text" : "sfx");
-            return true;
+            return { wholeStage: true, changed: true };
           }
           await pipeline.render(job);
-          return true;
+          return { wholeStage: true, changed: true };
         });
         if (wholeStage) await PageStore.setStage(params.id, stage, "fresh");
-        if (RUNNABLE[stage].length > 0) await PageStore.markStale(params.id, [...RUNNABLE[stage]]);
+        if (changed && RUNNABLE[stage].length > 0) await PageStore.markStale(params.id, [...RUNNABLE[stage]]);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error({ err, pageId: params.id, stage }, "Studio run failed");
