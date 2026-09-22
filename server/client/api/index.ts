@@ -241,8 +241,12 @@ export const createWorkspace = (body: { name: string; source_url?: string; sourc
 export const renameWorkspace = (id: number, body: { name?: string; adult?: boolean }) =>
   unwrap(api.studio.api.workspaces({ id }).patch(body));
 
-/** Removes the workspace only: its pages stay in the Studio, loose. */
-export const deleteWorkspace = (id: number) => unwrap(api.studio.api.workspaces({ id }).delete());
+/**
+ * Closes a workspace. Its drafts go with it unless `keepPages`, which leaves them loose in the Studio; pages already
+ * filed into a chapter always stay there.
+ */
+export const deleteWorkspace = (id: number, keepPages = false) =>
+  unwrap(api.studio.api.workspaces({ id }).delete(undefined, { query: keepPages ? { keep_pages: true } : {} }));
 
 /**
  * Appends images at `startIndex` (0-based). A batch sent again skips the positions it already stored, so a retry

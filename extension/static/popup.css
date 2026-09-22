@@ -190,3 +190,12 @@ a.menu-btn {
   text-decoration: none;
   justify-content: center;
 }
+
+/* Which build is running, so a report about a problem can say so */
+.version {
+  color: #6c7086;
+  font-size: 10px;
+  text-align: right;
+  padding: 0 12px 8px;
+}
+

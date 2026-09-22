@@ -12,7 +12,7 @@ import type {
   FromEngineMsg,
   FetchImageMsg,
 } from "./types";
-import { extractChapterHere, extractSeriesHere } from "./chapter-extract";
+import { extractChapterHere, extractSeriesHere, resolvePageHere } from "./chapter-extract";
 import { loadServerAccess } from "./settings-store";
 import { errorMessage, serverApi, streamUrl, type PageJobEvent, type PageLiveEvent } from "./api";
 
@@ -66,6 +66,11 @@ function init(): void {
     if (msg.type === "extract-series") {
       sendResponse(extractSeriesHere());
       return undefined;
+    }
+    // The import in the worker, asking for one listed page's image — answered from here, where the cookies are
+    if (msg.type === "resolve-page") {
+      void resolvePageHere(msg.provider, msg.page).then(sendResponse);
+      return true;
     }
     if (msg.type !== "extract-chapter") return undefined;
     void extractChapterHere(msg.rescan === true).then(sendResponse);

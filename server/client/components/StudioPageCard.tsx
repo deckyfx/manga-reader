@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { Link } from "react-router";
 import { pageFileUrl, type StudioPageSummary } from "../api";
-import { StatusBadge } from "./StatusBadge";
+import { pageStatus, StatusBadge } from "./StatusBadge";
 
 /** What a page is called in the Studio: its name, else the file name of its source, else the tail of its id. */
 export function pageLabel(page: StudioPageSummary): string {
@@ -41,7 +41,7 @@ export function StudioPageCard({ page, caption, actions }: StudioPageCardProps) 
           />
         </div>
         <div className="flex items-center justify-between gap-2 px-3 pt-2">
-          <StatusBadge status={page.status} />
+          <StatusBadge status={pageStatus(page)} />
           {page.has_edits ? (
             <span
               className="rounded-full bg-amber-900/60 px-2 py-0.5 text-xs font-medium text-amber-300"
@@ -54,7 +54,7 @@ export function StudioPageCard({ page, caption, actions }: StudioPageCardProps) 
           ) : null}
         </div>
         <div className="truncate px-3 pt-1 text-xs text-gray-300" title={page.source}>{pageLabel(page)}</div>
-        <div className="truncate px-3 pb-2 text-[11px] text-gray-500">
+        <div className="truncate px-3 pb-2 text-[11px] text-gray-500" title={page.location ? page.location.chapter_title : undefined}>
           {caption ?? (page.location
             ? `${page.location.chapter_title} · page ${page.location.index}/${page.location.total}`
             : `${page.width}×${page.height} · draft`)}

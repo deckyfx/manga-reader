@@ -56,6 +56,7 @@ import { CommandHistory, type Command } from "./history";
 import { MaskLayers, mergeAreas, type Area, type StrokeRecord } from "./mask-layers";
 import type { LetteringItem } from "../text/typesetter";
 import { LetteringObject, letteringIdOf } from "./lettering-object";
+import type { Toolset } from "../toolset";
 
 export type Tool = "select" | "rect" | "ellipse" | "polygon" | "brush";
 
@@ -154,6 +155,10 @@ interface PageCanvasProps {
   onModeChange?: (mode: EditMode) => void;
   /** Floating editor shown next to the selected block in Lettering mode. */
   renderLetteringPanel?: (id: number) => ReactNode;
+  /** The toolset the previous page was left with; read once, when the canvas opens. */
+  initialToolset?: Toolset;
+  /** Told whenever the toolset changes, so the next page can start from it. */
+  onToolsetChange?: (patch: Toolset) => void;
 }
 
 interface Entry {
@@ -175,7 +180,11 @@ interface CanvasActions {
   cancelDrawing: () => void;
   deleteSelected: () => void;
   fit: () => void;
+  /** First view of the page at a remembered zoom. */
+  openAt: (scale: number) => void;
   zoomBy: (factor: number) => void;
+  /** Sets an exact zoom (1 = 100%), keeping the middle of the view where it is. */
+  zoomTo: (value: number) => void;
 }
 
 const isTyping = (target: EventTarget | null): boolean =>
@@ -188,7 +197,7 @@ const isTyping = (target: EventTarget | null): boolean =>
  */
 export function PageCanvas({
   pageId, imageUrl, page, blocks, disabled, selectedId, onSelect, onDetail, onReload, toolbarStart, onImagesChanged,
-  lettering, textPreviewAvailable, onStylePreview, relayout, onModeChange, renderLetteringPanel, ref,
+  lettering, textPreviewAvailable, onStylePreview, relayout, onModeChange, renderLetteringPanel, initialToolset, onToolsetChange, ref,
 }: PageCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<Canvas | null>(null);
@@ -198,11 +207,13 @@ export function PageCanvas({
   const spaceRef = useRef(false);
   const queueRef = useRef<Promise<void>>(Promise.resolve());
 
-  const [tool, setTool] = useState<Tool>("select");
-  const [kind, setKind] = useState<RegionKind>("text");
-  const [brushLayer, setBrushLayer] = useState<MaskLayerName>("add");
-  const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH);
-  const [showMask, setShowMask] = useState(false);
+  // The toolset starts where the previous page of the workspace left it; read once, since the canvas owns it after
+  const [startingToolset] = useState<Toolset>(() => initialToolset ?? {});
+  const [tool, setTool] = useState<Tool>(startingToolset.tool ?? "select");
+  const [kind, setKind] = useState<RegionKind>(startingToolset.kind ?? "text");
+  const [brushLayer, setBrushLayer] = useState<MaskLayerName>(startingToolset.brushLayer ?? "add");
+  const [brushSize, setBrushSize] = useState(startingToolset.brushSize ?? DEFAULT_BRUSH);
+  const [showMask, setShowMask] = useState(startingToolset.showMask ?? false);
   /** Spots painted into the add layer that haven't been re-cleaned yet, in page pixels. */
   const [paintedAreas, setPaintedAreas] = useState<Area[]>([]);
   const [recleaning, setRecleaning] = useState(false);
@@ -210,8 +221,8 @@ export function PageCanvas({
   const [layersNonce, setLayersNonce] = useState(0);
   const maskRef = useRef<MaskLayers | null>(null);
   const brushCursorRef = useRef<Circle | null>(null);
-  const [mode, setMode] = useState<EditMode>("regions");
-  const [showText, setShowText] = useState(true);
+  const [mode, setMode] = useState<EditMode>(startingToolset.mode ?? "regions");
+  const [showText, setShowText] = useState(startingToolset.showText ?? true);
   /** Floating lettering objects by block id. */
   const letteringRef = useRef(new Map<number, LetteringObject>());
   const panelHostRef = useRef<HTMLDivElement>(null);
@@ -240,12 +251,17 @@ export function PageCanvas({
   const showTextLayer = mode === "lettering" || (showText && textPreviewAvailable);
   const live = useRef({
     pageId, page, blocks, disabled, tool, kind, wheelMode, brushLayer, brushSize, showMask, showTextLayer, mode, selectedId, lettering,
-    onSelect, onDetail, onReload, onImagesChanged, onStylePreview, relayout, onModeChange,
+    onSelect, onDetail, onReload, onImagesChanged, onStylePreview, relayout, onModeChange, onToolsetChange,
   });
   live.current = {
     pageId, page, blocks, disabled, tool, kind, wheelMode, brushLayer, brushSize, showMask, showTextLayer, mode, selectedId, lettering,
-    onSelect, onDetail, onReload, onImagesChanged, onStylePreview, relayout, onModeChange,
+    onSelect, onDetail, onReload, onImagesChanged, onStylePreview, relayout, onModeChange, onToolsetChange,
   };
+
+  // Every toolset change is handed on, so the workspace's next page opens with it
+  useEffect(() => {
+    live.current.onToolsetChange?.({ tool, kind, brushLayer, brushSize, showMask, mode, showText });
+  }, [tool, kind, brushLayer, brushSize, showMask, mode, showText]);
 
   /** Runs server changes one after another; a failure shows the error, drops the history and reloads the page. */
   const enqueue = useCallback((task: () => Promise<void>) => {
@@ -465,6 +481,7 @@ export function PageCanvas({
       const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
       canvas.zoomToPoint(at, next);
       setZoom(next);
+      live.current.onToolsetChange?.({ zoom: next });
       canvas.requestRenderAll();
     };
 
@@ -476,6 +493,23 @@ export function PageCanvas({
       const scale = Math.min(cw / width, ch / height) * 0.96;
       canvas.setViewportTransform([scale, 0, 0, scale, (cw - width * scale) / 2, (ch - height * scale) / 2]);
       setZoom(scale);
+      live.current.onToolsetChange?.({ zoom: null });
+      canvas.requestRenderAll();
+    };
+
+    /**
+     * Opens a page at a remembered zoom rather than fitted: centred across, and from the top when it's taller than
+     * the view, which is where a tall page is read from.
+     */
+    const openAt = (scale: number) => {
+      const { width, height } = live.current.page;
+      if (!width || !height) return fit();
+      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
+      const cw = canvas.getWidth();
+      const ch = canvas.getHeight();
+      const top = height * next > ch ? 16 : (ch - height * next) / 2;
+      canvas.setViewportTransform([next, 0, 0, next, (cw - width * next) / 2, top]);
+      setZoom(next);
       canvas.requestRenderAll();
     };
 
@@ -578,7 +612,9 @@ export function PageCanvas({
       cancelDrawing,
       deleteSelected,
       fit,
+      openAt,
       zoomBy: (factor) => setZoomTo(canvas.getZoom() * factor, new Point(canvas.getWidth() / 2, canvas.getHeight() / 2)),
+      zoomTo: (value) => setZoomTo(value, new Point(canvas.getWidth() / 2, canvas.getHeight() / 2)),
     };
 
     // ── Pointer handling ──────────────────────────────────────────────────────
@@ -841,7 +877,9 @@ export function PageCanvas({
         img.set({ originX: "left", originY: "top", left: 0, top: 0, selectable: false, evented: false });
         canvas.backgroundImage = img;
         if (!fittedRef.current) {
-          actionsRef.current?.fit();
+          const saved = startingToolset.zoom;
+          if (typeof saved === "number") actionsRef.current?.openAt(saved);
+          else actionsRef.current?.fit();
           fittedRef.current = true;
         }
         canvas.requestRenderAll();
@@ -1365,7 +1403,7 @@ export function PageCanvas({
           <button onClick={() => actionsRef.current?.zoomBy(1 / 1.2)} title="Zoom out (-)" className="p-1.5 rounded-md hover:bg-gray-800">
             <ZoomOut size={15} />
           </button>
-          <span className="w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
+          <ZoomField zoom={zoom} onZoom={(value) => actionsRef.current?.zoomTo(value)} />
           <button onClick={() => actionsRef.current?.zoomBy(1.2)} title="Zoom in (+)" className="p-1.5 rounded-md hover:bg-gray-800">
             <ZoomIn size={15} />
           </button>
@@ -1412,5 +1450,50 @@ export function PageCanvas({
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * The zoom percentage, typed into: Enter or leaving the field applies it (100 for actual size), Escape puts back the
+ * current zoom. Anything that isn't a positive number is ignored.
+ */
+function ZoomField({ zoom, onZoom }: { zoom: number; onZoom: (value: number) => void }) {
+  const shown = String(Math.round(zoom * 100));
+  const [draft, setDraft] = useState<string | null>(null);
+  // Escape blurs the field, and the blur must not apply what Escape just threw away
+  const cancelled = useRef(false);
+  const apply = () => {
+    if (cancelled.current) {
+      cancelled.current = false;
+      setDraft(null);
+      return;
+    }
+    if (draft === null) return;
+    const percent = Number.parseFloat(draft.replace("%", ""));
+    setDraft(null);
+    if (Number.isFinite(percent) && percent > 0) onZoom(percent / 100);
+  };
+  return (
+    <label className="flex items-center rounded-md px-1 hover:bg-gray-800 focus-within:bg-gray-800" title="Zoom: type a percentage, 100 for actual size">
+      <input
+        value={draft ?? shown}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={apply}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            apply();
+            e.currentTarget.blur();
+          } else if (e.key === "Escape") {
+            cancelled.current = true;
+            e.currentTarget.blur();
+          }
+        }}
+        inputMode="decimal"
+        aria-label="Zoom percentage"
+        className="w-9 bg-transparent text-right tabular-nums focus:outline-none"
+      />
+      <span>%</span>
+    </label>
   );
 }

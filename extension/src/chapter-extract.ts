@@ -5,9 +5,10 @@
  * own scripts finished, the user's session applied. The extractors themselves are shared with the server
  * (`shared/providers/`), so the same code the fixtures test is the code that runs here.
  */
-import { extractorFor } from "../../server/src/shared/providers/registry";
+import { extractorById, extractorFor } from "../../server/src/shared/providers/registry";
 import { seriesInfoFrom, type SeriesInfo } from "../../server/src/shared/providers/series-info";
-import type { ExtractContext } from "../../server/src/shared/providers/types";
+import { FetchStatusError, type ExtractContext, type Resolved } from "../../server/src/shared/providers/types";
+import type { ExtractProgressMsg } from "./types";
 
 /** What a series page says about itself, for "New series from this page". */
 export type SeriesExtractResult =
@@ -36,6 +37,10 @@ export type ChapterExtractResult =
       provider: string;
       label: string;
       minIntervalMs: number;
+      /** The list holds pages rather than images, each resolved by this tab when the import reaches it. */
+      resolves: boolean;
+      /** The site's own tags, for suggesting when a series is made from the import. */
+      tags?: string[];
       images: string[];
       title?: string;
       chapter?: string;
@@ -53,9 +58,12 @@ const SCROLL_SETTLE_MS = 250;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Same-origin fetch + parse, for readers that spread one chapter over several pages. */
+/** Longest a page of a multi-page walk may take. Without a limit one stalled request hung the whole read. */
+const FETCH_TIMEOUT_MS = 20_000;
+
 async function fetchDocument(url: string): Promise<Document> {
-  const response = await fetch(url, { credentials: "include" });
-  if (!response.ok) throw new Error(`${url} answered ${response.status}`);
+  const response = await fetch(url, { credentials: "include", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  if (!response.ok) throw new FetchStatusError(`${url} answered ${response.status}`, response.status);
   return new DOMParser().parseFromString(await response.text(), "text/html");
 }
 
@@ -96,7 +104,13 @@ export async function extractChapterHere(rescan = false): Promise<ChapterExtract
     const url = new URL(location.href);
     const extractor = extractorFor(url);
     const logs: string[] = [];
-    const ctx: ExtractContext = { url, document, fetchDocument, log: (message) => logs.push(message) };
+    const log = (message: string): void => {
+      logs.push(message);
+      // Live, to the popup: a gallery walk takes a second a page, and without this the popup sat on its first
+      // message for minutes and looked hung. Nobody listening (the popup closed) is not an error.
+      chrome.runtime.sendMessage({ type: "extract-progress", message } satisfies ExtractProgressMsg).catch(() => undefined);
+    };
+    const ctx: ExtractContext = { url, document, fetchDocument, log };
 
     let extract = await extractor.extract(ctx);
     // A reader that adds pages as you scroll answers the first read with however many exist so far, which is
@@ -112,13 +126,31 @@ export async function extractChapterHere(rescan = false): Promise<ChapterExtract
       provider: extractor.id,
       label: extractor.label,
       minIntervalMs: extractor.minIntervalMs,
+      resolves: extractor.resolve !== undefined,
       images: extract.images,
       ...(extract.title !== undefined ? { title: extract.title } : {}),
       ...(extract.chapter !== undefined ? { chapter: extract.chapter } : {}),
       ...(extract.adult !== undefined ? { adult: extract.adult } : {}),
+      ...(extract.tags !== undefined ? { tags: extract.tags } : {}),
       logs,
     };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+/**
+ * Turns one listed page into its image, for an import in progress. It runs here, in the tab, because this is where the
+ * user's cookies are: the worker asks, a page at a time, as it reaches each one. Pacing is the worker's business.
+ */
+export async function resolvePageHere(provider: string, page: string): Promise<Resolved> {
+  const extractor = extractorById(provider);
+  if (!extractor?.resolve) return { ok: false, reason: `${provider} has no pages to resolve`, stop: true };
+  try {
+    const ctx: ExtractContext = { url: new URL(location.href), document, fetchDocument, log: () => undefined };
+    return await extractor.resolve(page, ctx);
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+

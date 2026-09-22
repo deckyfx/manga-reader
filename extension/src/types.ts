@@ -91,8 +91,12 @@ export interface ExplainResultMsg   { type: "explain-result"; tokens: TokenInfo[
 export interface ExplainErrorMsg    { type: "explain-error"; message: string }
 
 export interface StartImageModeMsg  { type: "start-image-mode" }
+/** A step of a page read as it happens, so the popup can show "reading page 37 of 120" instead of waiting silently. */
+export interface ExtractProgressMsg { type: "extract-progress"; message: string }
 /** Asks the content script to read this page's chapter images; `rescan` forces the scroll pass. */
 export interface ExtractChapterMsg  { type: "extract-chapter"; rescan?: boolean }
+/** Asks the tab to turn one listed page into its image, for an import that is running. */
+export interface ResolvePageMsg     { type: "resolve-page"; provider: string; page: string }
 /** Asks the content script what this page says about itself, for "New series from this page". */
 export interface ExtractSeriesMsg   { type: "extract-series" }
 /** Sent to content tabs when Studio burns text and the result image is updated. */
@@ -108,6 +112,7 @@ export type ToContentMsg =
   | StartImageModeMsg
   | ExtractChapterMsg
   | ExtractSeriesMsg
+  | ResolvePageMsg
   | ImageUpdatedMsg;
 
 // ── Messages: content → background ───────────────────────────────────────────
@@ -134,8 +139,14 @@ export interface ImportRequest {
   adult?: boolean;
   /** Add to this workspace instead of making one (offered for an earlier import of the same address). */
   workspaceId?: number;
-  /** Start "Run all" once every page is in. */
+  /** Translate the pages as they land, one at a time. */
   runAfter: boolean;
+  /** The site's tags for it, kept on the workspace as suggestions for a series made from it later. */
+  tags?: string[];
+  /** The listed items are pages whose images the tab resolves, one at a time, as the import reaches them. */
+  resolves: boolean;
+  /** The tab that holds the user's cookies for resolving; it has to stay open until every page is resolved. */
+  tabId: number;
 }
 
 /** What the popup hands over to make a series: what the page said, as the user left it. */
@@ -145,6 +156,8 @@ export interface CreateSeriesRequest {
   /** Address of the cover to fetch and upload; the worker does both, as it does for chapter images. */
   cover?: string;
   adult: boolean;
+  /** Tags to start the series with — the page's own suggestions, as the person left them. */
+  tags?: string[];
 }
 
 export interface CreateSeriesMsg       { type: "create-series"; request: CreateSeriesRequest }

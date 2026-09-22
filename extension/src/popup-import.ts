@@ -6,10 +6,12 @@
  * comes from whatever site the user happens to be on.
  */
 import { findWorkspaceBySource, type WorkspaceRef } from "./api";
+import { ensureContentScript } from "./inject";
 import type { ChapterExtractResult, SeriesExtractResult } from "./chapter-extract";
 import type { SeriesInfo } from "../../server/src/shared/providers/series-info";
+import { MAX_SERIES_TAGS, splitTags, tagProblem } from "../../server/src/shared/tags";
 import { loadServerAccess } from "./settings-store";
-import type { ImportRequest } from "./types";
+import type { ExtractProgressMsg, ImportRequest } from "./types";
 
 /** The background worker's answer to `import-status`. */
 interface ImportStatusReply {
@@ -19,6 +21,8 @@ interface ImportStatusReply {
     pages: { index: number; url: string; state: string; reason?: string }[];
     finishedAt?: number;
     error?: string;
+    /** A gallery: its pages are read by the tab, which therefore has to stay open. */
+    resolves?: boolean;
   } | null;
   done: number;
   failed: number;
@@ -56,7 +60,12 @@ const send = <T>(msg: unknown): Promise<T> => chrome.runtime.sendMessage(msg) as
 
 /** The tab the user is looking at, when it is a page a content script can read. */
 async function activeTab(): Promise<chrome.tabs.Tab | null> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // Opened in its own window from the context menu, the panel is told which tab to read: "the active tab" in that
+  // window would be the panel itself
+  const pointed = Number(new URL(location.href).searchParams.get("tab"));
+  const tab = Number.isInteger(pointed) && pointed > 0
+    ? await chrome.tabs.get(pointed).catch(() => undefined)
+    : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
   if (!tab?.id || !tab.url || !/^https?:/i.test(tab.url)) return null;
   return tab;
 }
@@ -76,6 +85,10 @@ async function renderProgress(status: ImportStatusReply): Promise<void> {
   ];
 
   if (job.error) nodes.push(el("p", "error", job.error));
+  // The popup can close now — the pages are read by the gallery tab, so that is what has to stay
+  if (job.resolves && !finished && !job.error) {
+    nodes.push(el("p", "muted", "Keep the gallery tab open until every page is read. This popup can close."));
+  }
   // Stopped rather than finished: the pages already downloaded are still waiting, so offer to carry on
   if (job.error && !finished) {
     const again = el("button", "menu-btn", "Try again");
@@ -129,7 +142,19 @@ function pollProgress(): void {
 
 /** The button, when this page says enough about itself to start a series from. */
 async function seriesButton(tabId: number): Promise<HTMLElement | null> {
-  const read = await chrome.tabs.sendMessage(tabId, { type: "extract-series" }) as SeriesExtractResult | undefined;
+  // Self-contained on purpose: relying on the caller to have injected first is how this read broke before
+  try {
+    await ensureContentScript(tabId);
+  } catch {
+    return null;
+  }
+  let read: SeriesExtractResult | undefined;
+  try {
+    read = await chrome.tabs.sendMessage(tabId, { type: "extract-series" }) as SeriesExtractResult | undefined;
+  } catch {
+    // No answer is no button, not an error: this is an offer, and the chapter read beside it still stands
+    return null;
+  }
   if (!read?.ok) return null;
   const button = el("button", "menu-btn", "New series from this page");
   button.addEventListener("click", () => renderSeries(read.info));
@@ -151,6 +176,12 @@ function renderSeries(info: SeriesInfo): void {
   synopsis.rows = 4;
   synopsis.maxLength = 4000;
   synopsis.setAttribute("aria-label", "Synopsis");
+
+  // The page's own tags, as suggestions the person edits — comma-separated, since that is how anyone types a list
+  const tags = el("input", "import-input") as HTMLInputElement;
+  tags.value = (info.tags ?? []).slice(0, MAX_SERIES_TAGS).join(", ");
+  tags.placeholder = "Tags, comma-separated";
+  tags.setAttribute("aria-label", "Tags");
 
   const adultRow = el("label", "import-row");
   const adult = el("input") as HTMLInputElement;
@@ -177,6 +208,13 @@ function renderSeries(info: SeriesInfo): void {
       failed("Give the series a title.");
       return;
     }
+    // Checked here, with the limits the server applies, so an over-long list is fixed in the form rather than refused
+    const tagList = splitTags(tags.value);
+    const problem = tagProblem(tagList);
+    if (problem) {
+      failed(problem);
+      return;
+    }
     failure.hidden = true;
     create.setAttribute("disabled", "true");
     void send<{ ok: boolean; error?: string; series?: { id: number; title: string; coverError?: string } }>({
@@ -186,6 +224,7 @@ function renderSeries(info: SeriesInfo): void {
         ...(synopsis.value.trim() ? { synopsis: synopsis.value.trim() } : {}),
         ...(info.cover ? { cover: info.cover } : {}),
         adult: adult.checked,
+        ...(tagList.length > 0 ? { tags: tagList } : {}),
       },
     }).then(async (answer) => {
       if (!answer?.ok || !answer.series) {
@@ -217,6 +256,7 @@ function renderSeries(info: SeriesInfo): void {
     el("p", "import-found", "What this page says about itself"),
     title,
     synopsis,
+    tags,
     adultRow,
   ];
   if (info.cover) nodes.push(el("p", "muted", "Its cover comes across too."));
@@ -226,7 +266,7 @@ function renderSeries(info: SeriesInfo): void {
 
 // ── What the page holds ──────────────────────────────────────────────────────
 
-function renderFound(found: Extract<ChapterExtractResult, { ok: true }>, sourceUrl: string, earlier: WorkspaceRef | null): void {
+function renderFound(found: Extract<ChapterExtractResult, { ok: true }>, sourceUrl: string, tabId: number, earlier: WorkspaceRef | null): void {
   const chosen = new Set(found.images);
   const suggested = [found.title, found.chapter ? `Chapter ${found.chapter}` : null].filter(Boolean).join(" — ");
 
@@ -297,6 +337,9 @@ function renderFound(found: Extract<ChapterExtractResult, { ok: true }>, sourceU
       images,
       name: name.value.trim() || "Imported chapter",
       runAfter: translateTick.checked,
+      resolves: found.resolves,
+      tabId,
+      ...(found.tags && found.tags.length > 0 ? { tags: found.tags } : {}),
       ...(found.adult !== undefined ? { adult: found.adult } : {}),
       ...(earlier && addToEarlier?.checked ? { workspaceId: earlier.id } : {}),
     };
@@ -336,10 +379,36 @@ export async function start(rescan = false): Promise<void> {
     }
 
     message(rescan ? "Scanning the page…" : "Looking at this page…");
-    const found = await chrome.tabs.sendMessage(tab.id, { type: "extract-chapter", rescan }) as ChapterExtractResult | undefined;
+    try {
+      await ensureContentScript(tab.id);
+    } catch {
+      // The browser keeps every extension out of some pages: the Web Store, the new-tab page, a PDF viewer
+      message("The browser doesn't let extensions read this page.");
+      return;
+    }
+    // Each step of the read, as the page reports it. A long walk also warns that closing the popup ends it: the
+    // result comes back to this popup, and a closed popup has nowhere to put it.
+    const onProgress = (msg: unknown): void => {
+      if (!msg || typeof msg !== "object" || (msg as { type?: unknown }).type !== "extract-progress") return;
+      show(
+        el("p", "muted", (msg as ExtractProgressMsg).message),
+        el("p", "muted", "Keep this popup open until it finishes — closing it stops the read."),
+      );
+    };
+    chrome.runtime.onMessage.addListener(onProgress);
+    let found: ChapterExtractResult | undefined;
+    try {
+      found = await chrome.tabs.sendMessage(tab.id, { type: "extract-chapter", rescan }) as ChapterExtractResult | undefined;
+    } catch {
+      // Injection succeeded but the page went away before it answered — the raw "Receiving end does not exist"
+      // tells the user nothing they can act on
+      found = undefined;
+    } finally {
+      chrome.runtime.onMessage.removeListener(onProgress);
+    }
     if (!found) {
-      // No content script here: a page loaded before the extension, or one it isn't allowed on
-      message("This page can't be read — reload it and try again.");
+      // Injected, yet nothing answered: most likely the page navigated away while it was being read
+      message("The page didn't answer — try again once it has finished loading.");
       return;
     }
     if (!found.ok) {
@@ -365,7 +434,7 @@ export async function start(rescan = false): Promise<void> {
     const earlier = access.serverUrl && access.apiKey
       ? await findWorkspaceBySource(access.serverUrl, access.apiKey, sourceUrl).catch(() => null)
       : null;
-    renderFound(found, sourceUrl, earlier);
+    renderFound(found, sourceUrl, tab.id, earlier);
   } catch (err) {
     message(err instanceof Error ? err.message : String(err), "error");
   }

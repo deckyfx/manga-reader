@@ -6,13 +6,19 @@
  * other half of that — a batch uploaded twice lands on positions that already hold a page and is skipped — so a
  * resume that repeats the last batch costs nothing.
  *
- * Downloads are paced by the provider's `minIntervalMs` and run two at a time; pages are uploaded in small batches as
- * they arrive, so the Studio shows progress early and the worker never holds a whole chapter in memory.
+ * Each page travels on its own — resolved (for a gallery), downloaded, uploaded — with up to five in flight, so the
+ * first pages are in the Studio and translating while the rest are still being read, and nothing waits for the whole
+ * chapter. Requests to the *site* are paced by the provider's `minIntervalMs`, one clock for the lot: the image
+ * servers a gallery points at are a separate matter, bounded only by the five in flight. A problem that would fail
+ * every page after it (the server gone, the gallery tab closed, the site's image limit) pauses the import instead of
+ * failing pages, and Try again carries on from the first page not yet in.
  */
 import { addSeriesCover, createSeries, createWorkspace, findWorkspaceBySource, serverHasWorkspaces, startWorkspaceRun, uploadWorkspacePages, workspacePageSources } from "./api";
 import { isPrivateHost } from "../../server/src/shared/private-host";
+import { ensureContentScript } from "./inject";
 import { loadServerAccess } from "./settings-store";
-import type { CreateSeriesRequest, ImportRequest } from "./types";
+import type { Resolved } from "../../server/src/shared/providers/types";
+import type { CreateSeriesRequest, ImportRequest, ResolvePageMsg } from "./types";
 
 /** Where one page of the chapter got to. */
 export interface ImportPage {
@@ -30,8 +36,12 @@ export interface ImportJob {
   sourceUrl: string;
   provider: string;
   minIntervalMs: number;
-  /** Start "Run all" once every page is in. */
+  /** Translate the pages as they land. */
   runAfter: boolean;
+  /** The pages are a gallery's, each resolved to its image by the tab before it can be downloaded. */
+  resolves: boolean;
+  /** The tab that resolves them, with the user's cookies. */
+  tabId: number;
   pages: ImportPage[];
   startedAt: number;
   finishedAt?: number;
@@ -49,10 +59,8 @@ export interface ImportStatus {
 }
 
 const JOB_KEY = "chapter-import";
-/** Pages uploaded per request: small enough that the Studio fills in early, large enough to avoid a request each. */
-const BATCH_SIZE = 5;
-/** Two at a time is polite to a CDN and still hides most of the latency. */
-const PARALLEL_DOWNLOADS = 2;
+/** Pages in flight at once. Enough to hide each page's latency; the site's pace is kept by its clock, not by this. */
+const PIPELINE_WIDTH = 5;
 /** The server refuses anything larger, so there is no point sending it. */
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 /** Goes at one image before it is called failed. */
@@ -62,8 +70,20 @@ const RETRY_BACKOFF_MS = 700;
 
 /** True while this worker is inside the loop, so a second call doesn't run the same job twice. */
 let working = false;
-/** When the last download was *started*, for the provider's pacing. */
-let lastRequestAt = 0;
+/**
+ * When the last paced request to the site started. One clock for every request that counts against the site's limit,
+ * and only those: an unpaced download from a gallery's image servers never moves it, or each one would push back the
+ * next page read.
+ */
+let siteLastAt = 0;
+
+/** Waits for the next slot at the site's pace. The slot is taken before the wait, so callers arriving together queue. */
+async function takeSiteSlot(minIntervalMs: number): Promise<void> {
+  const now = Date.now();
+  const startAt = Math.max(now, siteLastAt + minIntervalMs);
+  siteLastAt = startAt;
+  if (startAt > now) await delay(startAt - now);
+}
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -152,6 +172,7 @@ export async function createSeriesFromPage(request: CreateSeriesRequest): Promis
     title: request.title,
     ...(request.synopsis ? { synopsis: request.synopsis } : {}),
     adult: request.adult,
+    ...(request.tags && request.tags.length > 0 ? { tags: request.tags } : {}),
   });
 
   if (!request.cover) return series;
@@ -167,12 +188,8 @@ export async function createSeriesFromPage(request: CreateSeriesRequest): Promis
 
 /** One attempt at one image. Throws `Transient` when trying again might work. */
 async function fetchPage(url: string, minIntervalMs: number): Promise<File> {
-  // The slot is taken before waiting for it: two callers arriving together would otherwise compute the same wait
-  // and start at the same moment, which is the one thing the interval exists to prevent
-  const now = Date.now();
-  const startAt = Math.max(now, lastRequestAt + minIntervalMs);
-  lastRequestAt = startAt;
-  if (startAt > now) await delay(startAt - now);
+  // Paced only when this request counts against the site's limit; a gallery's image servers pass 0
+  if (minIntervalMs > 0) await takeSiteSlot(minIntervalMs);
 
   // No spoofed headers: rawkuma's CDN serves without a Referer, and anything that needs one gets its own rule later
   let response: Response;
@@ -212,108 +229,136 @@ async function downloadPage(url: string, minIntervalMs: number): Promise<File> {
       if (attempt < DOWNLOAD_ATTEMPTS - 1) await delay(RETRY_BACKOFF_MS * 2 ** attempt);
     }
   }
-  throw new Error(`${lastError.message} (after ${DOWNLOAD_ATTEMPTS} attempts)`);
+  // Still failing after the retries: the site is down or limiting, which the next page would meet too. Pause with
+  // this page pending rather than fail it and the rest one by one; a 404 or a non-image already failed it above
+  throw new Pause(`${lastError.message} (after ${DOWNLOAD_ATTEMPTS} attempts) — press Try again when the site is back`);
 }
 
 /**
- * Sends the pages that are ready, in runs of neighbouring positions. Runs matter: the server places a batch at
- * `start_index`, `start_index + 1`, … so a gap left by a failed page has to end the batch rather than shift
- * everything after it up by one.
+ * Something that would fail every page after this one, too: the server is unreachable, the gallery tab has gone, the
+ * site's image limit is spent, the site keeps failing downloads. The import stops taking new pages and pauses — the page stays pending, not failed, so
+ * Try again picks it up.
  */
-async function uploadReady(
-  job: ImportJob,
-  ready: Map<number, { file: File; url: string }>,
-  access: { serverUrl: string; apiKey: string },
-): Promise<void> {
-  while (ready.size > 0) {
-    const first = Math.min(...ready.keys());
-    const run: { index: number; file: File; url: string }[] = [];
-    for (let index = first; ready.has(index) && run.length < BATCH_SIZE; index++) {
-      const entry = ready.get(index)!;
-      run.push({ index, ...entry });
-    }
+class Pause extends Error {}
 
-    try {
-      const report = await uploadWorkspacePages(
-        access.serverUrl,
-        access.apiKey,
-        job.workspaceId,
-        run[0]!.index,
-        run.map((entry) => entry.file),
-        run.map((entry) => entry.url),
-      );
-      for (const entry of run) {
-        const page = job.pages.find((candidate) => candidate.index === entry.index);
-        if (page) page.state = "uploaded";
-        ready.delete(entry.index);
-      }
-      // The server reports a refusal by the position it was given, which is the page's index, not its place in the array
-      for (const skipped of report.skipped) {
-        const page = job.pages.find((candidate) => candidate.index === skipped.index);
-        if (page) {
-          page.state = "failed";
-          page.reason = skipped.reason;
-        }
-      }
-    } catch (err) {
-      // The batch stays in `ready`: the next pass tries it again, and the server skips whatever did land
-      throw err instanceof Error ? err : new Error(String(err));
-    }
-    await saveJob(job);
-    showBadge(job);
+/**
+ * One gallery page to its image, asked of the tab that holds the user's cookies. Counts against the site's pace.
+ */
+async function resolveImage(job: ImportJob, page: ImportPage): Promise<string> {
+  try {
+    // The tab may have been reloaded since the import started, which takes the content script with it
+    await ensureContentScript(job.tabId);
+  } catch {
+    throw new Pause("the gallery tab is closed or can't be read — reopen the gallery and press Try again");
+  }
+  await takeSiteSlot(job.minIntervalMs);
+  let resolved: Resolved | undefined;
+  try {
+    resolved = await chrome.tabs.sendMessage(job.tabId, { type: "resolve-page", provider: job.provider, page: page.url } satisfies ResolvePageMsg) as Resolved | undefined;
+  } catch {
+    resolved = undefined;
+  }
+  if (!resolved) throw new Pause("the gallery tab stopped answering — reopen the gallery and press Try again");
+  if (resolved.ok) return resolved.url;
+  if (resolved.stop) throw new Pause(resolved.reason);
+  // Only this page: an odd page shouldn't halt the gallery
+  throw new Error(resolved.reason);
+}
+
+/** The page's image as a file: resolved first for a gallery, whose image servers aren't paced; downloaded at the site's pace otherwise. */
+async function pageImage(job: ImportJob, page: ImportPage): Promise<File> {
+  if (!job.resolves) return downloadPage(page.url, job.minIntervalMs);
+  return downloadPage(await resolveImage(job, page), 0);
+}
+
+/**
+ * Sends one page to its position. A server that can't be reached is a pause, not a failed page: it will be the same
+ * for every page after this one. A position that already holds a page (a resumed import) counts as done.
+ */
+async function uploadOne(job: ImportJob, page: ImportPage, file: File, access: { serverUrl: string; apiKey: string }): Promise<void> {
+  let refused: { reason: string } | undefined;
+  try {
+    const report = await uploadWorkspacePages(access.serverUrl, access.apiKey, job.workspaceId, page.index, [file], [page.url]);
+    refused = report.skipped.find((entry) => entry.index === page.index);
+  } catch (err) {
+    throw new Pause(`the server didn't take page ${page.index + 1}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (refused) {
+    page.state = "failed";
+    page.reason = refused.reason;
+  } else {
+    page.state = "uploaded";
   }
 }
 
-/** Downloads and uploads everything still pending. Safe to call again: it only ever works on `pending` pages. */
+/**
+ * Makes sure a translation run is going. Asked after every upload rather than once: a run follows the workspace, so
+ * one already going answers 409 and picks the page up itself, and one that ran out of pages before this one landed is
+ * started again. Never awaited by the pipeline — translating is the server's pace, not this one's.
+ */
+async function keepRunGoing(job: ImportJob, access: { serverUrl: string; apiKey: string }): Promise<void> {
+  if (!job.runAfter) return;
+  await startWorkspaceRun(access.serverUrl, access.apiKey, job.workspaceId).catch(() => {
+    // A run that won't start doesn't undo an import that did: the Studio's own button is still there
+  });
+}
+
+/**
+ * Takes every pending page through resolve → download → upload, PIPELINE_WIDTH at a time, in reading order. Safe to
+ * call again: it only ever takes pending pages, so a resume carries on from the first one not yet in.
+ */
 async function processJob(): Promise<void> {
   if (working) return;
   working = true;
+  // Read inside the try: a storage read that throws must still reach the finally, or `working` stays set and no
+  // import could start again until the service worker restarts
+  let loaded: ImportJob | null = null;
   try {
-    const access = await loadServerAccess();
     const job = await loadJob();
-    while (job && !job.finishedAt) {
-      const pending = job.pages.filter((page) => page.state === "pending");
-      if (pending.length === 0) break;
+    loaded = job;
+    if (!job || job.finishedAt) return;
+    const access = await loadServerAccess();
+    const queue = job.pages.filter((page) => page.state === "pending");
+    let cursor = 0;
+    let paused: string | null = null;
 
-      // A slice at a time, so a long chapter checkpoints as it goes instead of holding everything until the end
-      const slice = pending.slice(0, BATCH_SIZE * 2);
-      const ready = new Map<number, { file: File; url: string }>();
-      for (let i = 0; i < slice.length; i += PARALLEL_DOWNLOADS) {
-        const group = slice.slice(i, i + PARALLEL_DOWNLOADS);
-        await Promise.all(group.map(async (page) => {
-          try {
-            ready.set(page.index, { file: await downloadPage(page.url, job.minIntervalMs), url: page.url });
-          } catch (err) {
+    // Workers share one cursor, so pages are taken in order; a pause stops anyone taking another
+    const worker = async (): Promise<void> => {
+      while (paused === null && cursor < queue.length) {
+        const page = queue[cursor++]!;
+        try {
+          const file = await pageImage(job, page);
+          await uploadOne(job, page, file, access);
+          if (page.state === "uploaded") void keepRunGoing(job, access);
+        } catch (err) {
+          if (err instanceof Pause) {
+            paused ??= err.message;
+          } else {
             page.state = "failed";
             page.reason = err instanceof Error ? err.message : String(err);
           }
-        }));
+        }
         await saveJob(job);
         showBadge(job);
       }
+    };
+    await Promise.all(Array.from({ length: PIPELINE_WIDTH }, worker));
 
-      // Everything this slice managed to download goes now: there is nothing left to wait for
-      await uploadReady(job, ready, access);
-    }
-
-    if (job && !job.finishedAt) {
+    if (paused !== null) {
+      // Left unfinished on purpose: pending pages stay pending, and Try again or the next wake carries on
+      job.error = paused;
+    } else {
       job.finishedAt = Date.now();
-      await saveJob(job);
-      if (job.runAfter && job.pages.some((page) => page.state === "uploaded")) {
-        await startWorkspaceRun(access.serverUrl, access.apiKey, job.workspaceId).catch(() => {
-          // A run that won't start doesn't undo an import that did: the Studio's own button is still there
-        });
-      }
-      showBadge(job);
+      // Once more at the end: any page that landed after a run ran out gets one
+      await keepRunGoing(job, access);
     }
+    await saveJob(job);
+    showBadge(job);
   } catch (err) {
-    // Left unfinished on purpose: the pages already downloaded are still pending, and the job is written down, so
-    // the next wake — or the popup's "Try again" — carries on rather than abandoning a half-imported chapter
-    const job = await loadJob();
-    if (job) {
-      job.error = err instanceof Error ? err.message : String(err);
-      await saveJob(job);
-      showBadge(job);
+    if (loaded) {
+      loaded.error = err instanceof Error ? err.message : String(err);
+      await saveJob(loaded);
+      showBadge(loaded);
     }
   } finally {
     working = false;
@@ -348,6 +393,7 @@ export async function startChapterImport(request: ImportRequest): Promise<Import
         source_url: request.sourceUrl,
         source_provider: request.provider,
         ...(request.adult !== undefined ? { adult: request.adult } : {}),
+        ...(request.tags && request.tags.length > 0 ? { tags: request.tags } : {}),
       });
 
   // Adding to an earlier import: whatever it already holds is left alone, so the same chapter twice extends it
@@ -371,6 +417,8 @@ export async function startChapterImport(request: ImportRequest): Promise<Import
     provider: request.provider,
     minIntervalMs: request.minIntervalMs,
     runAfter: request.runAfter,
+    resolves: request.resolves,
+    tabId: request.tabId,
     // Appended after whatever the workspace already holds, so adding to an earlier import doesn't overwrite it
     pages: images.map((url, offset) => ({ index: (workspace.next_index ?? 0) + offset, url, state: "pending" as const })),
     startedAt: Date.now(),

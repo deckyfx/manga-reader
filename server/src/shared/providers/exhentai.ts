@@ -10,11 +10,12 @@
  * so their own cookies go along. A signed-out visitor gets the "no access" page instead of a gallery, which is
  * reported as such rather than as an empty chapter.
  *
- * The markup this depends on (`#gn`, `#img`, `/s/<key>/<gid>-<n>` links, `?p=` pager) is taken from the plan rather
- * than from a probe of the live site — unlike rawkuma, which was checked on 2026-09-18. The fixtures encode those
- * assumptions, so a redesign shows up as a failing test, but the first real run is the one that confirms them.
+ * The markup this depends on — `#gn`, `#gj`, `/s/<key>/<gid>-<n>` links carrying the gallery's own id, the `?p=`
+ * pager, and `#img` holding an absolute H@H address — was checked against live e-hentai galleries on 2026-09-21 (same
+ * markup as exhentai, which needs a signed-in browser to fetch). The fixtures pin it, so a redesign fails loudly.
  */
-import type { ChapterExtract, ExtractContext, Extractor } from "./types";
+import { MAX_SERIES_TAGS, MAX_TAG_LENGTH } from "../tags";
+import { isTransientFetchError, type ChapterExtract, type ExtractContext, type Extractor, type Resolved } from "./types";
 
 /** exhentai has asked for a second between requests for years; the walk is slow by design. */
 const MIN_INTERVAL_MS = 1000;
@@ -22,10 +23,13 @@ const MIN_INTERVAL_MS = 1000;
 const MAX_IMAGE_PAGES = 2000;
 /**
  * Gallery pages read in one go. The pager is whatever the page claims it is, and at a second a request a page
- * claiming `?p=99999` would otherwise buy itself a day of this extension's time. Forty images a page puts this well
- * past MAX_IMAGE_PAGES anyway, so a real gallery never reaches it.
+ * claiming `?p=99999` would otherwise buy itself a day of this extension's time.
+ *
+ * Sized so MAX_IMAGE_PAGES is the limit that actually bites: a gallery page lists twenty images by default (checked
+ * against a live e-hentai gallery on 2026-09-21 — 64 images over `?p=0..3`), so this many pages covers the full
+ * image cap and a real gallery never reaches it first.
  */
-const MAX_GALLERY_PAGES = 60;
+const MAX_GALLERY_PAGES = Math.ceil(MAX_IMAGE_PAGES / 20);
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -82,6 +86,26 @@ function imagePageLinks(document: Document, base: URL): string[] {
     links.push(absolute);
   }
   return links;
+}
+
+
+/**
+ * The gallery's tags as the site shows them, `namespace:tag` — `parody:azur lane`, `character:…`. Checked against a
+ * live gallery on 2026-09-21: each tag is a cell `#td_<namespace>:<tag_with_underscores>` under `#taglist`. The
+ * namespace is kept: it is what tells a parody from a character, and the tags are suggestions the user edits anyway.
+ */
+export function galleryTags(document: Document): string[] {
+  const tags = new Set<string>();
+  for (const cell of Array.from(document.querySelectorAll('#taglist [id^="td_"]'))) {
+    const id = cell.getAttribute("id")?.slice("td_".length) ?? "";
+    // The id spells spaces as underscores; the library keeps tags lower case and short
+    const tag = id.replace(/_/g, " ").trim().toLowerCase().slice(0, MAX_TAG_LENGTH);
+    if (tag.includes(":") && tag.length > 2) tags.add(tag);
+    // No more than a series can carry, so the suggestions go straight into one; the site lists the most telling
+    // namespaces (parody, character, group, artist) first
+    if (tags.size >= MAX_SERIES_TAGS) break;
+  }
+  return [...tags];
 }
 
 /** Whether this document is the gallery it should be, rather than the "no access" or an error page. */
@@ -151,40 +175,39 @@ export function createExhentaiExtractor(intervalMs = MIN_INTERVAL_MS): Extractor
         pageLinks.length = MAX_IMAGE_PAGES;
       }
 
-      // Then each image page, which is where the address actually lives
-      const images: string[] = [];
-      for (const [index, link] of pageLinks.entries()) {
-        await delay(intervalMs);
-        ctx.log(`reading page ${index + 1} of ${pageLinks.length}`);
-        let page: Document;
-        try {
-          page = await ctx.fetchDocument(link);
-        } catch (err) {
-          ctx.log(`page ${index + 1} couldn't be read: ${err instanceof Error ? err.message : String(err)}`);
-          continue;
-        }
-        const { url, limited } = imageOn(page);
-        if (limited) {
-          // The daily allowance is spent. What has been collected still imports, and a later run picks up the rest.
-          ctx.log(`image limit reached after ${images.length} page(s) — try again later and the rest will follow`);
-          break;
-        }
-        if (!url) {
-          ctx.log(`page ${index + 1} had no image`);
-          continue;
-        }
-        // Against `link`: the address lives on the image page, and resolving it against the gallery would be wrong
-        images.push(new URL(url, link).toString());
-      }
-
       const title = ctx.document.querySelector("#gj")?.textContent?.trim() || ctx.document.querySelector("#gn")?.textContent?.trim();
-      ctx.log(`${images.length} image(s) from ${pageLinks.length} page(s)`);
+      ctx.log(`${pageLinks.length} page(s) in the gallery`);
+      // The image pages, not the images: each is resolved as the import reaches it (see `resolve`), so a long gallery
+      // starts importing at once instead of after a second per page of reading first
+      const tags = galleryTags(ctx.document);
       return {
-        images,
+        images: pageLinks,
         ...(title ? { title } : {}),
+        ...(tags.length > 0 ? { tags } : {}),
         // Every gallery here is adult; a series filed from this import inherits it
         adult: true,
       };
+    },
+
+    // No pause here, unlike the listing walk: the import resolves several pages at once and paces them itself, so a
+    // pause per call would only make five callers sleep in parallel and then fire together
+    async resolve(link: string, ctx: ExtractContext): Promise<Resolved> {
+      let page: Document;
+      try {
+        page = await ctx.fetchDocument(link);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        // A timeout, a dropped network or the site struggling would fail every page after this one too: pause with
+        // the page still pending, so "Try again" picks it up, instead of marking the rest failed one by one
+        if (isTransientFetchError(err)) return { ok: false, reason: `couldn't reach the gallery (${reason}) — try again shortly`, stop: true };
+        return { ok: false, reason };
+      }
+      const { url, limited } = imageOn(page);
+      // The daily allowance is spent: every page after this one would say the same, so stop rather than burn them
+      if (limited) return { ok: false, reason: "image limit reached — try again later and the rest will follow", stop: true };
+      if (!url) return { ok: false, reason: "that page had no image" };
+      // Against `link`: the address lives on the image page, and resolving it against the gallery would be wrong
+      return { ok: true, url: new URL(url, link).toString() };
     },
   };
 }

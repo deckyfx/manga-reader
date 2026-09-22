@@ -11,7 +11,8 @@ import { genericExtractor } from "@/shared/providers/generic";
 import { createExhentaiExtractor } from "@/shared/providers/exhentai";
 import { rawkumaExtractor } from "@/shared/providers/rawkuma";
 import { extractorById, extractorFor } from "@/shared/providers/registry";
-import type { ChapterExtract, ExtractContext } from "@/shared/providers/types";
+import { FetchStatusError, type ChapterExtract, type ExtractContext } from "@/shared/providers/types";
+import { MAX_SERIES_TAGS, tagProblem } from "@/shared/tags";
 
 /** An extract context over fixture HTML; `fetchDocument` throws, since no fixture needs a second page yet. */
 function contextFor(html: string, href: string): ExtractContext & { logs: string[] } {
@@ -173,135 +174,176 @@ describe("the exhentai extractor", () => {
 
   const imagePage = (src: string) => `<div id="i3"><img id="img" src="${src}"></div>`;
   const GALLERY = "https://exhentai.org/g/123456/abcdef0123/";
+  const PAGE = (key: string, n: number) => `https://exhentai.org/s/${key}/123456-${n}`;
 
   test("claims a gallery address, and leaves the rest alone", () => {
     expect(extractorFor(new URL(GALLERY)).id).toBe("exhentai");
     expect(extractorFor(new URL("https://e-hentai.org/g/99/deadbeef11/")).id).toBe("exhentai");
     // A search or listing page isn't a gallery
     expect(extractorFor(new URL("https://exhentai.org/?f_search=whatever")).id).toBe("generic");
+    // A gallery's pages are resolved one at a time; a reader's images need no such step
+    expect(typeof extractor.resolve).toBe("function");
+    expect(extractorFor(new URL("https://reader.test/manga/x/chapter-1/")).resolve).toBeUndefined();
   });
 
-  test("walks the pager and every image page, in order", async () => {
-    const ctx = galleryContext(
-      `<h1 id="gn">A Gallery</h1><h1 id="gj">日本語の題</h1>
-       <a href="/s/aaa111/123456-1">1</a><a href="/s/aaa222/123456-2">2</a>
-       <table class="ptb"><tr><td><a href="?p=1">2</a></td></tr></table>`,
-      {
-        [`${GALLERY}?p=1`]: `<a href="/s/aaa333/123456-3">3</a>`,
-        "https://exhentai.org/s/aaa111/123456-1": imagePage("https://hath.test/a/1.jpg"),
-        "https://exhentai.org/s/aaa222/123456-2": imagePage("https://hath.test/b/2.jpg"),
-        "https://exhentai.org/s/aaa333/123456-3": imagePage("https://hath.test/c/3.jpg"),
-      },
-      GALLERY,
-    );
+  describe("listing", () => {
+    test("lists every image page across the pager, in order, without opening any of them", async () => {
+      let opened = 0;
+      const base = galleryContext(
+        `<h1 id="gn">A Gallery</h1><h1 id="gj">日本語の題</h1>
+         <a href="/s/aaa111/123456-1">1</a><a href="/s/aaa222/123456-2">2</a>
+         <table class="ptb"><tr><td><a href="?p=1">2</a></td></tr></table>`,
+        { [`${GALLERY}?p=1`]: `<a href="/s/aaa333/123456-3">3</a>` },
+        GALLERY,
+      );
+      const ctx = { ...base, fetchDocument: (url: string) => { if (url.includes("/s/")) opened++; return base.fetchDocument(url); } };
 
-    const result = await extractor.extract(ctx);
-    expect(result.images).toEqual([
-      "https://hath.test/a/1.jpg",
-      "https://hath.test/b/2.jpg",
-      "https://hath.test/c/3.jpg",
-    ]);
-    // The Japanese title wins when there is one, and everything here is adult
-    expect(result).toMatchObject({ title: "日本語の題", adult: true });
+      const result = await extractor.extract(ctx);
+      // The pages that hold the images — what the import resolves later, a page at a time
+      expect(result.images).toEqual([PAGE("aaa111", 1), PAGE("aaa222", 2), PAGE("aaa333", 3)]);
+      // Listing is only the gallery pages: opening every image page here is what used to take a second each
+      expect(opened).toBe(0);
+      // The Japanese title wins when there is one, and everything here is adult
+      expect(result).toMatchObject({ title: "日本語の題", adult: true });
+    });
+
+    test("reads the gallery's tags as the site shows them, namespace and all", async () => {
+      const ctx = galleryContext(
+        `<h1 id="gn">A Gallery</h1><a href="/s/aaa111/123456-1">1</a>
+         <div id="taglist"><table>
+           <tr><td class="tc">parody:</td><td><div id="td_parody:azur_lane"><a id="ta_parody:azur_lane">azur lane</a></div></td></tr>
+           <tr><td class="tc">character:</td><td><div id="td_character:some_name"><a>some name</a></div>
+             <div id="td_character:some_name"><a>some name</a></div></td></tr>
+         </table></div>`,
+        {},
+        GALLERY,
+      );
+      const result = await extractor.extract(ctx);
+      // Underscores back to spaces, the namespace kept, a tag listed twice offered once
+      expect(result.tags).toEqual(["parody:azur lane", "character:some name"]);
+    });
+
+    test("offers no more tags than a series can carry, so the suggestions go straight into one", async () => {
+      const cells = Array.from({ length: 50 }, (_, i) => `<div id="td_female:tag_${i}"><a>tag ${i}</a></div>`).join("");
+      const ctx = galleryContext(`<h1 id="gn">A Gallery</h1><a href="/s/aaa111/123456-1">1</a><div id="taglist">${cells}</div>`, {}, GALLERY);
+      const result = await extractor.extract(ctx);
+      expect(result.tags).toHaveLength(MAX_SERIES_TAGS);
+      expect(tagProblem(result.tags ?? [])).toBeNull();
+    });
+
+    test("includes the pages before the open one, and each exactly once", async () => {
+      const ctx = galleryContext(
+        // The reader is on page 2 of 2 and presses Import there
+        `<h1 id="gn">A Gallery</h1>
+         <a href="/s/ccc333/123456-3">3</a><a href="/s/ddd444/123456-4">4</a>
+         <table class="ptb"><tr><td><a href="?p=0">1</a></td><td><a href="?p=1">2</a></td></tr></table>`,
+        { [`${GALLERY}?p=0`]: `<a href="/s/aaa111/123456-1">1</a><a href="/s/bbb222/123456-2">2</a>` },
+        `${GALLERY}?p=1`,
+      );
+
+      const result = await extractor.extract(ctx);
+      // Gallery order, not "whatever page happened to be open first"
+      expect(result.images).toEqual([PAGE("aaa111", 1), PAGE("bbb222", 2), PAGE("ccc333", 3), PAGE("ddd444", 4)]);
+    });
+
+    test("ignores links to another site or another gallery", async () => {
+      const ctx = galleryContext(
+        `<h1 id="gn">A Gallery</h1>
+         <a href="/s/aaa111/123456-1">mine</a>
+         <a href="https://mirror.test/s/bbb222/123456-2">another site</a>
+         <a href="/s/ccc333/999999-1">another gallery</a>`,
+        {},
+        GALLERY,
+      );
+
+      const result = await extractor.extract(ctx);
+      expect(result.images).toEqual([PAGE("aaa111", 1)]);
+    });
+
+    test("won't walk a pager that claims thousands of pages", async () => {
+      let fetched = 0;
+      const ctx = contextFor(
+        `<h1 id="gn">A Gallery</h1><a href="/s/aaa111/123456-1">1</a>
+         <table class="ptb"><tr><td><a href="?p=99999">last</a></td></tr></table>`,
+        GALLERY,
+      );
+      const counting = {
+        ...ctx,
+        fetchDocument: () => {
+          fetched++;
+          const { document } = parseHTML("<!doctype html><html><body></body></html>");
+          return Promise.resolve(document as unknown as Document);
+        },
+      };
+
+      await extractor.extract(counting);
+      // A page is free to claim any number of pages; the walk is bounded regardless. Asserted as orders of
+      // magnitude below the claim rather than as the cap's exact value, so resizing the cap doesn't break the point.
+      expect(fetched).toBeLessThan(1000);
+      expect(ctx.logs.join(" ")).toContain("claims 100000 pages");
+    });
+
+    test("says when the gallery isn't visible rather than reporting an empty one", async () => {
+      const ctx = galleryContext(`<img src="https://exhentai.org/img/sadpanda.jpg">`, {}, GALLERY);
+      const result = await extractor.extract(ctx);
+      expect(result).toMatchObject({ images: [], adult: true });
+      expect(ctx.logs.join(" ")).toContain("aren't signed in");
+    });
   });
 
-  test("reads the pages before the open one, and each exactly once", async () => {
-    const ctx = galleryContext(
-      // The reader is on page 2 of 2 and presses Import there
-      `<h1 id="gn">A Gallery</h1>
-       <a href="/s/ccc333/123456-3">3</a><a href="/s/ddd444/123456-4">4</a>
-       <table class="ptb"><tr><td><a href="?p=0">1</a></td><td><a href="?p=1">2</a></td></tr></table>`,
-      {
-        [`${GALLERY}?p=0`]: `<a href="/s/aaa111/123456-1">1</a><a href="/s/bbb222/123456-2">2</a>`,
-        "https://exhentai.org/s/aaa111/123456-1": imagePage("https://hath.test/a/1.jpg"),
-        "https://exhentai.org/s/bbb222/123456-2": imagePage("https://hath.test/b/2.jpg"),
-        "https://exhentai.org/s/ccc333/123456-3": imagePage("https://hath.test/c/3.jpg"),
-        "https://exhentai.org/s/ddd444/123456-4": imagePage("https://hath.test/d/4.jpg"),
-      },
-      `${GALLERY}?p=1`,
-    );
+  describe("resolving one page", () => {
+    test("reads the image off its page", async () => {
+      const ctx = galleryContext(`<h1 id="gn">A Gallery</h1>`, { [PAGE("aaa111", 1)]: imagePage("https://hath.test/a/1.jpg") }, GALLERY);
+      expect(await extractor.resolve!(PAGE("aaa111", 1), ctx)).toEqual({ ok: true, url: "https://hath.test/a/1.jpg" });
+    });
 
-    const result = await extractor.extract(ctx);
-    // Gallery order, not "whatever page happened to be open first"
-    expect(result.images).toEqual([
-      "https://hath.test/a/1.jpg",
-      "https://hath.test/b/2.jpg",
-      "https://hath.test/c/3.jpg",
-      "https://hath.test/d/4.jpg",
-    ]);
-  });
+    test("resolves a relative address against the page it was read from", async () => {
+      const ctx = galleryContext(`<h1 id="gn">A Gallery</h1>`, { [PAGE("aaa111", 1)]: imagePage("keystamp/1.jpg") }, GALLERY);
+      // Against the image page. Resolved against the gallery instead, this would have been
+      // /g/123456/abcdef0123/keystamp/1.jpg, which is nobody's image.
+      expect(await extractor.resolve!(PAGE("aaa111", 1), ctx)).toEqual({ ok: true, url: "https://exhentai.org/s/aaa111/keystamp/1.jpg" });
+    });
 
-  test("resolves a relative image address against the page it was read from", async () => {
-    const ctx = galleryContext(
-      `<h1 id="gn">A Gallery</h1><a href="/s/aaa111/123456-1">1</a>`,
-      { "https://exhentai.org/s/aaa111/123456-1": imagePage("keystamp/1.jpg") },
-      GALLERY,
-    );
-
-    const result = await extractor.extract(ctx);
-    // Against the image page it was read from. Resolved against the gallery instead, this would have been
-    // /g/123456/abcdef0123/keystamp/1.jpg, which is nobody's image.
-    expect(result.images).toEqual(["https://exhentai.org/s/aaa111/keystamp/1.jpg"]);
-  });
-
-  test("ignores links to another site or another gallery", async () => {
-    const ctx = galleryContext(
-      `<h1 id="gn">A Gallery</h1>
-       <a href="/s/aaa111/123456-1">mine</a>
-       <a href="https://mirror.test/s/bbb222/123456-2">another site</a>
-       <a href="/s/ccc333/999999-1">another gallery</a>`,
-      { "https://exhentai.org/s/aaa111/123456-1": imagePage("https://hath.test/a/1.jpg") },
-      GALLERY,
-    );
-
-    const result = await extractor.extract(ctx);
-    // Only this gallery's own page; the fixtures deliberately have no answer for the other two
-    expect(result.images).toEqual(["https://hath.test/a/1.jpg"]);
-  });
-
-  test("won't walk a pager that claims thousands of pages", async () => {
-    let fetched = 0;
-    const ctx = contextFor(
-      `<h1 id="gn">A Gallery</h1><a href="/s/aaa111/123456-1">1</a>
-       <table class="ptb"><tr><td><a href="?p=99999">last</a></td></tr></table>`,
-      GALLERY,
-    );
-    const counting = {
-      ...ctx,
-      fetchDocument: (url: string) => {
-        fetched++;
-        const body = url.includes("/s/") ? imagePage("https://hath.test/a/1.jpg") : "";
-        const { document } = parseHTML(`<!doctype html><html><body>${body}</body></html>`);
-        return Promise.resolve(document as unknown as Document);
-      },
-    };
-
-    await extractor.extract(counting);
-    // A page is free to claim any number of pages; the walk is bounded regardless
-    expect(fetched).toBeLessThan(100);
-    expect(ctx.logs.join(" ")).toContain("claims 100000 pages");
-  });
-
-  test("says when the gallery isn't visible rather than reporting an empty one", async () => {
-    const ctx = galleryContext(`<img src="https://exhentai.org/img/sadpanda.jpg">`, {}, GALLERY);
-    const result = await extractor.extract(ctx);
-    expect(result).toMatchObject({ images: [], adult: true });
-    expect(ctx.logs.join(" ")).toContain("aren't signed in");
-  });
-
-  test("stops at the image limit and keeps what it already collected", async () => {
-    const ctx = galleryContext(
-      `<h1 id="gn">A Gallery</h1><a href="/s/aaa111/123456-1">1</a><a href="/s/aaa222/123456-2">2</a>`,
-      {
-        "https://exhentai.org/s/aaa111/123456-1": imagePage("https://hath.test/a/1.jpg"),
+    test("asks the import to stop at the image limit, since every later page would fail the same way", async () => {
+      const ctx = galleryContext(
+        `<h1 id="gn">A Gallery</h1>`,
         // The allowance is spent: a notice page rather than an error status
-        "https://exhentai.org/s/aaa222/123456-2": `<div>You have temporarily exceeded your image viewing limit (509)</div>`,
-      },
-      GALLERY,
-    );
+        { [PAGE("aaa222", 2)]: `<div>You have temporarily exceeded your image viewing limit (509)</div>` },
+        GALLERY,
+      );
+      const result = await extractor.resolve!(PAGE("aaa222", 2), ctx);
+      expect(result).toMatchObject({ ok: false, stop: true });
+    });
 
-    const result = await extractor.extract(ctx);
-    expect(result.images).toEqual(["https://hath.test/a/1.jpg"]);
-    expect(ctx.logs.join(" ")).toContain("image limit reached");
+    test("fails only its own page when that page has no image", async () => {
+      const ctx = galleryContext(`<h1 id="gn">A Gallery</h1>`, { [PAGE("aaa111", 1)]: `<div>nothing here</div>` }, GALLERY);
+      const result = await extractor.resolve!(PAGE("aaa111", 1), ctx);
+      expect(result).toMatchObject({ ok: false });
+      // No `stop`: one odd page shouldn't halt the rest of the gallery
+      expect("stop" in result && result.stop).toBeFalsy();
+    });
+
+    /** A context whose page fetch fails the given way. */
+    const failing = (error: Error) => ({
+      ...galleryContext(`<h1 id="gn">A Gallery</h1>`, {}, GALLERY),
+      fetchDocument: () => Promise.reject(error),
+    });
+
+    test("pauses the import when the site can't be reached or is struggling, keeping the page for later", async () => {
+      for (const error of [
+        new TypeError("Failed to fetch"),
+        new DOMException("The operation timed out.", "TimeoutError"),
+        new FetchStatusError("answered 429", 429),
+        new FetchStatusError("answered 503", 503),
+      ]) {
+        expect(await extractor.resolve!(PAGE("aaa111", 1), failing(error))).toMatchObject({ ok: false, stop: true });
+      }
+    });
+
+    test("fails only its own page when the site says that page isn't there", async () => {
+      const result = await extractor.resolve!(PAGE("aaa111", 1), failing(new FetchStatusError("answered 404", 404)));
+      expect(result).toMatchObject({ ok: false });
+      expect("stop" in result && result.stop).toBeFalsy();
+    });
   });
 });

@@ -117,7 +117,7 @@ export function ManageSeriesPage() {
         <Link to="/manage" className="text-gray-400 hover:text-white" title="Back to the library">
           <ArrowLeft size={18} />
         </Link>
-        <h1 className="truncate text-base font-semibold">{series.title}</h1>
+        <h1 className="max-w-[min(36rem,60vw)] truncate text-base font-semibold" title={series.title}>{series.title}</h1>
         {busy && <Loader2 size={14} className="animate-spin text-gray-500" />}
         {error && <span className="truncate text-xs text-red-400">{error.message}</span>}
 
@@ -303,7 +303,7 @@ function ChapterRows({ chapters, volumeOptions, onEditChapter, onDeleteChapter }
             />
           ) : (
             <>
-              <Link to={`/manage/chapters/${chapter.id}`} className="min-w-0 flex-1 truncate text-sm hover:text-indigo-300">
+              <Link to={`/manage/chapters/${chapter.id}`} title={chapter.title} className="min-w-0 flex-1 truncate text-sm hover:text-indigo-300">
                 {chapter.number ? `${chapter.number}. ` : ""}
                 {chapter.title}
               </Link>

@@ -5,7 +5,17 @@ const STATUS_CLASSES: Record<string, string> = {
   running: "bg-yellow-900/60 text-yellow-300",
   stale: "bg-amber-900/60 text-amber-300",
   queued: "bg-gray-800 text-gray-400",
+  // Neutral on purpose: nothing has happened to the page yet, good or bad
+  raw: "bg-gray-800 text-gray-300",
 };
+
+/**
+ * What a page's badge should say. The stored status is "done" whenever nothing is running on a page — including one
+ * that was imported and never translated, which "done" misdescribes. Until it has a result, it is "raw".
+ */
+export function pageStatus(page: { status: string; has_result: boolean }): string {
+  return page.status === "done" && !page.has_result ? "raw" : page.status;
+}
 
 /** Small coloured pill for page and stage statuses. */
 export function StatusBadge({ status, label }: { status: string; label?: string }) {

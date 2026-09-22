@@ -14,18 +14,22 @@
  */
 import Elysia, { t } from "elysia";
 import type { Workspace } from "@/db/schema";
+import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
 import { authContext } from "@/plugins/auth/index";
 import { PageSummary, toSummary } from "@/plugins/studio/page-summary";
 import { publishBlocker, publishDraft } from "@/services/draft-publish";
 import { batchRun, pagesNeedingRun, startBatchRun } from "@/services/page-batch";
+import { discardPage } from "@/services/page-discard";
 import { fileWorkspaceIntoChapter } from "@/services/workspace-file";
 import { importIntoWorkspace, type WorkspaceUpload } from "@/services/workspace-import";
 import { importUrlsIntoWorkspace, MAX_URLS_PER_IMPORT, tidyUrls } from "@/services/url-import";
 import { withPageLock, withWorkspaceLock } from "@/queue/page-queue";
-import { ChapterStore } from "@/stores/library-store";
+import { ChapterStore, normaliseTags } from "@/stores/library-store";
 import { PageStore } from "@/stores/page-store";
 import { WorkspaceStore, type WorkspaceCounts } from "@/stores/workspace-store";
+
+const log = childLogger("workspaces");
 
 const WorkspaceParams = t.Object({ id: t.Integer({ minimum: 1 }) });
 
@@ -38,6 +42,8 @@ const WorkspaceSummary = t.Object({
   source_url: t.Nullable(t.String()),
   source_provider: t.Nullable(t.String()),
   adult: t.Boolean(),
+  /** The site's tags for what was imported, suggested when a series is made from this workspace. */
+  tags: t.Array(t.String()),
   created_at: t.String(),
   updated_at: t.String(),
   pages: t.Integer(),
@@ -76,6 +82,16 @@ const runKey = (id: number): string => `workspace:${id}`;
 /** The workspace's pages a run would translate now. */
 const pagesToRun = async (id: number, force: boolean) => pagesNeedingRun(await WorkspaceStore.pages(id), force);
 
+/** Stored tags, read back. A value that isn't a list of strings (hand-edited, say) reads as none rather than failing. */
+function parseTags(json: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed.filter((tag): tag is string => typeof tag === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 /** A workspace name: trimmed, and not blank. */
 const Name = t.String({ minLength: 1, maxLength: 200 });
 
@@ -89,6 +105,7 @@ function toWorkspace(workspace: Workspace, counts: WorkspaceCounts | undefined) 
     source_url: workspace.sourceUrl,
     source_provider: workspace.sourceProvider,
     adult: workspace.adult,
+    tags: parseTags(workspace.tagsJson),
     created_at: workspace.createdAt,
     updated_at: workspace.updatedAt,
     pages: c.pages,
@@ -138,6 +155,7 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         sourceUrl: body.source_url ?? null,
         sourceProvider: body.source_provider ?? null,
         adult: body.adult ?? false,
+        tagsJson: JSON.stringify(normaliseTags(body.tags ?? [])),
       });
       return status(201, toWorkspace(workspace, undefined));
     },
@@ -148,6 +166,8 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         source_url: t.Optional(t.String({ maxLength: 4096 })),
         source_provider: t.Optional(t.String({ maxLength: 64 })),
         adult: t.Optional(t.Boolean()),
+        /** The site's own tags, kept as suggestions for a series made from this workspace later. */
+        tags: t.Optional(t.Array(t.String({ maxLength: 80 }), { maxItems: 100 })),
       }),
       response: { 201: WorkspaceSummary, 422: ErrBody },
     },
@@ -180,19 +200,63 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
 
   .delete(
     "/:id",
-    async ({ params, status }) => {
+    async ({ params, query, status }) => {
       // Under the lock, where a run can neither be going nor start: closing a workspace mid-run would leave the run
       // translating pages that no longer belong to anything
       const outcome = await withWorkspaceLock(params.id, async () => {
         if (batchRun(runKey(params.id))?.running) return "running" as const;
-        // The pages aren't touched: the foreign key leaves them loose in the Studio
-        return (await WorkspaceStore.delete(params.id)) ? "deleted" as const : "missing" as const;
+        if (!(await WorkspaceStore.findById(params.id))) return "missing" as const;
+
+        const pages = await WorkspaceStore.pages(params.id);
+        let pagesDeleted = 0;
+        let pagesKept = query.keep_pages ? pages.length : 0;
+        if (!query.keep_pages) {
+          // A page still in the pipeline can't go: refuse the whole close rather than leave half a workspace behind
+          if (pages.some((page) => page.status === "queued" || page.status === "running")) return "busy" as const;
+          for (const page of pages) {
+            // A page filed into a chapter is one readers are served: closing the workspace detaches it, never deletes
+            // it. Loose pages and drafts belong to the workspace alone, and go with it.
+            if (page.chapterId !== null) {
+              pagesKept++;
+              continue;
+            }
+            // Checked again under the page's own lock: a single-page rerun can be queued after the check above, and a
+            // page that started running since is kept (loose) rather than deleted under its job
+            // A page that can't be deleted (it started running, or the disk refused) stays loose rather than failing
+            // the close half way: every page is either gone or kept, and the workspace closes either way, so the
+            // answer always matches what happened
+            const discarded = await withPageLock(page.id, async () => {
+              const now = await PageStore.findById(page.id);
+              if (!now) return { ok: false as const, error: "already gone" };
+              if (now.status === "queued" || now.status === "running") return { ok: false as const, error: "busy" };
+              return discardPage(page.id);
+            }).catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }));
+            if (discarded.ok) pagesDeleted++;
+            else {
+              pagesKept++;
+              log.warn({ workspaceId: params.id, pageId: page.id, error: discarded.error }, "Closing a workspace kept a page it couldn't delete");
+            }
+          }
+        }
+        // Whatever is left falls back to loose (the foreign key clears it): kept pages, or everything with keep_pages
+        await WorkspaceStore.delete(params.id);
+        return { pagesDeleted, pagesKept };
       });
       if (outcome === "running") return status(409, { error: "this workspace is being translated — wait for the run to finish" });
+      if (outcome === "busy") return status(409, { error: "a page is still being translated — wait for it, or keep the pages" });
       if (outcome === "missing") return status(404, { error: "workspace not found" });
-      return { deleted: params.id };
+      return { deleted: params.id, pages_deleted: outcome.pagesDeleted, pages_kept: outcome.pagesKept };
     },
-    { params: WorkspaceParams, response: { 200: t.Object({ deleted: t.Integer() }), 404: ErrBody, 409: ErrBody } },
+    {
+      params: WorkspaceParams,
+      /** Keep the workspace's pages as loose drafts instead of deleting them with it. */
+      query: t.Object({ keep_pages: t.Optional(t.Boolean()) }),
+      response: {
+        200: t.Object({ deleted: t.Integer(), pages_deleted: t.Integer(), pages_kept: t.Integer() }),
+        404: ErrBody,
+        409: ErrBody,
+      },
+    },
   )
 
   .post(
@@ -200,7 +264,8 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
     async ({ params, body, status }) => {
       if (!(await WorkspaceStore.findById(params.id))) return status(404, { error: "workspace not found" });
       const files = Array.isArray(body.files) ? body.files : [body.files];
-      const sources = body.sources ?? [];
+      // One file's worth of sources arrives as a plain string: form data can't tell a one-item list from a value
+      const sources = body.sources === undefined ? [] : Array.isArray(body.sources) ? body.sources : [body.sources];
       if (body.sources !== undefined && sources.length !== files.length) return status(422, { error: "sources must list one URL per file" });
       const uploads: WorkspaceUpload[] = [];
       for (const [i, file] of files.entries()) {
@@ -219,7 +284,11 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         /** 0-based position of the first file in the workspace. */
         start_index: t.Numeric({ minimum: 0, maximum: 100_000 }),
         /** Each file's source URL, in the same order (a JSON array in the form field). */
-        sources: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 4096 }), { maxItems: 500 })),
+        // A list, or — when a batch holds a single file, as a page-at-a-time import always does — one plain string
+        sources: t.Optional(t.Union([
+          t.Array(t.String({ minLength: 1, maxLength: 4096 }), { maxItems: 500 }),
+          t.String({ minLength: 1, maxLength: 4096 }),
+        ])),
       }),
       response: {
         200: t.Composite([WorkspaceDetail, t.Object({ imported: t.Integer(), existing: t.Array(t.Integer()), skipped: t.Array(Skipped) })]),
@@ -266,6 +335,8 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
         return startBatchRun(runKey(params.id), () => pagesToRun(params.id, body?.force ?? false), {
           cleanSfx: body?.clean_sfx ?? false,
           publish: false,
+          // An import uploads a page at a time while this run is translating: keep picking up new ones as they land
+          follow: true,
         });
       });
       if (started === "missing") return status(404, { error: "workspace not found" });
@@ -333,7 +404,11 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
       // The whole run holds the workspace's lock, in the order filing takes them too (workspace, then page, then the
       // origin a draft publishes over), so closing the workspace can't detach pages halfway through publishing them
       const result = await withWorkspaceLock(params.id, async () => {
-        if (!(await WorkspaceStore.findById(params.id))) return null;
+        const workspace = await WorkspaceStore.findById(params.id);
+        if (!workspace) return null;
+        // Publishing a workspace means putting its pages in front of readers, which only a chapter does: an import
+        // not yet filed has no chapter, so there is nowhere for them to go
+        if (workspace.chapterId === null) return "unbound" as const;
         // A run works outside this lock once it has started, and replaces results as it goes: publishing now would
         // hand readers a page the run is about to redo
         if (batchRun(runKey(params.id))?.running) return "running" as const;
@@ -363,6 +438,7 @@ export const workspacesPlugin = new Elysia({ prefix: "/workspaces" })
       });
       if (!result) return status(404, { error: "workspace not found" });
       if (result === "running") return status(409, { error: "this workspace is being translated — wait for the run to finish" });
+      if (result === "unbound") return status(409, { error: "file this workspace into a chapter before publishing it" });
       return result;
     },
     {

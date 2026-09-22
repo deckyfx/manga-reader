@@ -6,6 +6,7 @@
  * leaves the contributor to correct the rest. Browser-safe, like the extractors beside it, so the extension reads a
  * page with the same code the server would.
  */
+import { galleryTags } from "./exhentai";
 
 /** The content of the first meta tag among `names`, by `property` or by `name`. */
 function meta(document: Document, ...names: string[]): string | undefined {
@@ -24,6 +25,8 @@ export interface SeriesInfo {
   cover?: string;
   /** True when the page says it is adult, so the series starts hidden. */
   adult?: boolean;
+  /** Tags the page lists for itself (an exhentai gallery's `namespace:tag`s), offered as suggestions. */
+  tags?: string[];
 }
 
 /** Whether a page describes itself as adult, by the two conventions sites actually use. */
@@ -54,10 +57,12 @@ export function seriesInfoFrom(document: Document, url: URL): SeriesInfo | null 
     }
   }
 
+  const tags = galleryTags(document);
   return {
     title: title.slice(0, 200),
     ...(synopsis ? { synopsis: synopsis.slice(0, 4000) } : {}),
     ...(absolute ? { cover: absolute } : {}),
     ...(saysAdult(document) ? { adult: true } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
   };
 }

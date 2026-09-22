@@ -48,6 +48,18 @@ describe("workspaces", () => {
     expect(renamed.body.workspace).toMatchObject({ name: "Ch. 12", adult: true });
   });
 
+  test("keep an import's tags as suggestions, normalised like series tags", async () => {
+    const created = await call<{ id: number; tags: string[] }>(
+      "POST", "/studio/api/workspaces",
+      { name: "Tagged", tags: ["Parody:Azur Lane", "character:some name", "parody:azur lane "] },
+      { cookie },
+    );
+    // Lower case, trimmed, each once — the same rule series tags follow, so they drop straight into a new series
+    expect(created.body.tags).toEqual(["character:some name", "parody:azur lane"]);
+    const listed = await call<{ id: number; tags: string[] }[]>("GET", "/studio/api/workspaces", undefined, { cookie });
+    expect(listed.body.find((w) => w.id === created.body.id)?.tags).toEqual(["character:some name", "parody:azur lane"]);
+  });
+
   test("need a name, a contributor, and an existing id", async () => {
     expect((await call("POST", "/studio/api/workspaces", { name: "   " }, { cookie })).status).toBe(422);
     const reader = await signedIn("reader");
@@ -93,25 +105,77 @@ describe("workspaces", () => {
     expect(added.body.pages.map((p: { name: string }) => p.name)).toEqual(["2", "3"]);
   });
 
+  test("take a single file with its source, as a page-at-a-time import sends it", async () => {
+    const id = await create({ name: "One at a time" });
+    // One file and one source: form data sends that source as a plain string, not a one-item list
+    const form = new FormData();
+    form.append("files", new File([await png("#123456")], "001.png"));
+    form.append("start_index", "0");
+    form.append("sources", "https://exhentai.test/s/abc/1-1");
+
+    const res = await call("POST", `/studio/api/workspaces/${id}/pages`, form, { cookie });
+    expect(res.status).toBe(200);
+    expect(res.body.pages[0]).toMatchObject({ source: "https://exhentai.test/s/abc/1-1" });
+  });
+
   test("refuse a sources list that doesn't match the files", async () => {
     const id = await create({ name: "Mismatch" });
     const res = await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(0, ["a.png", "b.png"], ["only one"]), { cookie });
     expect(res.status).toBe(422);
   });
 
-  test("keep their pages out of the loose list, and leave them loose when deleted", async () => {
-    const id = await create({ name: "To delete" });
+  test("keep their pages out of the loose list", async () => {
+    const id = await create({ name: "Listed apart" });
+    const upload = await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(0, ["only.png"]), { cookie });
+    const pageId: string = upload.body.pages[0].id;
+    const loose = (await call<{ id: string }[]>("GET", "/studio/api/pages", undefined, { cookie })).body.map((p) => p.id);
+    expect(loose).not.toContain(pageId);
+  });
+
+  test("take their pages with them when closed, by default", async () => {
+    const id = await create({ name: "To close" });
+    const upload = await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(0, ["a.png", "b.png"]), { cookie });
+    const pageIds: string[] = upload.body.pages.map((p: { id: string }) => p.id);
+
+    const closed = await call("DELETE", `/studio/api/workspaces/${id}`, undefined, { cookie });
+    expect(closed.body).toMatchObject({ pages_deleted: 2, pages_kept: 0 });
+    for (const pageId of pageIds) expect((await call("GET", `/studio/api/pages/${pageId}`, undefined, { cookie })).status).toBe(404);
+  });
+
+  test("leave their pages loose when asked to keep them", async () => {
+    const id = await create({ name: "Keep mine" });
     const upload = await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(0, ["only.png"]), { cookie });
     const pageId: string = upload.body.pages[0].id;
 
-    const loose = async () => (await call<{ id: string }[]>("GET", "/studio/api/pages", undefined, { cookie })).body.map((p) => p.id);
-    expect(await loose()).not.toContain(pageId);
+    const closed = await call("DELETE", `/studio/api/workspaces/${id}?keep_pages=true`, undefined, { cookie });
+    expect(closed.body).toMatchObject({ pages_deleted: 0, pages_kept: 1 });
+    const page = await call("GET", `/studio/api/pages/${pageId}`, undefined, { cookie });
+    expect(page.body.page.workspace_id).toBeNull();
+    const loose = (await call<{ id: string }[]>("GET", "/studio/api/pages", undefined, { cookie })).body.map((p) => p.id);
+    expect(loose).toContain(pageId);
+  });
 
-    expect((await call("DELETE", `/studio/api/workspaces/${id}`, undefined, { cookie })).status).toBe(200);
+  test("never delete a page that was filed into a chapter, even when closing takes the rest", async () => {
+    const series = await call<{ series: { id: number } }>("POST", "/manage/api/series", { title: `Close ${crypto.randomUUID()}` }, { cookie });
+    const made = await call<{ unsorted: { id: number }[] }>("POST", "/manage/api/chapters", { series_id: series.body.series.id, title: "One" }, { cookie });
+    const id = await create({ name: "Filed then closed" });
+    const upload = await call("POST", `/studio/api/workspaces/${id}/pages`, await batch(0, ["a.png"]), { cookie });
+    const pageId: string = upload.body.pages[0].id;
+    await call("POST", `/studio/api/workspaces/${id}/file`, { chapter_id: made.body.unsorted[0]!.id }, { cookie });
+
+    const closed = await call("DELETE", `/studio/api/workspaces/${id}`, undefined, { cookie });
+    // Readers are served that page as part of the chapter: closing the workspace only detaches it
+    expect(closed.body).toMatchObject({ pages_deleted: 0, pages_kept: 1 });
     const page = await call("GET", `/studio/api/pages/${pageId}`, undefined, { cookie });
     expect(page.status).toBe(200);
-    expect(page.body.page.workspace_id).toBeNull();
-    expect(await loose()).toContain(pageId);
+    expect(page.body.page.chapter_id).toBe(made.body.unsorted[0]!.id);
+  });
+
+  test("can't be published until they are filed into a chapter", async () => {
+    const id = await create({ name: "Not filed yet" });
+    const published = await call("POST", `/studio/api/workspaces/${id}/publish`, undefined, { cookie });
+    expect(published.status).toBe(409);
+    expect(published.body.error).toContain("file this workspace into a chapter");
   });
 });
 

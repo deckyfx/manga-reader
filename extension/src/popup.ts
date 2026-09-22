@@ -15,5 +15,9 @@ function sendMode(mode: "region" | "image"): void {
   window.close();
 }
 
+// Which build this is: worth seeing at a glance when something goes wrong and needs reporting
+const version = document.getElementById("version");
+if (version) version.textContent = `Selfhost OCR v${chrome.runtime.getManifest().version}`;
+
 // The import panel decides for itself what to show: a running import, what this page holds, or why neither applies
 void startImportPanel();

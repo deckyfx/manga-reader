@@ -19,6 +19,7 @@ import m0014 from "./migrations/0014_even_betty_ross.sql" with { type: "text" };
 import m0015 from "./migrations/0015_melted_khan.sql" with { type: "text" };
 import m0016 from "./migrations/0016_cloudy_yellow_claw.sql" with { type: "text" };
 import m0017 from "./migrations/0017_handy_adam_warlock.sql" with { type: "text" };
+import m0018 from "./migrations/0018_cute_rhodey.sql" with { type: "text" };
 
 const files: Record<string, string> = {
   "0000_tidy_namor.sql": m0000,
@@ -39,6 +40,7 @@ const files: Record<string, string> = {
   "0015_melted_khan.sql": m0015,
   "0016_cloudy_yellow_claw.sql": m0016,
   "0017_handy_adam_warlock.sql": m0017,
+  "0018_cute_rhodey.sql": m0018,
 };
 
 /** Embedded migration SQL keyed by filename, plus the raw journal JSON. */

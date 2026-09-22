@@ -127,6 +127,13 @@
       "when": 1789955014743,
       "tag": "0017_handy_adam_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1789998364336,
+      "tag": "0018_cute_rhodey",
+      "breakpoints": true
     }
   ]
 }
