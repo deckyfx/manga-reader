@@ -10,12 +10,26 @@
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// A gallery resolves several pages of one tab at once (see import-queue.ts), and each calls this before its first
+// message; without this, they'd all pass the __socrLoaded check before the first injection finishes and each would
+// insert the CSS and script again. One in-flight injection per tab, shared by whoever asks while it's running.
+const inFlight = new Map<number, Promise<void>>();
+
 /**
  * Injects the content script (and its styles) into `tabId` unless it is already there. Throws when the browser won't
  * let an extension into the page at all — the Web Store, the new-tab page, a PDF viewer — which callers should report
  * as such rather than as a broken extension.
  */
 export async function ensureContentScript(tabId: number): Promise<void> {
+  const running = inFlight.get(tabId);
+  if (running) return running;
+
+  const task = injectIfMissing(tabId).finally(() => inFlight.delete(tabId));
+  inFlight.set(tabId, task);
+  return task;
+}
+
+async function injectIfMissing(tabId: number): Promise<void> {
   const [check] = await chrome.scripting.executeScript({
     target: { tabId },
     func: () => Boolean((window as unknown as Record<string, unknown>)["__socrLoaded"]),
