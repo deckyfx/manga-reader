@@ -16,7 +16,7 @@ import { labelComponents, maskFromImage, maskToPng, selectBlockMask, type BlockK
 import { getTextSegmenter, textSegModelPath } from "@/services/text-seg-service";
 import { getBubbleDetector } from "@/services/bubble-service";
 import { getInpainter, inpaintModelPath } from "@/services/inpaint-service";
-import { findTextArea, getTypesetter, isDarkBackground, separateAreas, type TextArea } from "@/services/typeset-service";
+import { getTypesetter, isDarkBackground, separateAreas, textAreaFor, type TextArea } from "@/services/typeset-service";
 import { rectArea, shiftArea, storedArea, typesetPage, type StoredArea, type TextStyle, type TypesetEntry } from "@/shared/typeset";
 
 export type PageStage = "detecting" | "ocr" | "translating" | "cleaning" | "typesetting";
@@ -386,8 +386,8 @@ export class PagePipeline {
 
   /**
    * Finds where each block's lettering may go on the latest cleaned page and stores it on the blocks: a text block's
-   * bubble interior (separated from neighbouring interiors), a sound effect's own box. Blocks with no room get no
-   * area. Returns the page and its pixels for a burn that follows.
+   * bubble interior (separated from neighbouring interiors), or its own box when it's written on the artwork with no
+   * bubble; a sound effect's own box. Returns the page and its pixels for a burn that follows.
    */
   private async findAreas(job: PageJob): Promise<{ input: string; page: Buffer; rgb: Buffer; width: number; height: number; areas: Map<number, TextArea> }> {
     const input = existsSync(this.path("clean-sfx.png")) ? "clean-sfx.png" : "clean-text.png";
@@ -407,8 +407,8 @@ export class PagePipeline {
       let area: TextArea | null = null;
       if (b.kind === "sfx") area = rectArea(b, isDarkBackground(rgb, width, height, b));
       else if (b.kind === "text") {
-        area = findTextArea(rgb, width, height, b, matchBubble(b, bubbles));
-        if (area) detected.push({ block: b, area });
+        area = textAreaFor(rgb, width, height, b, matchBubble(b, bubbles));
+        detected.push({ block: b, area });
       }
       if (area) areas.set(b.id, area);
     }

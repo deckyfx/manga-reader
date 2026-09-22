@@ -6,7 +6,7 @@ import animeAce from "../../assets/fonts/anime-ace/animeace.ttf" with { type: "f
 import animeAceBold from "../../assets/fonts/anime-ace/animeace_b.ttf" with { type: "file" };
 import animeAceItalic from "../../assets/fonts/anime-ace/animeace_i.ttf" with { type: "file" };
 import { dilateMask, type Box } from "@/lib/mask";
-import { Typesetter, type FontVariant, type TextArea } from "@/shared/typeset";
+import { rectArea, Typesetter, type FontVariant, type TextArea } from "@/shared/typeset";
 
 export type { TextArea } from "@/shared/typeset";
 
@@ -91,6 +91,18 @@ export function findTextArea(rgb: Buffer, width: number, height: number, block: 
   }
   if (allowed < MIN_AREA_PIXELS) return null;
   return { bound, mask, dark: background < 128 };
+}
+
+/**
+ * Where a text block's lettering goes: the bubble interior when there is one, else the block's own box.
+ *
+ * Text written straight onto the artwork — a narration or a character's inner monologue with no bubble around it — has
+ * no plain background to flood through, so `findTextArea` finds no room and the block would be left unlettered: its
+ * original text cleaned away and nothing burned in its place. The block's box is exactly what was cleaned, so the
+ * translation goes there, as a sound effect's does.
+ */
+export function textAreaFor(rgb: Buffer, width: number, height: number, block: Box, bubble: Box | null): TextArea {
+  return findTextArea(rgb, width, height, block, bubble) ?? rectArea(clampBox(block, width, height), isDarkBackground(rgb, width, height, block));
 }
 
 /** Distance from a point to a box (0 inside). */
