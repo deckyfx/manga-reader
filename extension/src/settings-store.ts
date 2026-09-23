@@ -45,14 +45,32 @@ export async function loadSettings(): Promise<Settings> {
     await chrome.storage.sync.remove([...inSync]);
   }
 
-  // Best effort: a browser that won't let go of them shouldn't keep the settings from loading
-  void Promise.all([
-    chrome.storage.sync.remove([...RETIRED_KEYS]),
-    chrome.storage.local.remove([...RETIRED_KEYS]),
-  ]).catch(() => { /* they'll be asked to go again next time */ });
+  await retire(synced);
 
   const shared = Object.fromEntries(Object.entries(synced).filter(([key]) => !isLocal(key)));
   return { ...DEFAULT_SETTINGS, ...shared, ...local } as Settings;
+}
+
+/**
+ * Clears what older builds stored, keeping the one thing still worth knowing: somebody who had turned translation
+ * off meant it, and shouldn't find it back on. Best effort — a browser that won't let go of these shouldn't keep
+ * the settings from loading.
+ */
+async function retire(synced: Partial<Settings>): Promise<void> {
+  try {
+    const old = await chrome.storage.sync.get([...RETIRED_KEYS]) as Record<string, string | undefined>;
+    if (!Object.hasOwn(synced, "translate") && Object.keys(old).length > 0) {
+      const wanted = (old.serverTranslation ?? "none") !== "none" || (old.clientTranslation ?? "none") !== "none";
+      await chrome.storage.sync.set({ translate: wanted });
+      synced.translate = wanted;
+    }
+    await Promise.all([
+      chrome.storage.sync.remove([...RETIRED_KEYS]),
+      chrome.storage.local.remove([...RETIRED_KEYS]),
+    ]);
+  } catch {
+    /* they'll be asked to go again next time */
+  }
 }
 
 /** Saves everything, sending the machine-local settings to local storage and the rest to sync. */
