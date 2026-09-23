@@ -110,21 +110,30 @@ export function StudioPageEditor() {
   const { setView, setCanvasImage, selectBlock: setSelectedBlock, setPanelCollapsed, imagesChanged } = useEditorStore.getState();
   // A page opens fresh: nothing selected, no image rewritten yet. In a layout effect, not during render: this
   // editor is keyed by page, so a render-phase reset would notify the outgoing editor while this one renders.
-  useLayoutEffect(() => { useEditorStore.getState().openPage(id); }, [id]);
+  /** Which opening of the editor this component is, so its own leftovers can be told from the next visit's. */
+  const opening = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    useEditorStore.getState().openPage(id);
+    opening.current = useEditorStore.getState().session;
+  }, [id]);
   /**
-   * Whether this page is still the one the editor's state belongs to. Work started here can finish after the user
-   * has moved on — a mutation's onSuccess runs whether or not the component is still mounted, and so do the
-   * canvas's callbacks — and the state is shared, so without this a late arrival would clear the next page's
-   * selected block or reload its images.
+   * Whether the editor is still showing this page. Work started here can finish after the user has moved on — a
+   * mutation's onSuccess runs whether or not the component is still mounted, and so do the canvas's callbacks —
+   * and the editor's state is shared with whatever page is open now.
    */
-  const stillOpen = (): boolean => useEditorStore.getState().pageId === id;
+  const showingThisPage = (): boolean => useEditorStore.getState().pageId === id;
   /**
-   * Selecting a block, but only while this page is the open one. The canvas selects the block it has just created,
-   * which it can only do once the server has answered — by then the user may be on the next page, and the
-   * selection is shared with it.
+   * Whether this editor is still the one open. Stricter than the page: leaving the page and coming back opens a
+   * new editor with the same id, and the first visit's leftovers must not reach into the second's.
+   */
+  const thisEditor = (): boolean => showingThisPage() && useEditorStore.getState().session === opening.current;
+  /**
+   * Selecting a block, but only for the editor that asked. The canvas selects the region it has just created,
+   * which it can only do once the server has answered — by then the user may have moved on, or come back to a
+   * fresh editor of the same page, and the selection is shared.
    */
   const selectBlock = (blockId: number | null): void => {
-    if (stillOpen()) setSelectedBlock(blockId);
+    if (thisEditor()) setSelectedBlock(blockId);
   };
   const canvasHandle = useRef<PageCanvasHandle>(null);
 
@@ -138,7 +147,7 @@ export function StudioPageEditor() {
   const translateAllM = useMutation({ mutationFn: () => runStage(id, "translate"), onSuccess: setDetail });
   const afterClean = (detail: StudioPageDetail) => {
     setDetail(detail);
-    if (stillOpen()) imagesChanged();
+    if (showingThisPage()) imagesChanged();
   };
   const cleanTextM = useMutation({ mutationFn: () => runStage(id, "clean_text"), onSuccess: afterClean });
   const cleanSfxM = useMutation({ mutationFn: () => runStage(id, "clean_sfx"), onSuccess: afterClean });
@@ -587,7 +596,7 @@ export function StudioPageEditor() {
             onSelect={selectBlock}
             onDetail={setDetail}
             onReload={() => void qc.invalidateQueries({ queryKey: ["studio-page", id] })}
-            onImagesChanged={() => { if (stillOpen()) imagesChanged(); }}
+            onImagesChanged={() => { if (showingThisPage()) imagesChanged(); }}
             lettering={letteringPlan.items}
             textPreviewAvailable={canvasImage === "clean-text.png" || canvasImage === "clean-sfx.png"}
             onStylePreview={setBlockStyle}

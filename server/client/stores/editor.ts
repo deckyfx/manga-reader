@@ -8,6 +8,11 @@ export type EditorView = "canvas" | "compare";
 interface EditorState {
   /** Which page's state this is. Until it is a page's own, that page reads the defaults instead. */
   pageId: string | null;
+  /**
+   * Counts openings. The page id alone can't tell one visit from the next: leaving a page and coming back opens a
+   * fresh editor with the same id, and work left over from the first visit would otherwise still speak for it.
+   */
+  session: number;
   view: EditorView;
   /** The stage image the canvas draws on. */
   canvasImage: PageImage;
@@ -37,6 +42,7 @@ const FRESH = { view: "canvas" as EditorView, canvasImage: "original.png" as Pag
  */
 export const useEditorStore = create<EditorState>((set, get) => ({
   pageId: null,
+  session: 0,
   ...FRESH,
   panelCollapsed: readPanelCollapsed(),
 
@@ -48,7 +54,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ panelCollapsed });
   },
   imagesChanged: () => set({ imagesNonce: get().imagesNonce + 1 }),
-  openPage: (pageId) => set({ pageId, ...FRESH }),
+  openPage: (pageId) => set({ pageId, session: get().session + 1, ...FRESH }),
 }));
 
 /**
