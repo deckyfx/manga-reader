@@ -1,3 +1,9 @@
+> [!NOTE]
+> **This project has moved.** Its successor is [deckyfx/web-ocr](https://github.com/deckyfx/web-ocr): the same idea —
+> read manga, pull the Japanese off the page, translate it — rebuilt around a Bun server that also letters and burns
+> the translation back into the page, with a browser extension and a desktop companion. This repository is archived
+> and read-only; nothing here is maintained.
+
 # Manga Reader
 
 A manga reader with OCR text extraction and translation capabilities.
