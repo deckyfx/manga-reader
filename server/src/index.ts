@@ -177,6 +177,12 @@ async function loadModels(): Promise<void> {
     await loadInpaintModel().catch((err: Error) => bootLog.warn({ err }, "Inpaint model unavailable"));
   }
 
+  if (env.BUBBLE_MODEL_ENABLED) {
+    // Optional too: without it, blocks are grouped by the text detector alone
+    const { loadBubbleModel } = await import("@/services/bubble-service");
+    await loadBubbleModel().catch((err: Error) => bootLog.warn({ err }, "Bubble detector unavailable"));
+  }
+
   // Dictionary is non-fatal (health reports "degraded"); /analyze needs both tokenizer and index.
   if (env.DICT_MODEL_ENABLED) {
     const { analyzeService } = await import("@/services/analyze-service");
