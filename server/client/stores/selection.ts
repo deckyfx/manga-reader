@@ -39,12 +39,17 @@ export function usePageSelection(scope: string) {
     if (state.scope === scope) state.stop();
   }, [scope]);
   const selected = useSelectionStore((state) => state.selected);
-  const { start, stop, toggle, selectAll } = useSelectionStore.getState();
+  const { start, toggle, selectAll } = useSelectionStore.getState();
   return {
     selecting: picking,
     selected: picking ? selected : (EMPTY as ReadonlySet<string>),
     start: () => start(scope),
-    stop,
+    // Scoped, because this outlives the screen it came from: a finalize started in Studio can finish after the
+    // user has moved to a workspace and begun picking there, and it must not clear what they are picking now
+    stop: () => {
+      const state = useSelectionStore.getState();
+      if (state.scope === scope) state.stop();
+    },
     toggle,
     selectAll,
   };
