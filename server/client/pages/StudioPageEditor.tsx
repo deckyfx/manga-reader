@@ -342,7 +342,9 @@ export function StudioPageEditor() {
       onSelect: () => afterSaves("translate-all", () => translateAllM.mutate()),
       unavailable: unavailableWhen(translating, [translateAllM.isPending, "Already translating"], [queued.has("translate-all"), "Waiting for edits to save"]),
       pending: translateAllM.isPending,
-      attention: stageStatus("translate") === "stale",
+      // Only when a block's source text has changed since it was translated. Editing a translation by hand doesn't
+      // call for translating again — it only needs burning, which is that action's business
+      attention: stageStatus("translate") === "stale" && blocks.some((block) => block.needs_translate),
     },
     {
       key: "render",
