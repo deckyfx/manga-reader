@@ -205,7 +205,7 @@ Layout: left page list (chapter thumbnails / Inbox) · centre canvas with viewpo
 
 ### Phase 0 breakdown
 
-Start after PR #14 (and its CodeRabbit fixes) is merged; branch `feat/studio-framework` from `master`.
+Start after PR #14 (and its CodeRabbit fixes) is merged; branch `feat/studio-framework` from `main`.
 
 **Schema** (`src/db/schema.ts`, then `bun run db:generate`)
 - `pages`: `id` (a generated UUIDv7; the extension's job id is this page id), `image_hash` (a separate column for the extension's reuse cache), `source`, `width`, `height`, `status`, `clean_sfx`, `revision`, `created_at`, `updated_at`. `image_hash` is unique for now; making it non-unique so the same image can appear in several chapters is phase 5 (section 5). Studio edits and live listeners address pages by `id`, never by hash.
