@@ -7,7 +7,7 @@ import { ChapterPicker } from "../components/ChapterPicker";
 import { DiscardPageDialog } from "../components/DiscardPageDialog";
 import { FinalizeDialog } from "../components/FinalizeDialog";
 import { SelectionBar } from "../components/SelectionBar";
-import { usePageSelection } from "../hooks/usePageSelection";
+import { usePageSelection } from "../stores/selection";
 import { Modal } from "../components/Modal";
 import { AddPageUrlsDialog } from "../components/AddPageUrlsDialog";
 import { NewPageDialog } from "../components/NewPageDialog";
@@ -50,7 +50,7 @@ export function StudioPagesPage() {
   const [search, setSearch] = useState("");
   const [filing, setFiling] = useState<StudioPageSummary | null>(null);
   const [discarding, setDiscarding] = useState<StudioPageSummary | null>(null);
-  const selection = usePageSelection();
+  const selection = usePageSelection("studio");
   /** The picked pages, while the finalize dialog asks about them. */
   const [finalizingIds, setFinalizingIds] = useState<string[] | null>(null);
   const [scope, setScopeState] = useState<PageScope>(readScope);

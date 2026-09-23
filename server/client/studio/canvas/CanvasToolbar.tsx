@@ -3,7 +3,7 @@
  * redo / delete, the wheel mode and zoom, and the status line. Split out of PageCanvas.tsx; the canvas owns the state
  * and hands it down under the same names.
  */
-import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
+import type { ReactNode, RefObject } from "react";
 import { useRef, useState } from "react";
 import {
   ALargeSmall,
@@ -26,54 +26,35 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import type { MaskLayerName } from "../../api";
-import { KIND_HINTS, LETTERING_HINT, MAX_BRUSH, MIN_BRUSH, TOOL_HINTS, WHEEL_HINTS, type CanvasActions, type EditMode, type Tool, type WheelMode } from "./config";
-import { REGION_COLORS, type RegionKind } from "./geometry";
+import { showsTextLayer, useCanvasStore } from "../../stores/canvas";
+import { KIND_HINTS, LETTERING_HINT, MAX_BRUSH, MIN_BRUSH, TOOL_HINTS, WHEEL_HINTS, type CanvasActions, type Tool } from "./config";
+import { REGION_COLORS } from "./geometry";
 import type { CommandHistory } from "./history";
 import type { Area } from "./mask-layers";
 
 interface CanvasToolbarProps {
   /** Extra controls at the start (the background image picker). */
   toolbarStart?: ReactNode;
-  mode: EditMode;
-  setMode: Dispatch<SetStateAction<EditMode>>;
-  tool: Tool;
-  setTool: Dispatch<SetStateAction<Tool>>;
   disabled: boolean;
-  brushLayer: MaskLayerName;
-  setBrushLayer: Dispatch<SetStateAction<MaskLayerName>>;
-  brushSize: number;
-  setBrushSize: Dispatch<SetStateAction<number>>;
-  kind: RegionKind;
-  setKind: Dispatch<SetStateAction<RegionKind>>;
-  showMask: boolean;
-  setShowMask: Dispatch<SetStateAction<boolean>>;
-  setShowText: Dispatch<SetStateAction<boolean>>;
+  /** In Regions mode the lettering preview shows only over a cleaned page. */
   textPreviewAvailable: boolean;
-  /** Whether the lettering layer is showing right now. */
-  showTextLayer: boolean;
   reclean: () => void;
-  recleaning: boolean;
   recleanTargets: Area[];
   recleanTitle: string;
-  paintedAreas: Area[];
   /** Runs a change after the ones already queued (undo and redo go through it). */
   enqueue: (task: () => Promise<void>) => void;
   history: CommandHistory;
-  busyCount: number;
   actionsRef: RefObject<CanvasActions | null>;
   selectedId: number | null;
-  wheelMode: WheelMode;
-  setWheelMode: (mode: WheelMode) => void;
-  zoom: number;
-  error: string | null;
 }
 
 export function CanvasToolbar({
-  toolbarStart, mode, setMode, tool, setTool, disabled, brushLayer, setBrushLayer, brushSize, setBrushSize, kind, setKind,
-  showMask, setShowMask, setShowText, textPreviewAvailable, showTextLayer, reclean, recleaning, recleanTargets, recleanTitle,
-  paintedAreas, enqueue, history, busyCount, actionsRef, selectedId, wheelMode, setWheelMode, zoom, error,
+  toolbarStart, disabled, textPreviewAvailable, reclean, recleanTargets, recleanTitle, enqueue, history, actionsRef, selectedId,
 }: CanvasToolbarProps) {
+  // What the canvas is set to: the store, so the canvas doesn't have to hand it all down
+  const { tool, mode, kind, brushLayer, brushSize, showMask, wheelMode, zoom, paintedAreas, recleaning, busyCount, error } = useCanvasStore();
+  const { setTool, setMode, setKind, setBrushLayer, setBrushSize, setShowMask, setShowText, setWheelMode } = useCanvasStore.getState();
+  const showTextLayer = showsTextLayer(useCanvasStore.getState(), textPreviewAvailable);
 const toolButton = (value: Tool, icon: ReactNode, label: string, shortcut: string) => (
   <button
     key={value}
