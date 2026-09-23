@@ -42,7 +42,13 @@ function medianColour(rgb: Buffer, pixels: readonly number[]): [number, number, 
  * Leftover ink per block, measured on `cleaned` against `mask` (both files, same size; the mask white where the
  * detector saw lettering).
  */
-export async function leftoverInk(cleaned: string | Buffer, mask: string | Buffer, blocks: readonly (Box & { id: number })[]): Promise<InkReport[]> {
+export async function leftoverInk(
+  cleaned: string | Buffer,
+  mask: string | Buffer,
+  blocks: readonly (Box & { id: number })[],
+  /** Which block owns each masked pixel (see blockOwnerMask). Without it, every masked pixel in a box counts. */
+  owners?: Int32Array,
+): Promise<InkReport[]> {
   const image = await sharp(cleaned).removeAlpha().toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
   // One byte per pixel whatever the mask file holds: greyscale() alone keeps an alpha channel, which would halve the
   // stride the loop below assumes
@@ -63,9 +69,14 @@ export async function leftoverInk(cleaned: string | Buffer, mask: string | Buffe
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         const p = y * width + x;
+        if (marks.data[p]! > 127) {
+          // A neighbour's strokes reaching into this box are neither this block's lettering nor its background
+          if (owners && owners[p] !== block.id) continue;
+          marked.push(p);
+        } else {
+          background.push(p);
+        }
         everything.push(p);
-        if (marks.data[p]! > 127) marked.push(p);
-        else background.push(p);
       }
     }
     if (marked.length === 0) return { blockId: block.id, ink: 0, marked: 0 };

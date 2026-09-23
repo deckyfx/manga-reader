@@ -65,6 +65,28 @@ describe("leftover ink", () => {
     expect((await leftoverInk(await page(250, 10), withAlpha, [block]))[0]).toMatchObject({ ink: 1, marked: 400 });
   });
 
+  test("only the block's own strokes count: a neighbour's reaching into its box are ignored", async () => {
+    // Two squares of lettering, both left uncleaned; `block` covers the first and overlaps the second
+    const both = Buffer.alloc(W * H, 0);
+    for (let y = LETTERING.y; y < LETTERING.y + LETTERING.h; y++) both.fill(255, y * W + LETTERING.x, y * W + LETTERING.x + LETTERING.w);
+    for (let y = 62; y < 70; y++) both.fill(255, y * W + 62, y * W + 70);
+    const marks = await sharp(both, { raw: { width: W, height: H, channels: 1 } }).png().toBuffer();
+    const page = Buffer.alloc(W * H * 3, 250);
+    for (let p = 0; p < W * H; p++) if (both[p]) page.fill(10, p * 3, p * 3 + 3);
+    const inked = await sharp(page, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer();
+    const wide = { id: 1, x: 30, y: 30, w: 45, h: 45 };
+
+    // Owners: the first square is block 1's, the second square belongs to block 2
+    const owners = new Int32Array(W * H);
+    for (let p = 0; p < W * H; p++) if (both[p]) owners[p] = 1;
+    for (let y = 62; y < 70; y++) for (let x = 62; x < 70; x++) owners[y * W + x] = 2;
+
+    const [all] = await leftoverInk(inked, marks, [wide]);
+    const [own] = await leftoverInk(inked, marks, [wide], owners);
+    expect(all!.marked).toBeGreaterThan(own!.marked);
+    expect(own!.marked).toBe(LETTERING.w * LETTERING.h);
+  });
+
   test("a block with nothing marked has nothing to clean", async () => {
     const [empty] = await leftoverInk(await page(250, 10), await mask(), [{ id: 2, x: 0, y: 0, w: 20, h: 20 }]);
     expect(empty).toEqual({ blockId: 2, ink: 0, marked: 0 });

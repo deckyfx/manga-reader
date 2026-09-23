@@ -12,7 +12,7 @@
 import sharp, { type OverlayOptions, type Sharp } from "sharp";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { labelComponents, maskFromImage, maskToPng, selectBlockMask, type BlockKind, type Box } from "@/lib/mask";
+import { blockOwnerMask, labelComponents, maskFromImage, maskToPng, selectBlockMask, type BlockKind, type Box } from "@/lib/mask";
 import { getTextSegmenter, textSegModelPath } from "@/services/text-seg-service";
 import { getBubbleDetector } from "@/services/bubble-service";
 import { getInpainter, inpaintModelPath, type CleanMethod } from "@/services/inpaint-service";
@@ -350,7 +350,7 @@ export class PagePipeline {
     // The self-check: how each block was cleaned, and how much of its lettering still shows on the page just written.
     // Measured against the mask the clean actually removed, painted additions included
     const maskPng = await maskToPng(target, width, height);
-    const ink = await leftoverInk(this.path(output), maskPng, regions);
+    const ink = await leftoverInk(this.path(output), maskPng, regions, blockOwnerMask(target, width, height, regions));
     dropStaleChecks();
     for (const [i, block] of regions.entries()) {
       block.clean = { method: methods[i] ?? "lama", ink: ink[i]?.ink ?? 0 };
@@ -445,7 +445,7 @@ export class PagePipeline {
     // counted against it
     const selection = job.blocks.map((b) => ({ ...b, include: checked.includes(b) }));
     const target = selectBlockMask(mask, width, height, selection);
-    const ink = await leftoverInk(this.path(output), await maskToPng(target, width, height), checked);
+    const ink = await leftoverInk(this.path(output), await maskToPng(target, width, height), checked, blockOwnerMask(target, width, height, checked));
     for (const [i, block] of checked.entries()) block.clean = { method: block.clean!.method, ink: ink[i]?.ink ?? 0 };
   }
 
