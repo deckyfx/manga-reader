@@ -21,7 +21,9 @@ SUGOI_URL=http://127.0.0.1:14366
 PREFERRED_TRANSLATION_ENGINE=sugoi
 ```
 
-Settings → Translation then shows Sugoi as configured, and the page pipeline translates through it. DeepL and the
+Settings → Translation then shows Sugoi as configured, and the page pipeline translates through it. If somebody has
+already picked an engine there, that choice is remembered and wins over `PREFERRED_TRANSLATION_ENGINE` — pick Sugoi
+in Settings instead of editing the environment. DeepL and the
 built-in model stay available: the engine is a setting, and a page can still ask for one explicitly.
 
 ## Licence — read this before using it

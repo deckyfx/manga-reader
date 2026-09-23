@@ -32,13 +32,15 @@ describe("choosing an engine", () => {
     // As a restart reads it back
     runtimeSettings.preferredTranslationEngine = "auto";
     await loadRuntimeSettings();
-    expect(runtimeSettings.preferredTranslationEngine).toBe("local");
+    const remembered: string = runtimeSettings.preferredTranslationEngine;
+    expect(remembered).toBe("local");
   });
 
   test("refuses an engine that isn't one", async () => {
     const { cookie } = await signedIn("admin");
     const refused = await call("PATCH", "/api/settings/engine", { engine: "google" }, { cookie });
     expect(refused.status).toBe(400);
-    expect(runtimeSettings.preferredTranslationEngine).toBe("local");
+    const unchanged: string = runtimeSettings.preferredTranslationEngine;
+    expect(unchanged).toBe("local");
   });
 });

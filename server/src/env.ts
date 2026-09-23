@@ -176,7 +176,11 @@ class EnvConfig {
    */
   get SUGOI_URL(): string { return Bun.env.SUGOI_URL?.trim() ?? ""; }
   /** How long one Sugoi request may take; a page's blocks are translated one after another. */
-  get SUGOI_TIMEOUT_MS(): number { return Number(Bun.env.SUGOI_TIMEOUT_MS ?? 30_000); }
+  get SUGOI_TIMEOUT_MS(): number {
+    // A timeout that isn't a positive number would abort every request the moment it starts
+    const ms = Number(Bun.env.SUGOI_TIMEOUT_MS);
+    return Number.isFinite(ms) && ms > 0 ? ms : 30_000;
+  }
 
   get INPAINT_ENGINE(): "auto" | "lama" | "flood_fill" {
     const v = Bun.env.INPAINT_ENGINE ?? "auto";

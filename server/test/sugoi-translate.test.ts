@@ -16,8 +16,13 @@ function settings(config: { sugoi?: string; deepl?: string; preferred?: typeof r
 }
 const before = { sugoi: Bun.env.SUGOI_URL, deepl: Bun.env.DEEPL_API_KEY, preferred: runtimeSettings.preferredTranslationEngine };
 afterAll(() => {
-  Bun.env.SUGOI_URL = before.sugoi;
-  Bun.env.DEEPL_API_KEY = before.deepl;
+  // Assigning undefined would leave the string "undefined" behind, which reads as a configured engine
+  const restore = (name: string, value: string | undefined) => {
+    if (value === undefined) delete Bun.env[name];
+    else Bun.env[name] = value;
+  };
+  restore("SUGOI_URL", before.sugoi);
+  restore("DEEPL_API_KEY", before.deepl);
   runtimeSettings.preferredTranslationEngine = before.preferred;
 });
 
