@@ -349,8 +349,10 @@ export class PagePipeline {
 
     // The self-check: how each block was cleaned, and how much of its lettering still shows on the page just written.
     // Measured against the mask the clean actually removed, painted additions included
-    const maskPng = await maskToPng(target, width, height);
-    const ink = await leftoverInk(this.path(output), maskPng, regions, blockOwnerMask(target, width, height, regions));
+    // Measured against everything this pass removed, with each stroke's owner worked out from the detector's mask
+    // alone: painting a stroke between two blocks joins their lettering into one blob, which belongs to neither, and
+    // measuring by the joined mask would quietly drop both blocks' strokes
+    const ink = await leftoverInk(this.path(output), await maskToPng(mask, width, height), regions, await this.strokeOwners(job, width, height));
     dropStaleChecks();
     for (const [i, block] of regions.entries()) {
       block.clean = { method: methods[i] ?? "lama", ink: ink[i]?.ink ?? 0 };
@@ -368,6 +370,17 @@ export class PagePipeline {
    * painted into mask-erase.png. `added` is the painted-in layer minus erasures (null when there is none). Layers
    * with a different size than mask.png are refused rather than stretched.
    */
+  /**
+   * Which block owns each stroke, from the detector's mask alone. Painted additions are left out on purpose: a stroke
+   * painted between two blocks would join their lettering into one blob, and whichever block didn't get it would
+   * measure as clean. A pixel nobody owns (painted, or a blob no block claims) counts for no block.
+   */
+  private async strokeOwners(job: PageJob, width: number, height: number): Promise<Int32Array> {
+    const detected = await maskFromImage(this.path("mask.png"));
+    if (detected.width !== width || detected.height !== height) throw new Error("mask.png size does not match the page");
+    return blockOwnerMask(detected.mask, width, height, job.blocks);
+  }
+
   async effectiveMask(): Promise<{ mask: Uint8Array; added: Uint8Array | null; width: number; height: number }> {
     const { mask, width, height } = await maskFromImage(this.path("mask.png"));
     const layer = async (name: MaskLayer): Promise<Uint8Array | null> => {
@@ -443,9 +456,7 @@ export class PagePipeline {
     const { mask, width, height } = await this.effectiveMask();
     // Through the same ownership filter the clean used, so a neighbour's strokes inside this block's box aren't
     // counted against it
-    const selection = job.blocks.map((b) => ({ ...b, include: checked.includes(b) }));
-    const target = selectBlockMask(mask, width, height, selection);
-    const ink = await leftoverInk(this.path(output), await maskToPng(target, width, height), checked, blockOwnerMask(target, width, height, checked));
+    const ink = await leftoverInk(this.path(output), await maskToPng(mask, width, height), checked, await this.strokeOwners(job, width, height));
     for (const [i, block] of checked.entries()) block.clean = { method: block.clean!.method, ink: ink[i]?.ink ?? 0 };
   }
 

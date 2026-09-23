@@ -37,6 +37,45 @@ const job = (): PageJob => ({
   blocks: [{ id: 1, kind: "text", ...BLOCK, include: true, source_text: null, translated_text: null, clean: { method: "flat", ink: 1 } }],
 });
 
+describe("painted additions and ownership", () => {
+  test("lettering joined to a painted stroke still counts against its block", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "self-check-bridge-"));
+    // Two blocks side by side. In each, the upper strokes were cleaned away and the lower ones still show
+    const boxes = [
+      { id: 1, kind: "text" as const, x: 5, y: 20, w: 45, h: 70, include: true, source_text: null, translated_text: null },
+      { id: 2, kind: "text" as const, x: 70, y: 20, w: 45, h: 70, include: true, source_text: null, translated_text: null },
+    ];
+    const page = Buffer.alloc(W * H * 3, 250);
+    const detected = Buffer.alloc(W * H, 0);
+    const painted = Buffer.alloc(W * H, 0);
+    for (const box of boxes) {
+      for (let y = box.y + 5; y < box.y + 20; y++) for (let x = box.x + 5; x < box.x + 40; x++) if ((x + y) % 3 === 0) detected[y * W + x] = 255;
+      for (let y = box.y + 40; y < box.y + 55; y++) {
+        for (let x = box.x + 5; x < box.x + 40; x++) {
+          if ((x + y) % 3 !== 0) continue;
+          detected[y * W + x] = 255;
+          page.fill(15, (y * W + x) * 3, (y * W + x) * 3 + 3);
+        }
+      }
+    }
+    // A painted band across the gap, joining both blocks' lower strokes into one blob that belongs to neither
+    for (let y = 63; y < 69; y++) painted.fill(255, y * W + 8, y * W + 112);
+
+    const save = (pixels: Buffer, file: string) => sharp(pixels, { raw: { width: W, height: H, channels: 1 } }).png().toFile(join(dir, file));
+    await sharp(page, { raw: { width: W, height: H, channels: 3 } }).png().toFile(join(dir, "clean-text.png"));
+    await save(detected, "mask.png");
+    await save(painted, "mask-add.png");
+
+    const pipeline = new PagePipeline(dir);
+    const bridged: PageJob = { source: "test", width: W, height: H, blocks: boxes.map((box) => ({ ...box, clean: { method: "flat" as const, ink: 0 } })) };
+    await pipeline.refreshCleanCheck(bridged);
+    // Ownership read from the painted mask gives that blob to nobody, so each block would be measured on its cleaned
+    // half alone and read as spotless while its lettering still shows
+    expect(bridged.blocks[0]!.clean!.ink).toBeGreaterThan(0.3);
+    expect(bridged.blocks[1]!.clean!.ink).toBeGreaterThan(0.3);
+  });
+});
+
 describe("stale self-checks", () => {
   test("a block left out of the clean, and the sound effects a text clean threw away, lose theirs", async () => {
     const dir = await pageFolder("clean");
