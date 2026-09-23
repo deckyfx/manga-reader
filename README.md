@@ -1,8 +1,10 @@
 # Selfhost OCR
 
-![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/deckyfx/web-ocr?utm_source=oss&utm_medium=github&utm_campaign=deckyfx%2Fweb-ocr&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/deckyfx/manga-reader?utm_source=oss&utm_medium=github&utm_campaign=deckyfx%2Fmanga-reader&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 
-> Forked from [brian-girko/image-reader](https://github.com/brian-girko/image-reader) — original OCR Image Reader extension by Brian Girko, licensed under MPL 2.0.
+> The extension began as [brian-girko/image-reader](https://github.com/brian-girko/image-reader) — the original OCR
+> Image Reader extension by Brian Girko, licensed under MPL 2.0 — and has been rewritten around this server since.
+> It lived at `deckyfx/web-ocr` until 2026-09-23 (now archived); the history came along.
 
 A browser extension (MV3) that lets you select any region on screen and extract text via OCR. Supports two engines: **Tesseract.js** (runs entirely in-browser, no server needed) or a **self-hosted Bun server** with ONNX OCR, translation, whole-page manga translation and a Studio for editing translated pages.
 
