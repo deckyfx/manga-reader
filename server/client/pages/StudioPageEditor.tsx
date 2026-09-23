@@ -108,6 +108,16 @@ export function StudioPageEditor() {
   // A page opens fresh: nothing selected, no image rewritten yet. In a layout effect, not during render: this
   // editor is keyed by page, so a render-phase reset would notify the outgoing editor while this one renders.
   useLayoutEffect(() => { useEditorStore.getState().openPage(); }, [id]);
+  /**
+   * Whether this page is still the one open. A mutation's onSuccess runs whether or not the component is still
+   * mounted, and the editor's state is shared — so a request finishing after the user has moved on would otherwise
+   * clear the next page's selected block, or reload its images.
+   */
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
   const canvasHandle = useRef<PageCanvasHandle>(null);
 
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);
@@ -120,7 +130,7 @@ export function StudioPageEditor() {
   const translateAllM = useMutation({ mutationFn: () => runStage(id, "translate"), onSuccess: setDetail });
   const afterClean = (detail: StudioPageDetail) => {
     setDetail(detail);
-    imagesChanged();
+    if (active.current) imagesChanged();
   };
   const cleanTextM = useMutation({ mutationFn: () => runStage(id, "clean_text"), onSuccess: afterClean });
   const cleanSfxM = useMutation({ mutationFn: () => runStage(id, "clean_sfx"), onSuccess: afterClean });
@@ -184,7 +194,7 @@ export function StudioPageEditor() {
     mutationFn: (blockId: number) => deleteBlock(id, blockId),
     onSuccess: (next) => {
       setDetail(next);
-      setSelectedBlock(null);
+      if (active.current) setSelectedBlock(null);
     },
   });
   /** Deletes a region: undoable through the canvas when it's open, otherwise after a confirmation. */
