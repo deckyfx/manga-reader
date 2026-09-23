@@ -58,15 +58,22 @@ export async function loadSettings(): Promise<Settings> {
  */
 async function retire(synced: Partial<Settings>): Promise<void> {
   try {
-    const old = await chrome.storage.sync.get([...RETIRED_KEYS]) as Record<string, string | undefined>;
+    // Both stores: the engine choices were synced, the DeepL key was kept on this machine
+    const [fromSync, fromLocal] = await Promise.all([
+      chrome.storage.sync.get([...RETIRED_KEYS]) as Promise<Record<string, string | undefined>>,
+      chrome.storage.local.get([...RETIRED_KEYS]) as Promise<Record<string, string | undefined>>,
+    ]);
+    const old = { ...fromLocal, ...fromSync };
     if (!Object.hasOwn(synced, "translate") && Object.keys(old).length > 0) {
       const wanted = (old.serverTranslation ?? "none") !== "none" || (old.clientTranslation ?? "none") !== "none";
       await chrome.storage.sync.set({ translate: wanted });
       synced.translate = wanted;
     }
+    // Only what is actually there. Settings are read on every scan, and chrome.storage.sync counts every remove
+    // against its hourly quota whether or not it removed anything — spent here, it wouldn't be there for a save.
     await Promise.all([
-      chrome.storage.sync.remove([...RETIRED_KEYS]),
-      chrome.storage.local.remove([...RETIRED_KEYS]),
+      Object.keys(fromSync).length > 0 ? chrome.storage.sync.remove(Object.keys(fromSync)) : undefined,
+      Object.keys(fromLocal).length > 0 ? chrome.storage.local.remove(Object.keys(fromLocal)) : undefined,
     ]);
   } catch {
     /* they'll be asked to go again next time */
