@@ -6,7 +6,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { inferenceQueue } from "@/queue/inference-queue";
 import { registerTranslateHandler } from "@/services/translate-service";
 import { resolveTranslationEngine } from "@/services/translation-engine";
-import { runtimeSettings } from "@/stores/settings-store";
+import { runtimeSettings, setRuntimeEngine } from "@/stores/settings-store";
 
 /** Puts the translation settings back however a test left them. */
 function settings(config: { sugoi?: string; deepl?: string; preferred?: typeof runtimeSettings.preferredTranslationEngine }): void {
@@ -49,6 +49,14 @@ describe("which engine translates", () => {
     expect(resolveTranslationEngine()).toBe("local");
     // Asked for by name, even against the setting
     expect(resolveTranslationEngine("sugoi")).toBe("sugoi");
+  });
+});
+
+describe("changing the engine", () => {
+  test("an engine that belongs to the other setting changes nothing", async () => {
+    const was = runtimeSettings.preferredTranslationEngine;
+    await expect(setRuntimeEngine("translation", "lama")).rejects.toThrow(/not one of/);
+    expect(runtimeSettings.preferredTranslationEngine).toBe(was);
   });
 });
 

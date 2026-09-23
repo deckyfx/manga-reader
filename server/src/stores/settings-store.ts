@@ -36,11 +36,17 @@ export async function loadRuntimeSettings(): Promise<void> {
     runtimeSettings.inpaintEngine = inpaint as (typeof INPAINT_ENGINES)[number];
 }
 
-/** Changes an engine and remembers it. */
+/**
+ * Changes an engine and remembers it. It is written down before it takes effect, so a failed write can't leave the
+ * running server on an engine the next restart won't know about — and an engine that isn't one of that setting's
+ * choices ("lama" for translation, say) changes nothing.
+ */
 export async function setRuntimeEngine(which: keyof typeof ENGINE_KEYS, engine: string): Promise<void> {
+  const choices: readonly string[] = which === "translation" ? TRANSLATION_ENGINES : INPAINT_ENGINES;
+  if (!choices.includes(engine)) throw new Error(`${engine} is not one of: ${choices.join(", ")}`);
+  await ServerSettingStore.set(ENGINE_KEYS[which], engine);
   if (which === "translation") runtimeSettings.preferredTranslationEngine = engine as (typeof TRANSLATION_ENGINES)[number];
   else runtimeSettings.inpaintEngine = engine as (typeof INPAINT_ENGINES)[number];
-  await ServerSettingStore.set(ENGINE_KEYS[which], engine);
 }
 
 /** The key/value table behind the runtime policy an admin can change (see services/server-settings.ts). */
