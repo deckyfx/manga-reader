@@ -1,4 +1,4 @@
-import type { Settings, OcrEngine, ServerTranslation, ClientTranslation, DictMode, TesseractQuality } from "./types";
+import type { Settings, OcrEngine, DictMode, TesseractQuality } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 import { isPlainHttpOverNetwork, loadSettings, saveSettings as persistSettings } from "./settings-store";
 import { errorMessage, serverApi } from "./api";
@@ -15,25 +15,18 @@ const tesseractQualitySel        = document.getElementById("tesseractQuality")  
 const checkLangBtn               = document.getElementById("checkLangBtn")            as HTMLButtonElement;
 const checkLangStatus            = document.getElementById("checkLangStatus")!;
 
-const clientTranslationSel       = document.getElementById("clientTranslation")       as HTMLSelectElement;
-const deeplFields                = document.getElementById("deeplFields")!;
-const deeplApiKeyInput           = document.getElementById("deeplApiKey")             as HTMLInputElement;
-const deeplTargetLangSel         = document.getElementById("deeplTargetLang")         as HTMLSelectElement;
+/** The same setting, offered in whichever tab is open. */
+const translateInput             = document.getElementById("translate")               as HTMLInputElement;
+const translateServerInput       = document.getElementById("translateServer")         as HTMLInputElement;
 
 const serverUrlInput             = document.getElementById("serverUrl")               as HTMLInputElement;
 const serverApiKeyInput          = document.getElementById("serverApiKey")            as HTMLInputElement;
 const allowInsecureInput         = document.getElementById("allowInsecureServer")     as HTMLInputElement;
 const insecureField              = document.getElementById("insecureField")           as HTMLElement;
-const serverTranslationSel       = document.getElementById("serverTranslation")       as HTMLSelectElement;
 const dictModeSelect             = document.getElementById("dictMode")                as HTMLSelectElement;
 const pageCleanSfxInput          = document.getElementById("pageCleanSfx")            as HTMLInputElement;
 const testBtn                    = document.getElementById("testBtn")                 as HTMLButtonElement;
 const testBtnStatus              = document.getElementById("testBtnStatus")!;
-
-const clientTranslationServerSel = document.getElementById("clientTranslationServer") as HTMLSelectElement;
-const deeplFieldsServer          = document.getElementById("deeplFieldsServer")!;
-const deeplApiKeyServerInput     = document.getElementById("deeplApiKeyServer")       as HTMLInputElement;
-const deeplTargetLangServerSel   = document.getElementById("deeplTargetLangServer")   as HTMLSelectElement;
 
 const saveBtn                    = document.getElementById("saveBtn")                 as HTMLButtonElement;
 const statusEl                   = document.getElementById("status")                  as HTMLDivElement;
@@ -214,31 +207,10 @@ async function testConnection(): Promise<void> {
 
 
 
-// ── Client translation visibility ─────────────────────────────────────────────
+// ── One setting, two tabs ─────────────────────────────────────────────────────
 
-clientTranslationSel.addEventListener("change", () => {
-  deeplFields.style.display = clientTranslationSel.value === "deepl" ? "block" : "none";
-});
-
-clientTranslationServerSel.addEventListener("change", () => {
-  deeplFieldsServer.style.display = clientTranslationServerSel.value === "deepl" ? "block" : "none";
-});
-
-// ── Server translation hints ──────────────────────────────────────────────────
-
-const serverHints: Record<ServerTranslation, HTMLElement | null> = {
-  none:  document.getElementById("serverHint-none"),
-  auto:  document.getElementById("serverHint-auto"),
-  local: document.getElementById("serverHint-local"),
-  deepl: document.getElementById("serverHint-deepl"),
-};
-
-serverTranslationSel.addEventListener("change", () => {
-  const mode = serverTranslationSel.value as ServerTranslation;
-  for (const [k, el] of Object.entries(serverHints)) {
-    if (el) el.style.display = k === mode ? "block" : "none";
-  }
-});
+translateInput.addEventListener("change", () => { translateServerInput.checked = translateInput.checked; });
+translateServerInput.addEventListener("change", () => { translateInput.checked = translateServerInput.checked; });
 
 // ── Dict mode hints ───────────────────────────────────────────────────────────
 
@@ -262,34 +234,21 @@ loadSettings()
     tesseractLangInput.value    = s.tesseractLang;
     tesseractQualitySel.value   = s.tesseractQuality;
 
-    clientTranslationSel.value  = s.clientTranslation;
-    deeplApiKeyInput.value      = s.deeplApiKey;
-    deeplTargetLangSel.value    = s.deeplTargetLang;
-    deeplFields.style.display   = s.clientTranslation === "deepl" ? "block" : "none";
+    translateInput.checked      = s.translate;
+    translateServerInput.checked = s.translate;
 
     serverUrlInput.value        = s.serverUrl;
     serverApiKeyInput.value     = s.serverApiKey;
     allowInsecureInput.checked  = s.allowInsecureServer;
     updateInsecureVisibility();
-    serverTranslationSel.value  = s.serverTranslation;
     dictModeSelect.value        = s.dictMode;
     pageCleanSfxInput.checked   = s.pageCleanSfx;
 
-    clientTranslationServerSel.value = s.clientTranslation;
-    deeplApiKeyServerInput.value     = s.deeplApiKey;
-    deeplTargetLangServerSel.value   = s.deeplTargetLang;
-    deeplFieldsServer.style.display  = s.clientTranslation === "deepl" ? "block" : "none";
-
-    // Apply hints
-    const sHint = serverHints[s.serverTranslation];
-    for (const [k, el] of Object.entries(serverHints)) {
-      if (el) el.style.display = k === s.serverTranslation ? "block" : "none";
-    }
     const dHint = dictHints[s.dictMode];
     for (const [k, el] of Object.entries(dictHints)) {
       if (el) el.style.display = k === s.dictMode ? "block" : "none";
     }
-    void sHint; void dHint;
+    void dHint;
 
     // If they've previously saved settings, treat as pre-verified so they can re-save
     if (s.ocrEngine === "tesseract" && s.tesseractLang) {
@@ -318,34 +277,16 @@ async function saveSettings(): Promise<void> {
     }
   }
 
-  const clientTranslation = activeEngine === "server"
-    ? clientTranslationServerSel.value as ClientTranslation
-    : clientTranslationSel.value as ClientTranslation;
-  const deeplApiKey = activeEngine === "server"
-    ? deeplApiKeyServerInput.value.trim()
-    : deeplApiKeyInput.value.trim();
-  const deeplTargetLang = activeEngine === "server"
-    ? deeplTargetLangServerSel.value
-    : deeplTargetLangSel.value;
-
-  if (clientTranslation === "deepl" && !deeplApiKey) {
-    showStatus("Please enter your DeepL API key.", "error");
-    return;
-  }
-
   const settings: Settings = {
     ocrEngine:         activeEngine,
     serverUrl:         serverUrlInput.value.trim(),
     serverApiKey:      serverApiKeyInput.value.trim(),
     allowInsecureServer: allowInsecureInput.checked,
-    serverTranslation: serverTranslationSel.value as ServerTranslation,
     dictMode:          dictModeSelect.value as DictMode,
     pageCleanSfx:      pageCleanSfxInput.checked,
     tesseractLang:     tesseractLangInput.value,
     tesseractQuality:  tesseractQualitySel.value as TesseractQuality,
-    clientTranslation,
-    deeplApiKey,
-    deeplTargetLang,
+    translate:         activeEngine === "server" ? translateServerInput.checked : translateInput.checked,
   };
 
   await persistSettings(settings);

@@ -7,7 +7,7 @@ import { JobStore } from "@/stores/job-store";
 import { ErrBody } from "@/lib/schemas";
 import { join } from "path";
 import { env } from "@/env";
-import { runtimeSettings } from "@/stores/settings-store";
+import { resolveTranslationEngine } from "@/services/translation-engine";
 import { PAGE_JOBS_DIR } from "@/stores/page-store";
 import { authContext } from "@/plugins/auth/index";
 
@@ -43,24 +43,12 @@ export const routeOcr = new Elysia()
       if (imageBytes.length > 10 * 1024 * 1024)
         return error(400, { error: "decoded image exceeds 10 MB limit" });
 
-      const allowedTranslateEngines = ["none", "auto", "local", "deepl"] as const;
-      const rawEngine = body.translate_engine?.toLowerCase() ?? "none";
-      if (!allowedTranslateEngines.includes(rawEngine as typeof allowedTranslateEngines[number]))
-        return error(400, { error: `translate_engine must be one of: ${allowedTranslateEngines.join(", ")}` });
-
-      // Resolve translate engine, then coerce to what is actually available.
-      let resolvedTranslateEngine: "none" | "local" | "deepl" = rawEngine === "none" ? "none"
-        : rawEngine === "auto"
-          ? env.DEEPL_API_KEY ? "deepl" : "local"
-          : rawEngine === "local" || rawEngine === "deepl"
-            ? rawEngine
-            : runtimeSettings.preferredTranslationEngine as "none" | "local" | "deepl";
-
-      // DeepL requested but key absent → fall back to local (same as "auto" with no key).
-      if (resolvedTranslateEngine === "deepl" && !env.DEEPL_API_KEY) {
-        resolvedTranslateEngine = "local";
-      }
-      if (resolvedTranslateEngine === "local" && !bootState.translateReady)
+      // A client says whether it wants a translation; which engine makes it is the server's business (see
+      // Settings → Translation). `translate_engine` is what older clients sent: "none" still means don't, and a
+      // named engine now means yes, please — with the engine this server chose.
+      const wantsTranslation = body.translate ?? (body.translate_engine?.toLowerCase() ?? "none") !== "none";
+      const engine = wantsTranslation ? resolveTranslationEngine() : "none";
+      if (engine === "local" && !bootState.translateReady)
         return error(503, { error: "Translate model not ready" });
 
       const ocrResult = await inferenceQueue.enqueue<
@@ -69,11 +57,11 @@ export const routeOcr = new Elysia()
       >("ocr", { imageBuffer: imageBytes });
 
       let translation: string | null = null;
-      if (resolvedTranslateEngine !== "none" && ocrResult.text) {
+      if (engine !== "none" && ocrResult.text) {
         const tr = await inferenceQueue.enqueue<
           { text: string; engine: string },
           { translatedText: string; processingTimeMs: number }
-        >("translate", { text: ocrResult.text, engine: resolvedTranslateEngine });
+        >("translate", { text: ocrResult.text, engine });
         translation = tr.translatedText;
       }
 
@@ -91,7 +79,7 @@ export const routeOcr = new Elysia()
           username: principal.user.username,
           sourceText: ocrResult.text,
           translatedText: translation,
-          translateEngine: resolvedTranslateEngine,
+          translateEngine: engine,
           elapsedMs: ocrResult.processingTimeMs,
         }).catch(() => {});
       }
@@ -105,6 +93,9 @@ export const routeOcr = new Elysia()
     {
       body: t.Object({
         image: t.String(),
+        /** Whether to translate what was read. Which engine does it is the server's choice. */
+        translate: t.Optional(t.Boolean()),
+        /** What older clients sent instead; "none" means don't translate, any engine name means do. */
         translate_engine: t.Optional(t.String()),
         track_job: t.Optional(t.Boolean()),
       }),

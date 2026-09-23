@@ -1,8 +1,6 @@
 // ── Engine / settings types ───────────────────────────────────────────────────
 
 export type OcrEngine         = "tesseract" | "server";
-export type ServerTranslation = "none" | "auto" | "local" | "deepl";
-export type ClientTranslation = "none" | "deepl";
 export type DictMode          = "local" | "jisho";
 export type TesseractQuality  = "4.0.0" | "4.0.0_best";
 
@@ -20,7 +18,6 @@ export interface Settings {
    * this extension exists for.
    */
   allowInsecureServer: boolean;
-  serverTranslation: ServerTranslation;
   dictMode: DictMode;
   /** Page translation also removes sound effects (can soften detailed artwork). */
   pageCleanSfx: boolean;
@@ -29,10 +26,11 @@ export interface Settings {
   tesseractLang: string;
   tesseractQuality: TesseractQuality;
 
-  // Client-side translation (Tesseract mode; optionally server mode too)
-  clientTranslation: ClientTranslation;
-  deeplApiKey: string;
-  deeplTargetLang: string;
+  /**
+   * Whether what's read gets translated. Which engine does it is the server's setting, not this one's: one server,
+   * one answer, and no API keys kept in a browser extension. Nothing is translated without a server configured.
+   */
+  translate: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -40,14 +38,11 @@ export const DEFAULT_SETTINGS: Settings = {
   serverUrl: "",
   serverApiKey: "",
   allowInsecureServer: false,
-  serverTranslation: "auto",
   dictMode: "jisho",
   pageCleanSfx: false,
   tesseractLang: "jpn",
   tesseractQuality: "4.0.0",
-  clientTranslation: "none",
-  deeplApiKey: "",
-  deeplTargetLang: "EN-US",
+  translate: true,
 };
 
 // ── Token / dictionary types ──────────────────────────────────────────────────

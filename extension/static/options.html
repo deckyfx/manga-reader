@@ -382,54 +382,21 @@
           </div>
         </div>
 
-        <!-- Client-side DeepL for Tesseract -->
+        <!-- Translation, done by the server -->
         <div class="card">
           <div class="card-header">
             <span class="card-title">Translation</span>
-            <span class="card-badge">optional</span>
+            <span class="card-badge">needs a server</span>
           </div>
           <div class="field">
-            <label for="clientTranslation">Engine</label>
-            <select id="clientTranslation">
-              <option value="none">Disabled</option>
-              <option value="deepl">DeepL — my own API key</option>
-            </select>
-          </div>
-          <div id="deeplFields" style="display:none">
-            <hr />
-            <div class="field">
-              <label for="deeplApiKey">DeepL API Key</label>
-              <input type="password" id="deeplApiKey" placeholder="xxxx…:fx" autocomplete="off" />
-              <p class="hint">Free keys end with <code>:fx</code>. Stored locally in your browser.</p>
-            </div>
-            <div class="field">
-              <label for="deeplTargetLang">Target language</label>
-              <select id="deeplTargetLang">
-                <option value="EN-US">English (US)</option>
-                <option value="EN-GB">English (UK)</option>
-                <option value="ZH">Chinese (Simplified)</option>
-                <option value="ZH-HANT">Chinese (Traditional)</option>
-                <option value="JA">Japanese</option>
-                <option value="KO">Korean</option>
-                <option value="DE">German</option>
-                <option value="FR">French</option>
-                <option value="ES">Spanish</option>
-                <option value="PT-BR">Portuguese (Brazil)</option>
-                <option value="PT-PT">Portuguese (Portugal)</option>
-                <option value="IT">Italian</option>
-                <option value="NL">Dutch</option>
-                <option value="PL">Polish</option>
-                <option value="RU">Russian</option>
-                <option value="TR">Turkish</option>
-                <option value="ID">Indonesian</option>
-                <option value="SV">Swedish</option>
-                <option value="DA">Danish</option>
-                <option value="FI">Finnish</option>
-                <option value="CS">Czech</option>
-                <option value="RO">Romanian</option>
-                <option value="UK">Ukrainian</option>
-              </select>
-            </div>
+            <label class="checkbox">
+              <input type="checkbox" id="translate" />
+              Translate what's read
+            </label>
+            <p class="hint">
+              Your server translates, with the engine chosen there (Settings → Translation). Set a server URL and key
+              in the Server tab; without one, Tesseract gives you the Japanese text and nothing else.
+            </p>
           </div>
         </div>
 
@@ -475,17 +442,14 @@
           </div>
           <hr />
           <div class="field">
-            <label for="serverTranslation">Server-side Translation</label>
-            <select id="serverTranslation">
-              <option value="none">Disabled</option>
-              <option value="auto">Auto (DeepL if key set, else local)</option>
-              <option value="local">Embedded model (OPUS-MT)</option>
-              <option value="deepl">DeepL via server key</option>
-            </select>
-            <p class="hint" id="serverHint-none">OCR text only — no translation.</p>
-            <p class="hint" id="serverHint-auto" style="display:none">Uses DeepL when <code>DEEPL_API_KEY</code> is set on the server, otherwise falls back to the embedded OPUS-MT model.</p>
-            <p class="hint" id="serverHint-local" style="display:none">Uses OPUS-MT on your server. No external requests.</p>
-            <p class="hint" id="serverHint-deepl" style="display:none">Server calls DeepL using its configured API key.</p>
+            <label class="checkbox">
+              <input type="checkbox" id="translateServer" />
+              Translate what's read
+            </label>
+            <p class="hint">
+              Which engine translates is the server's own setting (Settings → Translation), so every device that uses
+              this server gets the same answer.
+            </p>
           </div>
           <hr />
           <div class="field">
@@ -511,46 +475,6 @@
             </select>
             <p class="hint" id="dictHint-jisho">Fetches from jisho.org. JLPT levels and common-word badges included.</p>
             <p class="hint" id="dictHint-local" style="display:none">Uses Jitendex on your server. No internet required. JLPT info unavailable.</p>
-          </div>
-          <hr />
-          <!-- Client DeepL also available in server mode -->
-          <div class="field">
-            <label for="clientTranslationServer">Client-side Translation</label>
-            <select id="clientTranslationServer">
-              <option value="none">Disabled</option>
-              <option value="deepl">DeepL — my own API key</option>
-            </select>
-            <p class="hint">Overrides server translation. Runs directly from your browser.</p>
-          </div>
-          <div id="deeplFieldsServer" style="display:none">
-            <hr />
-            <div class="field">
-              <label for="deeplApiKeyServer">DeepL API Key</label>
-              <input type="password" id="deeplApiKeyServer" placeholder="xxxx…:fx" autocomplete="off" />
-              <p class="hint">Free keys end with <code>:fx</code>.</p>
-            </div>
-            <div class="field">
-              <label for="deeplTargetLangServer">Target language</label>
-              <select id="deeplTargetLangServer">
-                <option value="EN-US">English (US)</option>
-                <option value="EN-GB">English (UK)</option>
-                <option value="ZH">Chinese (Simplified)</option>
-                <option value="ZH-HANT">Chinese (Traditional)</option>
-                <option value="JA">Japanese</option>
-                <option value="KO">Korean</option>
-                <option value="DE">German</option>
-                <option value="FR">French</option>
-                <option value="ES">Spanish</option>
-                <option value="PT-BR">Portuguese (Brazil)</option>
-                <option value="PT-PT">Portuguese (Portugal)</option>
-                <option value="IT">Italian</option>
-                <option value="NL">Dutch</option>
-                <option value="PL">Polish</option>
-                <option value="RU">Russian</option>
-                <option value="TR">Turkish</option>
-                <option value="ID">Indonesian</option>
-              </select>
-            </div>
           </div>
         </div>
 

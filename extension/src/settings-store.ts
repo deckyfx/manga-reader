@@ -2,20 +2,27 @@
  * Where settings live.
  *
  * `chrome.storage.sync` is copied to Google's servers and to every browser signed into the same profile, which is
- * fine for a language choice and wrong for a credential. The two secrets (the server's API key and the DeepL key) are
- * kept in `chrome.storage.local`, which stays on this machine, and so is everything that decides where the server key
- * goes: the server URL and the consent to send it over plain http. Were those synced, another browser changing the
- * URL would have this one hand its key to the new address unasked.
+ * fine for a language choice and wrong for a credential. The one secret left — the server's API key, since nothing
+ * else is translated from here any more — is kept in `chrome.storage.local`, which stays on this machine, and so is
+ * everything that decides where it goes: the server URL and the consent to send it over plain http. Were those
+ * synced, another browser changing the URL would have this one hand its key to the new address unasked.
  *
  * Anything an older build saved into sync is moved across on first read and removed from sync.
  */
 import { DEFAULT_SETTINGS, type Settings } from "./types";
 
 /** Settings that never leave this machine. */
-const LOCAL_KEYS = ["serverApiKey", "deeplApiKey", "serverUrl", "allowInsecureServer"] as const;
+const LOCAL_KEYS = ["serverApiKey", "serverUrl", "allowInsecureServer"] as const;
 type LocalKey = (typeof LOCAL_KEYS)[number];
 
 const isLocal = (key: string): key is LocalKey => (LOCAL_KEYS as readonly string[]).includes(key);
+
+/**
+ * Settings this build no longer has, dropped wherever an older one left them. The server decides how things are
+ * translated now, so the DeepL key the extension used to keep is not a setting any more — it is somebody's
+ * credential lying about, and it goes.
+ */
+const RETIRED_KEYS = ["deeplApiKey", "deeplTargetLang", "clientTranslation", "serverTranslation"] as const;
 
 /** Every setting, with anything an older build left in sync pulled across. */
 export async function loadSettings(): Promise<Settings> {
@@ -37,6 +44,12 @@ export async function loadSettings(): Promise<Settings> {
     // Only once the values are safely local: a failed set would otherwise lose them
     await chrome.storage.sync.remove([...inSync]);
   }
+
+  // Best effort: a browser that won't let go of them shouldn't keep the settings from loading
+  void Promise.all([
+    chrome.storage.sync.remove([...RETIRED_KEYS]),
+    chrome.storage.local.remove([...RETIRED_KEYS]),
+  ]).catch(() => { /* they'll be asked to go again next time */ });
 
   const shared = Object.fromEntries(Object.entries(synced).filter(([key]) => !isLocal(key)));
   return { ...DEFAULT_SETTINGS, ...shared, ...local } as Settings;
