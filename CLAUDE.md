@@ -9,6 +9,7 @@ server/      Bun server: OCR, translation, page pipeline, Studio + reader SPA (T
 extension/   Browser extension (MV3, TypeScript + Bun)
 desktop/     Avalonia desktop companion (C#, .NET 10); talks to the server's /health, /ocr, /analyze
 docs/        PLAN_dashboard_studio.md: the Studio / reader plan with per-phase design notes
+tools/       sugoi/: a containerised Sugoi translation server the Bun server can use (SUGOI_URL)
 WebOcr.slnx  .NET solution for the desktop app
 ```
 

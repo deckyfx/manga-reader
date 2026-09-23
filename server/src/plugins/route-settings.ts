@@ -2,7 +2,7 @@ import Elysia, { t } from "elysia";
 import { env } from "@/env";
 import { bootState } from "@/boot-state";
 import { ModelInfoSchema } from "@/lib/schemas";
-import { runtimeSettings } from "@/stores/settings-store";
+import { INPAINT_ENGINES, runtimeSettings, setRuntimeEngine, TRANSLATION_ENGINES } from "@/stores/settings-store";
 
 const SettingsSchema = t.Object({
   ocr: ModelInfoSchema,
@@ -11,6 +11,8 @@ const SettingsSchema = t.Object({
   bubble: ModelInfoSchema,
   text_seg: ModelInfoSchema,
   preferred_translation_engine: t.String(),
+  sugoi_configured: t.Boolean(),
+  sugoi_url: t.String(),
   inpaint_engine: t.String(),
   deepl_configured: t.Boolean(),
   /**
@@ -61,6 +63,9 @@ function currentSettings() {
     preferred_translation_engine: runtimeSettings.preferredTranslationEngine,
     inpaint_engine: runtimeSettings.inpaintEngine,
     deepl_configured: !!env.DEEPL_API_KEY,
+    /** A self-hosted Sugoi server is configured (SUGOI_URL); its address, for the settings page to show. */
+    sugoi_configured: !!env.SUGOI_URL,
+    sugoi_url: env.SUGOI_URL,
     capabilities: { workspaces: true },
   };
 }
@@ -69,22 +74,20 @@ export const routeSettings = new Elysia({ prefix: "/api/settings" })
   .get("/", () => currentSettings(), { response: { 200: SettingsSchema } })
   .patch(
     "/engine",
-    ({ body, status: error }) => {
-      const allowed = ["auto", "local", "deepl"] as const;
-      if (!allowed.includes(body.engine as typeof allowed[number]))
-        return error(400, { error: `engine must be one of: ${allowed.join(", ")}` });
-      runtimeSettings.preferredTranslationEngine = body.engine as typeof runtimeSettings.preferredTranslationEngine;
+    async ({ body, status: error }) => {
+      if (!TRANSLATION_ENGINES.includes(body.engine as (typeof TRANSLATION_ENGINES)[number]))
+        return error(400, { error: `engine must be one of: ${TRANSLATION_ENGINES.join(", ")}` });
+      await setRuntimeEngine("translation", body.engine);
       return { preferred_translation_engine: body.engine };
     },
     { body: t.Object({ engine: t.String() }) },
   )
   .patch(
     "/inpaint-engine",
-    ({ body, status: error }) => {
-      const allowed = ["auto", "lama", "flood_fill"] as const;
-      if (!allowed.includes(body.engine as typeof allowed[number]))
-        return error(400, { error: `engine must be one of: ${allowed.join(", ")}` });
-      runtimeSettings.inpaintEngine = body.engine as typeof runtimeSettings.inpaintEngine;
+    async ({ body, status: error }) => {
+      if (!INPAINT_ENGINES.includes(body.engine as (typeof INPAINT_ENGINES)[number]))
+        return error(400, { error: `engine must be one of: ${INPAINT_ENGINES.join(", ")}` });
+      await setRuntimeEngine("inpaint", body.engine);
       return { inpaint_engine: body.engine };
     },
     { body: t.Object({ engine: t.String() }) },
