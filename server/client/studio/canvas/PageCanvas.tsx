@@ -92,6 +92,14 @@ export function PageCanvas({
     useCanvasStore.getState().open(startingToolset);
   }, [startingToolset]);
   const { tool, kind, brushLayer, brushSize, showMask, showText, mode, paintedAreas, recleaning, zoom, busyCount, error } = useCanvasStore();
+  /**
+   * The page these rendered values belong to. The first render of a new canvas reads the store before the layout
+   * effect above opens it, so it holds the *previous* page's tools — and an effect from that render runs all the
+   * same. Anything that tells the editor what it is looking at, or writes to the workspace's remembered toolset,
+   * has to sit out that one render, or it would report the page the user just left.
+   */
+  const session = useCanvasStore((state) => state.session);
+  const rendersThisPage = (): boolean => session === useCanvasStore.getState().session;
   const { setTool, setMode, setBrushLayer, setBrushSize, setShowMask, setPaintedAreas, setRecleaning, setZoom, addBusy, setError } = useCanvasStore.getState();
   /** Bumped to load the mask layers from the server again (after a failed save). */
   const [layersNonce, setLayersNonce] = useState(0);
@@ -122,8 +130,10 @@ export function PageCanvas({
 
   // Every toolset change is handed on, so the workspace's next page opens with it
   useEffect(() => {
+    if (!rendersThisPage()) return;
     live.current.onToolsetChange?.({ tool, kind, brushLayer, brushSize, showMask, mode, showText });
-  }, [tool, kind, brushLayer, brushSize, showMask, mode, showText]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, kind, brushLayer, brushSize, showMask, mode, showText, session]);
 
   /** Runs server changes one after another; a failure shows the error, drops the history and reloads the page. */
   const enqueue = useCallback((task: () => Promise<void>) => {
@@ -261,9 +271,13 @@ export function PageCanvas({
       mask.apply(record, state);
       if (maskRef.current === mask) canvasRef.current?.requestRenderAll();
     };
+    // The page this stroke was painted on; its saves can land after another page has opened
+    const strokeSession = canvasSession();
     /** Queues the stroke's area for Re-clean: only when the change can add pixels to the effective mask. */
     const markForReclean = () => {
-      if (live.current.pageId === pageId) setPaintedAreas((areas) => [...areas, record.area]);
+      // Not `live.current.pageId === pageId` — both are this canvas's own, so that was always true. The painted
+      // areas are shared, and the next page must not be offered a Re-clean of coordinates from this one.
+      ifCurrent(strokeSession, () => setPaintedAreas((areas) => [...areas, record.area]));
     };
     perform({
       label: record.layer === "add" ? "Paint mask" : "Erase mask",
@@ -820,9 +834,10 @@ export function PageCanvas({
 
   // Switching modes tells the editor (Lettering switches the background to the cleaned page)
   useEffect(() => {
+    if (!rendersThisPage()) return;
     live.current.onModeChange?.(mode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [mode, session]);
 
   // A different page starts a fresh history and has nothing painted yet
   useEffect(() => {

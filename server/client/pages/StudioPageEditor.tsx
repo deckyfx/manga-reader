@@ -118,6 +118,14 @@ export function StudioPageEditor() {
    * selected block or reload its images.
    */
   const stillOpen = (): boolean => useEditorStore.getState().pageId === id;
+  /**
+   * Selecting a block, but only while this page is the open one. The canvas selects the block it has just created,
+   * which it can only do once the server has answered — by then the user may be on the next page, and the
+   * selection is shared with it.
+   */
+  const selectBlock = (blockId: number | null): void => {
+    if (stillOpen()) setSelectedBlock(blockId);
+  };
   const canvasHandle = useRef<PageCanvasHandle>(null);
 
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);
@@ -194,7 +202,7 @@ export function StudioPageEditor() {
     mutationFn: (blockId: number) => deleteBlock(id, blockId),
     onSuccess: (next) => {
       setDetail(next);
-      if (stillOpen()) setSelectedBlock(null);
+      selectBlock(null);
     },
   });
   /** Deletes a region: undoable through the canvas when it's open, otherwise after a confirmation. */
@@ -576,7 +584,7 @@ export function StudioPageEditor() {
             blocks={blocks}
             disabled={busy}
             selectedId={selectedBlock}
-            onSelect={setSelectedBlock}
+            onSelect={selectBlock}
             onDetail={setDetail}
             onReload={() => void qc.invalidateQueries({ queryKey: ["studio-page", id] })}
             onImagesChanged={() => { if (stillOpen()) imagesChanged(); }}
@@ -668,13 +676,13 @@ export function StudioPageEditor() {
           {typesetterError && <p className="text-xs text-red-400">Lettering preview unavailable: {typesetterError}</p>}
           {placeError && <p className="text-xs text-amber-400">Couldn't place the lettering yet: {placeError}</p>}
           {textBlocks.map((block) => (
-            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} setBlockStyle={setBlockStyle} onDelete={() => void removeBlock(block.id)} />
+            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} selected={selectedBlock === block.id} onSelect={() => selectBlock(block.id)} setBlockStyle={setBlockStyle} onDelete={() => void removeBlock(block.id)} />
           ))}
           {sfxBlocks.length > 0 && (
             <div className="pt-2 border-t border-gray-800 space-y-1.5">
               <div className="text-xs text-gray-400">Sound effects · ticked ones are removed by Clean SFX; give one lettering to draw it again</div>
               {sfxBlocks.map((block) => (
-                <SfxBlockRow key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} setBlockStyle={setBlockStyle} onDelete={() => void removeBlock(block.id)} />
+                <SfxBlockRow key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} selected={selectedBlock === block.id} onSelect={() => selectBlock(block.id)} setBlockStyle={setBlockStyle} onDelete={() => void removeBlock(block.id)} />
               ))}
             </div>
           )}
