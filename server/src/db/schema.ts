@@ -338,6 +338,8 @@ export const pageBlocks = sqliteTable("page_blocks", {
   styleJson: text("style_json"),
   /** Text area JSON from the last render (bound, dark, run-length mask), reused by the Studio's live preview. */
   areaJson: text("area_json"),
+  /** How the last clean went for this block: `{ method, ink }` — see services/clean-check.ts. Null before a clean. */
+  cleanJson: text("clean_json"),
   /**
    * This block changed since the page was last translated / rendered — its source text, or its translation, style,
    * shape or cleaning. The page's stage state says *that* a stage is out of date; these say *which blocks* made it so.

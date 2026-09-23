@@ -388,6 +388,7 @@ export class PageStore {
         ...(r.shapeJson ? { shape: JSON.parse(r.shapeJson) as BlockShape } : {}),
         ...(r.styleJson ? { style: JSON.parse(r.styleJson) as TextStyle } : {}),
         ...(r.areaJson ? { area: JSON.parse(r.areaJson) as StoredArea } : {}),
+        ...(r.cleanJson ? { clean: JSON.parse(r.cleanJson) as PageBlock["clean"] } : {}),
         ...(r.needsTranslate ? { needs_translate: true } : {}),
         ...(r.needsRender ? { needs_render: true } : {}),
       })),
@@ -419,6 +420,7 @@ export class PageStore {
           shapeJson: shapeToJson(b.shape),
           styleJson: b.style ? JSON.stringify(b.style) : null,
           areaJson: b.area ? JSON.stringify(b.area) : null,
+          cleanJson: b.clean ? JSON.stringify(b.clean) : null,
           needsTranslate: b.needs_translate ?? false,
           needsRender: b.needs_render ?? false,
         })))

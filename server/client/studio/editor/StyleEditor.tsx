@@ -290,6 +290,7 @@ export function LetteringPanel({ pageId, block, disabled, onChanged, trackSave, 
           scheduleText(next);
         }}
         placeholder={isSfx ? "New lettering for this sound effect" : "Translation"}
+        title="Enter starts a new line in the lettering; otherwise the text wraps to the bubble"
         className="w-full resize-y bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-violet-500"
       />
       {error && <p className="text-red-400">{error}</p>}

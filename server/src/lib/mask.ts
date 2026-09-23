@@ -184,23 +184,53 @@ export function selectBlockMask(
   height: number,
   blocks: ReadonlyArray<TextBlock & { include: boolean }>,
 ): Uint8Array {
+  const { comps, owners } = blockOwners(mask, width, height, blocks);
+  const out = new Uint8Array(width * height);
+  for (let i = 0; i < out.length; i++) {
+    const owner = owners[comps.labels[i]!];
+    if (owner !== undefined && owner.include) out[i] = 1;
+  }
+  return out;
+}
+
+/** The block each blob belongs to (undefined = none), by component id. Text blocks win ties over sound effects. */
+function blockOwners<T extends TextBlock>(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  blocks: readonly T[],
+): { comps: Components; owners: (T | undefined)[] } {
   const comps = labelComponents(mask, width, height);
   const ordered = [...blocks].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "text" ? -1 : 1));
-  const keep = new Uint8Array(comps.boxes.length + 1);
+  const owners: (T | undefined)[] = new Array<T | undefined>(comps.boxes.length + 1).fill(undefined);
   comps.boxes.forEach((comp, i) => {
-    let owner: (TextBlock & { include: boolean }) | null = null;
+    let owner: T | undefined;
     let best = OWNERSHIP;
     for (const block of ordered) {
       const share = overlapShare(comp, block);
-      if (owner === null ? share >= best : share > best) {
+      if (owner === undefined ? share >= best : share > best) {
         owner = block;
         best = share;
       }
     }
-    if (owner?.include) keep[i + 1] = 1;
+    owners[i + 1] = owner;
   });
-  const out = new Uint8Array(width * height);
-  for (let i = 0; i < out.length; i++) if (keep[comps.labels[i]]) out[i] = 1;
+  return { comps, owners };
+}
+
+/**
+ * Which block owns each masked pixel, as that block's id (0 = none). Blobs are owned outright, so a block's own
+ * lettering can be told from a neighbour's strokes reaching into its box — what measuring a clean needs.
+ */
+export function blockOwnerMask(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  blocks: ReadonlyArray<TextBlock & { id: number }>,
+): Int32Array {
+  const { comps, owners } = blockOwners(mask, width, height, blocks);
+  const out = new Int32Array(width * height);
+  for (let i = 0; i < out.length; i++) out[i] = owners[comps.labels[i]!]?.id ?? 0;
   return out;
 }
 

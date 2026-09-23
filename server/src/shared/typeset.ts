@@ -124,6 +124,8 @@ const GLYPH_FALLBACKS: Record<string, string> = {
 interface Token {
   text: string;
   glue: boolean;
+  /** A line break was typed before this piece: it has to start a line, whatever is left of the one before. */
+  startsLine: boolean;
 }
 
 /** Row-wise free span through the interior's centre column, plus its centroid. */
@@ -196,10 +198,28 @@ export function areaFromStored(stored: StoredArea): TextArea {
   return { bound: stored.bound, dark: stored.dark, mask: decodeMask(stored.mask, stored.bound.w * stored.bound.h) };
 }
 
+/**
+ * The text as wrappable pieces. Line breaks typed into the text are kept: the first word after one starts a new line.
+ * Several breaks in a row count as one — a blank line inside a bubble is wasted space, not a paragraph.
+ */
 function tokenize(text: string, uppercase: boolean): Token[] {
   const tokens: Token[] = [];
-  for (const word of (uppercase ? text.toUpperCase() : text).split(/\s+/).filter(Boolean)) {
-    word.split(/(?<=\/)/).forEach((part, i) => tokens.push({ text: part, glue: i > 0 }));
+  let broken = false;
+  for (const [row, line] of (uppercase ? text.toUpperCase() : text).split(/\r\n|[\r\n]/).entries()) {
+    const words = line.split(/[^\S\r\n]+/).filter(Boolean);
+    if (words.length === 0) {
+      broken ||= row > 0;
+      continue;
+    }
+    for (const [index, word] of words.entries()) {
+      word.split(/(?<=\/)/).forEach((part, i) => tokens.push({
+        text: part,
+        glue: i > 0,
+        startsLine: broken && index === 0 && i === 0,
+      }));
+      broken = false;
+    }
+    broken = true;
   }
   return tokens;
 }
@@ -277,7 +297,7 @@ export class Typesetter {
    * Word-wrapped lines of `text` inside the area's shape. With a fixed `style.font_size` the text is wrapped at that
    * size; otherwise the largest size up to `maxFontSize` that fits is chosen. Each line gets the interior's width at
    * its own height, so text follows oval and cloud bubbles. Breaks after "/" are always allowed; hyphenation only
-   * when it buys a clearly larger font (or is needed at a fixed size).
+   * when it buys a clearly larger font (or is needed at a fixed size). A line break typed into `text` is kept.
    */
   layout(text: string, area: TextArea, maxFontSize: number, style: TextStyle = {}): TextLayout {
     const font = this.fontFor(style);
@@ -324,7 +344,7 @@ export class Typesetter {
       const width = widths[i] * scale;
       const last = rows.at(-1);
       const gap = token.glue ? 0 : space;
-      if (last && last.width + gap + width <= geometry.width) {
+      if (last && !token.startsLine && last.width + gap + width <= geometry.width) {
         last.text += (gap ? " " : "") + token.text;
         last.width += gap + width;
       } else {
@@ -374,6 +394,8 @@ export class Typesetter {
         let text = "", width = 0;
         while (next < tokens.length || carry !== null) {
           const fromCarry = carry !== null;
+          // A break typed into the text ends the line here, however much room is left
+          if (!fromCarry && text !== "" && tokens[next].startsLine) break;
           const piece: string = carry ?? tokens[next].text;
           const pieceWidth = fromCarry ? font.getAdvanceWidth(piece, size) : widths[next] * scale;
           const gap = text === "" || (!fromCarry && tokens[next].glue) ? 0 : space;

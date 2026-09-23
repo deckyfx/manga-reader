@@ -189,6 +189,11 @@ const BlockSchema = t.Object({
   style: t.Nullable(StyleSchema),
   /** Where the last render placed the text (run-length mask), for the live preview; null before a render. */
   area: t.Nullable(StoredAreaSchema),
+  /**
+   * The self-check from the last clean: how this block was cleaned ("flat" fill or "lama"), and how much of its
+   * lettering still shows (0–1). Null for a block that hasn't been cleaned.
+   */
+  clean: t.Nullable(t.Object({ method: t.String(), ink: t.Number() })),
   /** Its source text changed since it was last translated. */
   needs_translate: t.Boolean(),
   /** It changed since the page was last rendered: this block is why the render is out of date. */
@@ -224,6 +229,7 @@ function toBlock(block: PageBlock) {
     shape: block.shape ?? null,
     style: block.style ?? null,
     area: block.area ?? null,
+    clean: block.clean ?? null,
     needs_translate: block.needs_translate ?? false,
     needs_render: block.needs_render ?? false,
   };
@@ -652,6 +658,12 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
         await runExclusiveResult(async () => {
           const pipeline = new PagePipeline(pageDir(params.id), () => {}, PageStore.repository(params.id));
           await pipeline.recleanAreas(body.areas);
+          // The blocks' self-check was measured before this fix: measure it again on the page as it is now
+          const job = await pipeline.readJob();
+          if (job) {
+            await pipeline.refreshCleanCheck(job);
+            await pipeline.writeJob(job);
+          }
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
