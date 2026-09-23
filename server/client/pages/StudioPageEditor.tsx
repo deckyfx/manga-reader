@@ -44,23 +44,13 @@ import { usePageJobEvents } from "../hooks/usePageJobEvents";
 import { PageCanvas, type PageCanvasHandle } from "../studio/canvas/PageCanvas";
 import { buildLettering, relayoutBlock, useTypesetter } from "../studio/text/typesetter";
 import { readToolset, saveToolset, toolsetScope } from "../studio/toolset";
+import { useEditorStore } from "../stores/editor";
 import { ProcessingView, StageCompare, FinalizedView } from "../studio/editor/views";
 import { BlockEditor, blockCheck, SfxBlockRow } from "../studio/editor/BlockRows";
 import { LetteringPanel } from "../studio/editor/StyleEditor";
 import { HistoryPanel } from "../studio/editor/HistoryPanel";
 
 const isBusy = (status: string | undefined) => status === "queued" || status === "running";
-
-const PANEL_COLLAPSED_KEY = "studio-editor-panel-collapsed";
-
-/** Saved side-panel state; storage can be unavailable (private mode), so default to expanded. */
-function readPanelCollapsed(): boolean {
-  try {
-    return localStorage.getItem(PANEL_COLLAPSED_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
 
 /** The stage that writes each page image; the original is always there. */
 const IMAGE_STAGE: Partial<Record<PageImage, string>> = {
@@ -112,21 +102,16 @@ export function StudioPageEditor() {
     }, release);
   }, []);
 
-  const [view, setView] = useState<"canvas" | "compare">("canvas");
-  const [canvasImage, setCanvasImage] = useState<PageImage>("original.png");
-  const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
-  const [panelCollapsed, setPanelCollapsedState] = useState(readPanelCollapsed);
-  const setPanelCollapsed = (collapsed: boolean) => {
-    setPanelCollapsedState(collapsed);
-    try {
-      localStorage.setItem(PANEL_COLLAPSED_KEY, collapsed ? "1" : "0");
-    } catch {
-      // Not persisted; the choice still applies for this visit
-    }
-  };
+  // What the editor is showing: shared with the canvas, the block list and the lettering panel
+  const { view, canvasImage, selectedBlock, panelCollapsed, imagesNonce } = useEditorStore();
+  const { setView, setCanvasImage, selectBlock: setSelectedBlock, setPanelCollapsed, imagesChanged } = useEditorStore.getState();
+  // A page opens fresh: nothing selected, no image rewritten yet
+  const openedPage = useRef(false);
+  if (!openedPage.current) {
+    openedPage.current = true;
+    useEditorStore.getState().openPage();
+  }
   const canvasHandle = useRef<PageCanvasHandle>(null);
-  /** Bumped when a cleaned image is rewritten, so image URLs change and the browser loads the new file. */
-  const [imagesNonce, setImagesNonce] = useState(0);
 
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);
   const onPublished = (result: { revision: number; notified: number }) => {
@@ -138,7 +123,7 @@ export function StudioPageEditor() {
   const translateAllM = useMutation({ mutationFn: () => runStage(id, "translate"), onSuccess: setDetail });
   const afterClean = (detail: StudioPageDetail) => {
     setDetail(detail);
-    setImagesNonce((n) => n + 1);
+    imagesChanged();
   };
   const cleanTextM = useMutation({ mutationFn: () => runStage(id, "clean_text"), onSuccess: afterClean });
   const cleanSfxM = useMutation({ mutationFn: () => runStage(id, "clean_sfx"), onSuccess: afterClean });
@@ -586,7 +571,7 @@ export function StudioPageEditor() {
             onSelect={setSelectedBlock}
             onDetail={setDetail}
             onReload={() => void qc.invalidateQueries({ queryKey: ["studio-page", id] })}
-            onImagesChanged={() => setImagesNonce((n) => n + 1)}
+            onImagesChanged={() => imagesChanged()}
             lettering={letteringPlan.items}
             textPreviewAvailable={canvasImage === "clean-text.png" || canvasImage === "clean-sfx.png"}
             onStylePreview={setBlockStyle}
