@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useImperativeHandle, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { Canvas, Circle, Ellipse, FabricImage, Line, Point, Polyline, Rect, util, type FabricObject } from "fabric";
 import {
   createBlock,
@@ -82,12 +82,15 @@ export function PageCanvas({
 
   // The toolset starts where the previous page of the workspace left it; read once, since the canvas owns it after
   const [startingToolset] = useState<Toolset>(() => initialToolset ?? {});
-  // Opened with the toolset the previous page was left with, before anything reads it, so the first paint is right
+  // Opened with the toolset the previous page was left with. In a layout effect, so the store is set before paint
+  // without updating the outgoing canvas — which is still mounted while this one renders — mid-render. The ref
+  // keeps StrictMode's second mount in development from opening the page twice.
   const opened = useRef(false);
-  if (!opened.current) {
+  useLayoutEffect(() => {
+    if (opened.current) return;
     opened.current = true;
     useCanvasStore.getState().open(startingToolset);
-  }
+  }, [startingToolset]);
   const { tool, kind, brushLayer, brushSize, showMask, showText, mode, paintedAreas, recleaning, zoom, busyCount, error } = useCanvasStore();
   const { setTool, setMode, setBrushLayer, setBrushSize, setShowMask, setPaintedAreas, setRecleaning, setZoom, addBusy, setError } = useCanvasStore.getState();
   /** Bumped to load the mask layers from the server again (after a failed save). */
