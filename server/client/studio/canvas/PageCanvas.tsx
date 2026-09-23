@@ -29,7 +29,7 @@ import { CommandHistory, type Command } from "./history";
 import { MaskLayers, type Area, type StrokeRecord } from "./mask-layers";
 import { LetteringObject, letteringIdOf } from "./lettering-object";
 import type { Toolset } from "../toolset";
-import { showsTextLayer, useCanvasStore } from "../../stores/canvas";
+import { canvasSession, ifCurrent, showsTextLayer, useCanvasStore } from "../../stores/canvas";
 
 /** What the canvas is set to right now, for handlers registered once (see the store). */
 const canvasState = () => useCanvasStore.getState();
@@ -124,14 +124,16 @@ export function PageCanvas({
 
   /** Runs server changes one after another; a failure shows the error, drops the history and reloads the page. */
   const enqueue = useCallback((task: () => Promise<void>) => {
+    // Whatever this reports belongs to the page open now; a page opened meanwhile has its own busy count and error
+    const session = canvasSession();
     addBusy(1);
     queueRef.current = queueRef.current
       .then(async () => {
         await task();
-        setError(null);
+        ifCurrent(session, () => setError(null));
       })
       .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : String(err));
+        ifCurrent(session, () => setError(err instanceof Error ? err.message : String(err)));
         history.clear();
         for (const entry of entriesRef.current.values()) entry.key = "";
         // The reload brings back the server's styles: pending canvas baselines no longer apply
@@ -140,7 +142,7 @@ export function PageCanvas({
         // A failed layer save leaves the overlay ahead of the server: show what the server has
         setLayersNonce((n) => n + 1);
       })
-      .finally(() => addBusy(-1));
+      .finally(() => ifCurrent(session, () => addBusy(-1)));
   }, [history]);
 
   /** Applies a change now and records it for undo. */
@@ -873,6 +875,7 @@ export function PageCanvas({
     // The areas belong to this page: the queued run must not re-clean, or update, a page opened meanwhile
     const targetPageId = pageId;
     if (areas.length === 0) return;
+    const session = canvasSession();
     addBusy(1);
     setRecleaning(true);
     queueRef.current = queueRef.current
@@ -882,16 +885,18 @@ export function PageCanvas({
           if (live.current.pageId !== targetPageId) return;
           live.current.onDetail(detail);
           live.current.onImagesChanged();
-          setPaintedAreas((current) => current.filter((area) => !used.includes(area)));
-          setError(null);
+          ifCurrent(session, () => {
+            setPaintedAreas((current) => current.filter((area) => !used.includes(area)));
+            setError(null);
+          });
         } catch (err) {
-          if (live.current.pageId === targetPageId) setError(err instanceof Error ? err.message : String(err));
+          if (live.current.pageId === targetPageId) ifCurrent(session, () => setError(err instanceof Error ? err.message : String(err)));
         }
       })
-      .finally(() => {
+      .finally(() => ifCurrent(session, () => {
         setRecleaning(false);
         addBusy(-1);
-      });
+      }));
   };
 
 

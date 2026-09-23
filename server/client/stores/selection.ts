@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { create } from "zustand";
 
 interface SelectionState {
@@ -31,6 +32,12 @@ export const useSelectionStore = create<SelectionState>((set) => ({
 /** The picking state of one grid: whether it is picking, and what it has picked. */
 export function usePageSelection(scope: string) {
   const picking = useSelectionStore((state) => state.scope === scope);
+  // Leaving the grid really does drop what was picked: without this, coming back to Studio from a workspace would
+  // find the old selection waiting, ready to be finalized from a page the user had moved on from
+  useEffect(() => () => {
+    const state = useSelectionStore.getState();
+    if (state.scope === scope) state.stop();
+  }, [scope]);
   const selected = useSelectionStore((state) => state.selected);
   const { start, stop, toggle, selectAll } = useSelectionStore.getState();
   return {

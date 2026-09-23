@@ -33,6 +33,8 @@ interface CanvasState {
   /** Changes in flight; while any is, undo and redo wait. */
   busyCount: number;
   error: string | null;
+  /** Counts page openings. A request that outlives the page it was started on is recognised by this. */
+  session: number;
 
   setTool: (tool: Tool) => void;
   setMode: (mode: EditMode | ((current: EditMode) => EditMode)) => void;
@@ -51,6 +53,17 @@ interface CanvasState {
   /** Opens a page: the toolset it was left with, and nothing painted or failing yet. */
   open: (toolset: Toolset) => void;
 }
+
+/**
+ * The session a request should report against, read when it starts. Pass it to `ifCurrent`, which drops the report
+ * if another page has been opened meanwhile — a page's own busy count, error and re-clean state are its own.
+ */
+export const canvasSession = (): number => useCanvasStore.getState().session;
+
+/** Runs `report` only if the page that started the request is still the one open. */
+export const ifCurrent = (session: number, report: () => void): void => {
+  if (useCanvasStore.getState().session === session) report();
+};
 
 const apply = <T>(next: T | ((current: T) => T), current: T): T => (typeof next === "function" ? (next as (c: T) => T)(current) : next);
 
@@ -75,6 +88,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   recleaning: false,
   busyCount: 0,
   error: null,
+  session: 0,
 
   setTool: (tool) => set({ tool }),
   setMode: (mode) => set({ mode: apply(mode, get().mode) }),
@@ -108,6 +122,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     recleaning: false,
     busyCount: 0,
     error: null,
+    session: get().session + 1,
   }),
 }));
 

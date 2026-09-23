@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -105,12 +105,9 @@ export function StudioPageEditor() {
   // What the editor is showing: shared with the canvas, the block list and the lettering panel
   const { view, canvasImage, selectedBlock, panelCollapsed, imagesNonce } = useEditorStore();
   const { setView, setCanvasImage, selectBlock: setSelectedBlock, setPanelCollapsed, imagesChanged } = useEditorStore.getState();
-  // A page opens fresh: nothing selected, no image rewritten yet
-  const openedPage = useRef(false);
-  if (!openedPage.current) {
-    openedPage.current = true;
-    useEditorStore.getState().openPage();
-  }
+  // A page opens fresh: nothing selected, no image rewritten yet. In a layout effect, not during render: this
+  // editor is keyed by page, so a render-phase reset would notify the outgoing editor while this one renders.
+  useLayoutEffect(() => { useEditorStore.getState().openPage(); }, [id]);
   const canvasHandle = useRef<PageCanvasHandle>(null);
 
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);
@@ -327,9 +324,10 @@ export function StudioPageEditor() {
       onSelect: () => afterSaves("translate-all", () => translateAllM.mutate()),
       unavailable: unavailableWhen(translating, [translateAllM.isPending, "Already translating"], [queued.has("translate-all"), "Waiting for edits to save"]),
       pending: translateAllM.isPending,
-      // Only when a block's source text has changed since it was translated. Editing a translation by hand doesn't
-      // call for translating again — it only needs burning, which is that action's business
-      attention: stageStatus("translate") === "stale" && blocks.some((block) => block.needs_translate),
+      // Only when a block's source text has changed since it was translated — which is what the flag means, set
+      // when a reading or an edit changes the Japanese and cleared when it is translated. The translate stage's own
+      // status would add nothing and hides this on a page that has never been translated at all.
+      attention: blocks.some((block) => block.needs_translate),
     },
     {
       key: "render",
