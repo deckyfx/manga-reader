@@ -44,7 +44,7 @@ import { usePageJobEvents } from "../hooks/usePageJobEvents";
 import { PageCanvas, type PageCanvasHandle } from "../studio/canvas/PageCanvas";
 import { buildLettering, relayoutBlock, useTypesetter } from "../studio/text/typesetter";
 import { readToolset, saveToolset, toolsetScope } from "../studio/toolset";
-import { useEditorStore } from "../stores/editor";
+import { useEditorPage, useEditorStore } from "../stores/editor";
 import { ProcessingView, StageCompare, FinalizedView } from "../studio/editor/views";
 import { BlockEditor, blockCheck, SfxBlockRow } from "../studio/editor/BlockRows";
 import { LetteringPanel } from "../studio/editor/StyleEditor";
@@ -102,12 +102,15 @@ export function StudioPageEditor() {
     }, release);
   }, []);
 
-  // What the editor is showing: shared with the canvas, the block list and the lettering panel
-  const { view, canvasImage, selectedBlock, panelCollapsed, imagesNonce } = useEditorStore();
+  // What the editor is showing: shared with the canvas, the block list and the lettering panel. Page-specific
+  // state comes through useEditorPage, which holds the defaults until the store is this page's; the panel is a
+  // habit of the person's, not a property of the page
+  const { view, canvasImage, selectedBlock, imagesNonce } = useEditorPage(id);
+  const panelCollapsed = useEditorStore((state) => state.panelCollapsed);
   const { setView, setCanvasImage, selectBlock: setSelectedBlock, setPanelCollapsed, imagesChanged } = useEditorStore.getState();
   // A page opens fresh: nothing selected, no image rewritten yet. In a layout effect, not during render: this
   // editor is keyed by page, so a render-phase reset would notify the outgoing editor while this one renders.
-  useLayoutEffect(() => { useEditorStore.getState().openPage(); }, [id]);
+  useLayoutEffect(() => { useEditorStore.getState().openPage(id); }, [id]);
   /**
    * Whether this page is still the one open. A mutation's onSuccess runs whether or not the component is still
    * mounted, and the editor's state is shared — so a request finishing after the user has moved on would otherwise
