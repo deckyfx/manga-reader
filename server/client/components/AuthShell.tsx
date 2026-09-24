@@ -28,7 +28,7 @@ export function AuthShell({ title, subtitle, children, footer }: AuthShellProps)
           <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-gray-800 bg-gray-900 text-indigo-400">
             <ScanText size={22} />
           </span>
-          <Link to="/read" className="text-sm font-medium text-gray-400 hover:text-gray-200">Web OCR</Link>
+          <Link to="/read" className="text-sm font-medium text-gray-400 hover:text-gray-200">Manga Reader</Link>
         </div>
 
         <div className="rounded-2xl border border-gray-800 bg-gray-900/80 p-6 shadow-xl shadow-black/40 backdrop-blur">

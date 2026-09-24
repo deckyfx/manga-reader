@@ -297,7 +297,7 @@ async function handleExplain(text: string, tabId: number): Promise<void> {
 
 /**
  * Broadcast an image-updated notification to all tabs that have the content
- * script loaded. Called when the Studio page emits a web-ocr:image-updated
+ * script loaded. Called when the Studio page emits a manga-reader:image-updated
  * postMessage after burning text in Stage 3.
  */
 async function handleImageUpdated(relay: ImageUpdatedRelayMsg): Promise<void> {

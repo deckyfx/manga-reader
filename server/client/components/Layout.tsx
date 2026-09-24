@@ -62,7 +62,7 @@ export function Layout() {
         }`}
       >
         <div className={`flex items-center mb-2 ${expanded ? "justify-between pl-2" : "justify-center"}`}>
-          {expanded && <NavLink to="/home" className="text-sm font-semibold text-gray-300 hover:text-gray-50">Web OCR</NavLink>}
+          {expanded && <NavLink to="/home" className="text-sm font-semibold text-gray-300 hover:text-gray-50">Manga Reader</NavLink>}
           <button
             onClick={toggle}
             title={expanded ? "Collapse sidebar" : "Expand sidebar"}

@@ -84,7 +84,7 @@ async function request(url: URL, resolve: Resolver, signal: AbortSignal): Promis
       agent: false,
       lookup: pinnedLookup(resolve),
       signal,
-      headers: { accept: "image/*", referer: `${url.origin}/`, "user-agent": "web-ocr" },
+      headers: { accept: "image/*", referer: `${url.origin}/`, "user-agent": "manga-reader" },
     }, resolvePromise);
     req.on("error", reject);
   });

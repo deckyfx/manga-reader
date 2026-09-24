@@ -1,4 +1,4 @@
-# Selfhost OCR
+# Manga Reader
 
 ![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/deckyfx/manga-reader?utm_source=oss&utm_medium=github&utm_campaign=deckyfx%2Fmanga-reader&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 
@@ -115,7 +115,7 @@ skips the questions and takes the defaults, so it can be started by a service ma
 `--doctor` reports what this machine can and cannot run (libraries, models, fonts, folders) and exits non-zero if
 something would stop the server.
 
-`bun run build --archive` also writes `dist/web-ocr-<target>.tar.gz` — the binary and its libraries, ready to hand
+`bun run build --archive` also writes `dist/manga-reader-<target>.tar.gz` — the binary and its libraries, ready to hand
 to CI or to a machine. `--target=` picks one of `ubuntu64` (the default), `linux-arm64`, `macos-arm64`,
 `macos-x64` or `windows64`; the JavaScript cross-compiles, but the native libraries come from the machine doing the
 building, so a build for another platform lands in its own folder and says what is missing.

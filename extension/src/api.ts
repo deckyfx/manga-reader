@@ -1,5 +1,5 @@
 /**
- * Typed client for the web-ocr Bun server via Eden Treaty. `Api` comes from the declarations the server
+ * Typed client for the manga-reader Bun server via Eden Treaty. `Api` comes from the declarations the server
  * emits (`bun run --cwd ../server types:api`), so request and response shapes are checked at build time.
  */
 import { treaty } from "@elysiajs/eden";

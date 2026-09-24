@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const dataDir = mkdtempSync(join(tmpdir(), "web-ocr-test-"));
+const dataDir = mkdtempSync(join(tmpdir(), "manga-reader-test-"));
 Bun.env.DATA_DIR = dataDir;
 Bun.env.DATABASE_URL = join(dataDir, "ocr.db");
 Bun.env.NODE_ENV = "test";

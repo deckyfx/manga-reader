@@ -82,7 +82,7 @@ function collectGlossaries(node: ContentNode, out: string[]): void {
 async function fetchJisho(word: string): Promise<Definition | null> {
   try {
     const res = await fetch(`https://jisho.org/api/v1/search/words?keyword=${encodeURIComponent(word)}`, {
-      headers: { "User-Agent": "web-ocr-bun" },
+      headers: { "User-Agent": "manga-reader" },
       signal: AbortSignal.timeout(8_000),
     });
     if (!res.ok) { await res.body?.cancel(); return null; }

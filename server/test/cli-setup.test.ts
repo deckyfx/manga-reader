@@ -40,7 +40,7 @@ describe("the file the answers write", () => {
     expect(env).toContain("SUGOI_URL=http://127.0.0.1:14366");
     // A file someone opens months later should explain what the lines are for
     expect(env).toContain("# Where to listen");
-    expect(env.startsWith("# web-ocr settings")).toBe(true);
+    expect(env.startsWith("# manga-reader settings")).toBe(true);
   });
 
   test("leaves out a secret nobody gave", () => {
@@ -80,7 +80,7 @@ describe("using the answers", () => {
   });
 
   test("the file it reads is the one beside where you started it", () => {
-    expect(envPath("/srv/web-ocr")).toBe("/srv/web-ocr/.env");
+    expect(envPath("/srv/manga-reader")).toBe("/srv/manga-reader/.env");
   });
 });
 

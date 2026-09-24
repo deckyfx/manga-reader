@@ -23,7 +23,7 @@ export class MigrationManager {
   /** Temp dir where embedded SQL is written before Drizzle's migrator runs.
    *  Rewritten on every startup so it always matches the running binary. */
   private static get migrationsDir(): string {
-    return join(tmpdir(), "web-ocr-bun-migrations");
+    return join(tmpdir(), "manga-reader-migrations");
   }
 
   /** Write embedded SQL files to the temp dir.

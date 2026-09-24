@@ -30,7 +30,7 @@ export function printUsage(): void {
   const gray = colour("gray");
 
   console.log(`
-${BOLD}web-ocr${RESET} — OCR, translation and a Studio for manga pages
+${BOLD}manga-reader${RESET} — OCR, translation and a Studio for manga pages
 
 ${BOLD}Usage:${RESET}
   ${cyan}app${RESET}                  Start the server (offers to set it up on a first run)
@@ -47,7 +47,7 @@ ${BOLD}Examples:${RESET}
   ./app
 
   ${gray}# Somewhere unattended: no questions, defaults and the environment decide${RESET}
-  PORT=8080 DATA_DIR=/var/lib/web-ocr ./app
+  PORT=8080 DATA_DIR=/var/lib/manga-reader ./app
 
   ${gray}# Before asking why it won't work${RESET}
   ./app --doctor

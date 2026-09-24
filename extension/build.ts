@@ -25,7 +25,7 @@ manifest.version = newVersion;
 await Bun.write(pkgFile,      JSON.stringify(pkg,      null, 2) + "\n");
 await Bun.write(manifestFile, JSON.stringify(manifest, null, 2) + "\n");
 
-console.log(`📦 Building Selfhost OCR extension v${newVersion}${DEV ? " (dev)" : ""}\n`);
+console.log(`📦 Building Manga Reader extension v${newVersion}${DEV ? " (dev)" : ""}\n`);
 
 console.log("  Cleaning dist...");
 await $`rm -rf ./dist && mkdir -p ./dist`;
@@ -120,11 +120,11 @@ console.log("   Load it in Chrome: chrome://extensions → Load unpacked → sel
 
 if (!DEV) {
   // ── Archive (zip — required by Chrome Web Store and manual sideloading) ─────
-  process.stdout.write("  Archiving dist → selfhost-ocr.zip...");
+  process.stdout.write("  Archiving dist → manga-reader-chrome.zip...");
 
-  await Bun.$`rm -f selfhost-ocr.zip && cd dist && zip -rq ../selfhost-ocr.zip .`;
+  await Bun.$`rm -f manga-reader-chrome.zip && cd dist && zip -rq ../manga-reader-chrome.zip .`;
 
-  const size = Bun.file("selfhost-ocr.zip").size;
+  const size = Bun.file("manga-reader-chrome.zip").size;
   console.log(` ✅  (${(size / 1024).toFixed(1)} KB)`);
-  console.log("   selfhost-ocr.zip ready for Chrome Web Store or manual install.");
+  console.log("   manga-reader-chrome.zip ready for Chrome Web Store or manual install.");
 }

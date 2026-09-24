@@ -25,7 +25,7 @@ export const envPath = (dir = process.cwd()): string => join(dir, ".env");
  */
 export function renderEnv(settings: Settings): string {
   const lines = [
-    "# web-ocr settings, written by the setup questions. Anything here can be edited by hand;",
+    "# manga-reader settings, written by the setup questions. Anything here can be edited by hand;",
     "# what is absent falls back to a default, and the environment wins over both.",
     "",
     "# Where to listen. 127.0.0.1 answers only this machine; 0.0.0.0 answers the network,",
@@ -75,7 +75,7 @@ function keep<T>(value: T | symbol): T {
  * ask anyone to start the server twice.
  */
 export async function runSetup(dir = process.cwd(), thenStarting = true): Promise<Settings> {
-  p.intro("web-ocr — setting up");
+  p.intro("manga-reader — setting up");
   const file = envPath(dir);
   if (existsSync(file)) {
     const overwrite = keep(await p.confirm({ message: `${file} already exists. Write over it?`, initialValue: false }));

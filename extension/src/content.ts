@@ -79,7 +79,7 @@ function init(): void {
 
   // Studio page → extension bridge: relay image-updated events from the same origin
   window.addEventListener("message", (e: MessageEvent<{ type?: string; jobId?: string; resultUrl?: string }>) => {
-    if (e.data?.type === "web-ocr:image-updated" && e.origin === window.location.origin) {
+    if (e.data?.type === "manga-reader:image-updated" && e.origin === window.location.origin) {
       const relay: ImageUpdatedRelayMsg = {
         type: "image-updated-relay",
         jobId: e.data.jobId ?? "",
@@ -352,7 +352,7 @@ function showRevision(jobId: string, resultUrl: string, attempt = 0): void {
   replacePageImages(jobId, resultUrl).catch((err: unknown) => {
     if (attempt >= REVISION_RETRIES) {
       // The old revision stays on screen rather than a broken image
-      console.warn("[web-ocr] republish not shown:", err);
+      console.warn("[manga-reader] republish not shown:", err);
       return;
     }
     setTimeout(() => showRevision(jobId, resultUrl, attempt + 1), 2000 * 2 ** attempt);
@@ -401,19 +401,19 @@ async function replacePageImages(jobId: string, resultUrl: string): Promise<void
   try {
     target = new URL(resultUrl, `${serverUrl}/`);
   } catch {
-    console.warn("[web-ocr] ignored a revision with an unreadable address");
+    console.warn("[manga-reader] ignored a revision with an unreadable address");
     return;
   }
   if (!serverUrl || target.origin !== new URL(serverUrl).origin) {
     // Not an error to retry: it will never become the configured server
-    console.warn(`[web-ocr] ignored a revision from ${target.origin}: it isn't the configured server`);
+    console.warn(`[manga-reader] ignored a revision from ${target.origin}: it isn't the configured server`);
     return;
   }
   // …and only this page's result image: the key must not be spendable on any other route of that server
   const params = [...target.searchParams.keys()];
   const revOnly = params.length === 0 || (params.length === 1 && /^[1-9]\d{0,9}$/.test(target.searchParams.get("rev") ?? ""));
   if (target.pathname !== `/api/translate-page/${encodeURIComponent(jobId)}/result` || !revOnly || target.hash) {
-    console.warn("[web-ocr] ignored a revision that isn't this page's result image");
+    console.warn("[manga-reader] ignored a revision that isn't this page's result image");
     return;
   }
 

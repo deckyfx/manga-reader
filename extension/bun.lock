@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "selfhost-ocr-extension",
+      "name": "manga-reader-chrome",
       "dependencies": {
         "@elysiajs/eden": "1.4.9",
         "tesseract.js": "^7.0.0",

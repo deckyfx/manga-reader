@@ -232,7 +232,7 @@ const listen = env.SOCKET_PATH
   : { hostname: env.HOST, port: env.PORT };
 
 app.listen(listen, ({ hostname, port }) => {
-  logger.info(`web-ocr-bun listening on http://${hostname}:${port}`);
+  logger.info(`manga-reader listening on http://${hostname}:${port}`);
 });
 
 // Graceful shutdown — one Ctrl+C is enough
