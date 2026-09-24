@@ -9,7 +9,7 @@ import tailwind from "bun-plugin-tailwind";
  * The two native modules are bundled rather than left external, because a compiled binary resolves nothing from
  * disk: its imports come from a virtual filesystem with no node_modules in it. Bundling embeds their `.node`
  * addons — but an addon still dlopens its own shared library by name, and those cannot be embedded, so they are
- * copied next to the binary and the loader is pointed at them (see dist/start.sh).
+ * copied next to the binary and loaded from there at startup (see src/lib/native-libs.ts).
  */
 const OUT_DIR = "./dist";
 const OUT = `${OUT_DIR}/app`;
@@ -21,7 +21,8 @@ const NATIVE_LIB_DIRS = [
 ];
 
 const result = await Bun.build({
-  entrypoints: ["./src/index.ts"],
+  // boot.ts, not index.ts: it loads the shared libraries before the server's imports can ask for them
+  entrypoints: ["./src/boot.ts"],
   compile: { outfile: OUT },
   plugins: [tailwind],
   target: "bun",
@@ -61,15 +62,4 @@ if (copied === 0) {
   process.exit(1);
 }
 
-// A binary that finds its libraries: dlopen searches neither the executable's directory nor the working one
-await Bun.write(
-  `${OUT_DIR}/start.sh`,
-  `#!/usr/bin/env sh\n` +
-    `# The addons inside the binary load these by name, and dlopen looks in neither the binary's directory nor\n` +
-    `# the working one. Run the server through this, or set LD_LIBRARY_PATH yourself.\n` +
-    `here=$(cd "$(dirname "$0")" && pwd)\n` +
-    `LD_LIBRARY_PATH="$here/lib\${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" exec "$here/app" "$@"\n`,
-);
-await Bun.$`chmod +x ${OUT_DIR}/start.sh`.quiet();
-
-console.log(`Build complete → ${OUT} (+ ${copied} shared libraries in ${libDir}, run it with ${OUT_DIR}/start.sh)`);
+console.log(`Build complete → ${OUT} (+ ${copied} shared libraries in ${libDir}, loaded by the binary itself)`);

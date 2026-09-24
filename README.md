@@ -104,10 +104,10 @@ For a plain-`http` address that isn't on this machine (a LAN server, say), the e
 
 Without a key the server refuses OCR, translation and page jobs. The desktop app takes the same key in its settings.
 
-To build a single executable: `bun run build`. It writes `server/dist/app`, copies the shared libraries its native
-parts need into `server/dist/lib/`, and writes `server/dist/start.sh`, which points the loader at them — run that
-rather than the binary directly. It reads the `.env` of whatever directory you start it from, so `bun run start`
-from `server/` behaves like the dev server, models and database included.
+To build an executable: `bun run build`. It writes `server/dist/app` and copies the shared libraries its native
+parts need into `server/dist/lib/`, which the binary loads itself at startup — so `./dist/app` runs as it is, with
+`lib/` kept beside it. It reads the `.env` of whatever directory you start it from, so `bun run start` from
+`server/` behaves like the dev server, models and database included.
 
 The models are not inside the binary; they are downloaded on first run into `DATA_DIR`.
 
