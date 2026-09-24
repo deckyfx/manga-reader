@@ -147,4 +147,17 @@ The app sends captured regions to the running server at `http://localhost:3579` 
 
 ## Version
 
-The extension version lives in `extension/package.json` and `extension/static/manifest.json`. Every `bun run build` automatically bumps the patch number and keeps both files in sync.
+The extension version lives in `extension/package.json` and `extension/static/manifest.json`, and `bun run build`
+bumps the patch number in both. A build that shouldn't touch it says so: `--no-bump` leaves the version alone (what
+the checks use) and `--version=1.2.3` sets it outright (what a tagged release uses, so the tag and the manifest
+agree).
+
+## Support
+
+This is free, and staying that way. If it saved you an afternoon and you'd like to put something in the hat:
+
+- [Trakteer](https://trakteer.id/decky_fiyemonda) — QRIS and the usual Indonesian e-wallets, one-off
+- [Patreon](https://www.patreon.com/u25753383) — if you'd rather make it monthly
+
+Neither buys priority, a support contract, or a say in what gets built — it buys coffee, and the occasional model
+download. Bug reports and pages that translate badly are worth more than either.
