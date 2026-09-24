@@ -11,9 +11,15 @@
 import { dlopen, FFIType } from "bun:ffi";
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { childLogger } from "@/lib/logger";
 
-const log = childLogger("native");
+/**
+ * The logger, fetched only if there is something to say. Imported at the top it would build itself here — before
+ * the server has done anything — and decide where its files go from whatever DATA_DIR held at that moment.
+ */
+const warn = (fields: Record<string, unknown>, message: string): void => {
+  const { childLogger } = require("@/lib/logger") as typeof import("@/lib/logger");
+  childLogger("native").warn(fields, message);
+};
 
 /**
  * A library to load, and one symbol from it. The symbol is not for calling — `dlopen` here simply needs something
@@ -36,7 +42,7 @@ export function preloadNativeLibraries(): void {
   if (!compiled()) return;
   const dir = join(dirname(process.execPath), "lib");
   if (!existsSync(dir)) {
-    log.warn({ dir }, "No lib/ beside the executable — the native modules will have to find their own libraries");
+    warn({ dir }, "No lib/ beside the executable — the native modules will have to find their own libraries");
     return;
   }
   const files = readdirSync(dir);
@@ -47,7 +53,7 @@ export function preloadNativeLibraries(): void {
       dlopen(join(dir, file), symbols);
     } catch (err) {
       // Perhaps the system has its own copy, which the loader will find in the usual way
-      log.warn({ err, file }, "Could not preload a native library");
+      warn({ err, file }, "Could not preload a native library");
     }
   }
 }

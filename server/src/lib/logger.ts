@@ -14,6 +14,7 @@
  */
 
 import pino from "pino";
+import pretty from "pino-pretty";
 import { mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
@@ -94,6 +95,15 @@ export function rollingFileOptions(dir: string): Record<string, unknown> {
   };
 }
 
+/** How a line is printed for a person to read, whether by the transport or in process (see compiledDestinations). */
+const PRETTY = {
+  colorize: true,
+  translateTime: "SYS:HH:MM:ss.l",
+  ignore: "pid,hostname",
+  messageFormat: "{module} {msg}",
+  errorLikeObjectKeys: ["err", "error"],
+};
+
 const isDev = (Bun.env.NODE_ENV ?? "development") !== "production";
 /**
  * A test run logs warnings and worse only: an info line per request would bury the one failure worth reading. Still
@@ -128,11 +138,17 @@ scheduleLogSweep(LOG_DIR);
  */
 const COMPILED = Bun.main.startsWith("/$bunfs/");
 
-/** Where the compiled binary writes: this boot's dated file, plus stdout for whatever collects it. */
+/**
+ * Where the compiled binary writes: the same two places as a run from source, reached differently.
+ *
+ * pino-pretty is used here as a stream rather than a transport — the same printer, in this process instead of a
+ * worker — because a transport is resolved by name at runtime, which a binary cannot do. The terminal therefore
+ * looks the same as it does from source; only the file loses its rolling, and the boot's date names it instead.
+ */
 function compiledDestinations(): pino.MultiStreamRes {
   const file = `${LOG_DIR}/server.${localDay(new Date())}.1.log`;
   return pino.multistream([
-    { level: consoleLevel as pino.Level, stream: process.stdout },
+    { level: consoleLevel as pino.Level, stream: pretty(PRETTY) },
     { level: "info", stream: pino.destination({ dest: file, append: true, sync: false }) },
   ]);
 }
@@ -143,13 +159,7 @@ const transport = COMPILED ? null : pino.transport({
     {
       target: "pino-pretty",
       level: consoleLevel,
-      options: {
-        colorize: true,
-        translateTime: "SYS:HH:MM:ss.l",
-        ignore: "pid,hostname",
-        messageFormat: "{module} {msg}",
-        errorLikeObjectKeys: ["err", "error"],
-      },
+      options: PRETTY,
     },
     // ── Rotating JSON file ──────────────────────────────────────────────────
     {
