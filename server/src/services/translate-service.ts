@@ -255,9 +255,15 @@ async function runSugoi(texts: string[], signal?: AbortSignal): Promise<Translat
 }
 
 /**
- * The answer's body, with the two ways it can fail told apart: a connection that died halfway leaves the body
- * unfinished and is worth another try, while a complete answer that isn't JSON is the server saying something we
- * don't understand — asking again produces the same thing.
+ * The answer's body, and what its failing means.
+ *
+ * A complete answer that isn't JSON is the server saying something nobody here understands — a proxy's error page,
+ * usually — and asking again produces the same page, so it is a fault rather than weather.
+ *
+ * A body that dies halfway *would* be weather, but in Bun it never reaches here: a connection lost mid-body is
+ * reported by `fetch` itself, and the catch around the request classifies it (measured, not assumed — a response
+ * whose stream errors makes `fetch()` throw a TypeError, and `json()` is never reached). The branch stays as
+ * defence for a runtime that behaves differently, and is deliberately not claimed to be under test.
  */
 async function readBody(response: Response, signal?: AbortSignal): Promise<unknown> {
   try {
