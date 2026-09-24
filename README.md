@@ -109,6 +109,17 @@ parts need into `server/dist/lib/`, which the binary loads itself at startup —
 `lib/` kept beside it. It reads the `.env` of whatever directory you start it from, so `bun run start` from
 `server/` behaves like the dev server, models and database included.
 
+Started with no `.env` and someone there to answer, it asks a few questions — port, whether the network may reach
+it, which reader and translator, whether to translate whole pages — writes them, and carries on. Unattended it
+skips the questions and takes the defaults, so it can be started by a service manager. `--setup` asks again,
+`--doctor` reports what this machine can and cannot run (libraries, models, fonts, folders) and exits non-zero if
+something would stop the server.
+
+`bun run build --archive` also writes `dist/web-ocr-<target>.tar.gz` — the binary and its libraries, ready to hand
+to CI or to a machine. `--target=` picks one of `ubuntu64` (the default), `linux-arm64`, `macos-arm64`,
+`macos-x64` or `windows64`; the JavaScript cross-compiles, but the native libraries come from the machine doing the
+building, so a build for another platform lands in its own folder and says what is missing.
+
 The models are not inside the binary; they are downloaded on first run into `DATA_DIR`.
 
 ## Server Features

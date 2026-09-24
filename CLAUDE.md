@@ -25,7 +25,11 @@ bun install
 bun run dev              # bun --hot src/index.ts, listens on :3579 (the user runs the server; don't start it yourself)
 bun run typecheck        # tsc --noEmit (covers src/, client/, scripts/)
 bun run build            # embed migrations → typecheck → ./dist/app + dist/lib/*.so (built from src/boot.ts)
+bun run build --archive  # …and dist/web-ocr-<target>.tar.gz, for handing to CI or to a machine
+bun run build --target=macos-arm64   # ubuntu64 (default), linux-arm64, macos-arm64, macos-x64, windows64
 bun run start            # runs the built binary; it loads dist/lib itself, so no LD_LIBRARY_PATH is needed
+./dist/app --doctor      # what this machine can and cannot run: libraries, models, fonts, folders
+./dist/app --setup       # ask the settings questions again and write .env
 bun run db:generate      # after changing src/db/schema.ts: drizzle-kit generate + re-embed migrations
 bun run page <image>     # run the page pipeline from the CLI (scripts/page.ts)
 bun run types:api        # emit API types for the extension's Eden client (server/types/)
@@ -50,6 +54,12 @@ dotnet run
 ```
 
 ## Server architecture
+
+**Entry** (`src/boot.ts`): the one entry for source runs and the executable alike. Before the server is imported it
+loads the shared libraries the embedded addons need, and answers `--help`, `--version`, `--doctor` and `--setup` —
+importing the server *does* things (the database module creates its file, the logger its folder), so a question
+about the machine must be answered first. A first run with no `.env` and somebody watching is offered the setup
+questions, and this run uses the answers.
 
 **Boot** (`src/index.ts`): run embedded Drizzle migrations, fail page jobs interrupted by the last shutdown and sweep leftover deleted-page folders, download and load models (`bootState` tracks readiness; `/health` reports it), then listen. `env.ts` is the typed config (port, `DATABASE_URL`, model repos/dirs/enabled flags, `DEEPL_API_KEY`, …).
 
