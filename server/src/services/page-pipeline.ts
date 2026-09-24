@@ -275,7 +275,8 @@ export class PagePipeline {
       await Bun.write(this.path(`crops/${b.id}.png`), crop);
       const read = await readText(crop);
       // A new reading needs translating and lettering again; the same reading changes nothing
-      const changed = read !== b.source_text;
+      const previous = b.source_text;
+      const changed = read !== previous;
       if (changed) {
         b.needs_translate = true;
         b.needs_render = true;
@@ -288,6 +289,11 @@ export class PagePipeline {
         if (readsAsNothing(read)) {
           if (b.include) log.info({ block: b.id, read }, "Block reads as nothing: leaving it out of cleaning");
           b.include = false;
+        } else if (!b.include && readsAsNothing(previous) && blockExclusion(b.kind, b, job.width, job.height) === null) {
+          // It says something now, and what kept it out was the old reading rather than its shape or somebody's
+          // decision about a block that did say something. A better crop or another engine earns it its place back.
+          log.info({ block: b.id, read }, "Block reads as text after all: putting it back");
+          b.include = true;
         }
       }
       b.source_text = read;

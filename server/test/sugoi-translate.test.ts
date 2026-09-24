@@ -236,3 +236,25 @@ describe("a translator having a bad moment", () => {
     }
   });
 });
+
+describe("an answer that never finished", () => {
+  test("a body cut off mid-flight is tried again; one that isn't JSON is not", async () => {
+    let calls = 0;
+    const stub = Bun.serve({
+      port: 0,
+      fetch: () => {
+        calls++;
+        // A complete answer that is not JSON: the server saying something we don't understand
+        return new Response("<html>gateway</html>", { status: 200, headers: { "content-type": "text/html" } });
+      },
+    });
+    try {
+      settings({ sugoi: stub.url.href });
+      registerTranslateHandler();
+      await expect(inferenceQueue.enqueue("translate", { text: "テスト" })).rejects.toThrow(/isn't JSON/);
+      expect(calls).toBe(1);
+    } finally {
+      stub.stop(true);
+    }
+  });
+});

@@ -241,7 +241,7 @@ async function runSugoi(texts: string[], signal?: AbortSignal): Promise<Translat
         throw new Transient(`Sugoi server answered ${status}`, after);
       }
       if (!response.ok) throw new Error(`Sugoi server answered ${response.status}`);
-      const answer: unknown = await response.json();
+      const answer: unknown = await readBody(response, signal);
       // A list back for a list, but a server asked for one sentence may answer with the string itself
       const texts = typeof answer === "string" ? [answer] : Array.isArray(answer) && answer.every((t) => typeof t === "string") ? answer as string[] : null;
       // Not transient: the same request would be answered the same way, and the fault is worth seeing
@@ -252,6 +252,21 @@ async function runSugoi(texts: string[], signal?: AbortSignal): Promise<Translat
     translations.push(...got);
   }
   return { translations, engine: "sugoi", processingTimeMs: Date.now() - start };
+}
+
+/**
+ * The answer's body, with the two ways it can fail told apart: a connection that died halfway leaves the body
+ * unfinished and is worth another try, while a complete answer that isn't JSON is the server saying something we
+ * don't understand — asking again produces the same thing.
+ */
+async function readBody(response: Response, signal?: AbortSignal): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    if (err instanceof SyntaxError) throw new Error(`answered with something that isn't JSON: ${err.message}`);
+    throw new Transient(`the answer didn't arrive in full: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /** Splits into pieces of at most `size`; one empty piece is never returned. */
@@ -298,7 +313,7 @@ async function runDeepL(texts: string[], targetLang: string, signal?: AbortSigna
         // A bad key, a quota spent (456), a text too long: all answered the same way however often it is asked
         throw new Error(`DeepL HTTP ${status}`);
       }
-      const json = await res.json() as { translations?: { text: string }[] };
+      const json = await readBody(res, signal) as { translations?: { text: string }[] };
       const answered = json.translations;
       // Position is the only thing tying a translation to the text it came from, so a short answer is an error
       if (!answered || answered.length !== batch.length) throw new Error(`DeepL answered with ${answered?.length ?? 0} translations for ${batch.length} texts`);

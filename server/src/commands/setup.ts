@@ -7,6 +7,7 @@
  */
 import * as p from "@clack/prompts";
 import { existsSync } from "node:fs";
+import { chmod } from "node:fs/promises";
 import { join } from "node:path";
 
 /** What the questions produce: settings for the file, and for the process about to use them. */
@@ -155,6 +156,10 @@ export async function runSetup(dir = process.cwd(), thenStarting = true): Promis
   settings.BUBBLE_MODEL_ENABLED = wanted;
 
   await Bun.write(file, renderEnv(settings));
+  // It may hold a DeepL key, so it is the owner's alone — set after writing, and on a file that already existed
+  await chmod(file, 0o600).catch(() => {
+    p.log.warn(`Could not restrict ${file} to your account — check its permissions if it holds a key.`);
+  });
   p.note(
     [
       `Written to ${file}`,

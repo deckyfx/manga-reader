@@ -100,3 +100,18 @@ describe("the doctor", () => {
     expect(said.join("\n")).toContain("--doctor");
   });
 });
+
+describe("the settings file's permissions", () => {
+  test("a file that may hold a key is the owner's alone", async () => {
+    const { mkdtempSync, statSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "env-perm-"));
+    const file = join(dir, ".env");
+    // As runSetup writes it: the content, then the mode — which also has to apply to a file that already existed
+    writeFileSync(file, "PORT=3579\n", { mode: 0o644 });
+    const { chmod } = await import("node:fs/promises");
+    await chmod(file, 0o600);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+  });
+});

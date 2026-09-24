@@ -527,7 +527,8 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
             return { wholeStage: covered, changed: texts("source_text") !== before };
           }
           if (stage === "translate") {
-            const covered = covers(job.blocks.filter((b) => b.kind === "text" && b.source_text?.trim()));
+            // The same blocks translate() works on, or a run that skipped the excluded ones would look partial
+            const covered = covers(job.blocks.filter((b) => b.kind === "text" && b.include && b.source_text?.trim()));
             const before = texts("translated_text");
             await pipeline.translate(job, pageEngines, ids);
             return { wholeStage: covered, changed: texts("translated_text") !== before };
