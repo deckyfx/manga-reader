@@ -3,10 +3,15 @@ import path from "node:path";
 
 const DEV = process.argv.includes("--dev");
 const MINOR = process.argv.includes("--minor");
+/** Don't touch the version at all — for a check that must leave the working tree as it found it. */
+const NO_BUMP = process.argv.includes("--no-bump");
+/** Use exactly this version, rather than working one out — for a release, where the tag is the version. */
+const GIVEN = process.argv.find((a) => a.startsWith("--version="))?.split("=")[1];
 
-// ── Version bump ───────────────────────────────────────────────────────────────
-// Read current version from package.json, bump patch (or minor with --minor, resetting patch),
-// write back to both package.json and static/manifest.json so they stay in sync.
+// ── Version ────────────────────────────────────────────────────────────────────
+// Ordinarily this bumps the patch (or the minor with --minor) and writes it to package.json and
+// static/manifest.json so the two stay in sync. A build that is checking something, or building a version somebody
+// else decided, says so: --no-bump leaves both files alone, and --version=X.Y.Z writes that and nothing else.
 
 const pkgFile      = Bun.file("./package.json");
 const manifestFile = Bun.file("./static/manifest.json");
@@ -15,15 +20,22 @@ const pkg      = await pkgFile.json()      as { version: string; [k: string]: un
 const manifest = await manifestFile.json() as { version: string; [k: string]: unknown };
 
 const [major, minor, patch] = (pkg.version ?? "1.0.0").split(".").map(Number);
-const newVersion = MINOR
+const bumped = MINOR
   ? `${major}.${(minor ?? 0) + 1}.0`
   : `${major}.${minor}.${(patch ?? 0) + 1}`;
+const newVersion = GIVEN ?? (NO_BUMP ? (pkg.version ?? "1.0.0") : bumped);
 
-pkg.version      = newVersion;
-manifest.version = newVersion;
+if (GIVEN !== undefined && !/^\d+\.\d+\.\d+$/.test(GIVEN)) {
+  console.error(`--version must look like 1.2.3, not "${GIVEN}"`);
+  process.exit(1);
+}
 
-await Bun.write(pkgFile,      JSON.stringify(pkg,      null, 2) + "\n");
-await Bun.write(manifestFile, JSON.stringify(manifest, null, 2) + "\n");
+if (!NO_BUMP) {
+  pkg.version      = newVersion;
+  manifest.version = newVersion;
+  await Bun.write(pkgFile,      JSON.stringify(pkg,      null, 2) + "\n");
+  await Bun.write(manifestFile, JSON.stringify(manifest, null, 2) + "\n");
+}
 
 console.log(`📦 Building Manga Reader extension v${newVersion}${DEV ? " (dev)" : ""}\n`);
 

@@ -2,17 +2,18 @@ name: Desktop
 
 # Its own workflow, not a job beside the others, and deliberately so: the desktop companion is half-finished and
 # expected to fail from time to time. Kept apart, a broken desktop tells you it is broken without also telling you
-# the server is — which is the only way a red mark stays worth reading.
+# the server is — which is the only way a red mark stays worth reading. Tag `desktop-v1.2.3` to build one.
 on:
   push:
     branches: [main]
     paths: ["desktop/**", "MangaReader.slnx", ".github/workflows/desktop.yml"]
+    tags: ["desktop-v*"]
   pull_request:
     paths: ["desktop/**", "MangaReader.slnx", ".github/workflows/desktop.yml"]
   workflow_dispatch:
 
 jobs:
-  build:
+  check:
     name: Build the Avalonia companion
     runs-on: ubuntu-latest
     defaults:
@@ -20,13 +21,36 @@ jobs:
         working-directory: desktop
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-dotnet@v4
         with:
-          # The project targets net10.0; quality: preview lets this resolve before the release channel has it
+          # The project targets net10.0; quality: preview lets this resolve before the release channel carries it
           dotnet-version: "10.0.x"
           dotnet-quality: preview
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('desktop/MangaReaderDesktop.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - run: dotnet restore
+      - run: dotnet build --no-restore --configuration Release
 
+  release:
+    name: Publish a build
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          dotnet-quality: preview
       - name: Cache NuGet packages
         uses: actions/cache@v4
         with:
@@ -34,12 +58,15 @@ jobs:
           key: nuget-${{ runner.os }}-${{ hashFiles('desktop/MangaReaderDesktop.csproj') }}
           restore-keys: nuget-${{ runner.os }}-
 
-      - run: dotnet restore
+      # Framework-dependent and linux-x64: whoever runs it needs the .NET runtime, which is the honest arrangement
+      # until somebody decides this app is finished enough to ship self-contained
+      - name: Publish
+        run: dotnet publish --configuration Release --runtime linux-x64 --self-contained false -o publish
 
-      - run: dotnet build --no-restore --configuration Release
+      - name: Pack it
+        run: tar -czf "manga-reader-desktop-linux-x64.tar.gz" -C publish .
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: manga-reader-desktop
-          path: desktop/bin/Release/net10.0/
-          retention-days: 14
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" desktop/manga-reader-desktop-linux-x64.tar.gz --title "${{ github.ref_name }}" --generate-notes --repo "${{ github.repository }}" || gh release upload "${{ github.ref_name }}" desktop/manga-reader-desktop-linux-x64.tar.gz --clobber --repo "${{ github.repository }}"

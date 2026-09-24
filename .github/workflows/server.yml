@@ -1,50 +1,70 @@
 name: Server
 
-# The server is the part everything else talks to, so it is checked on every change to it — and on changes to this
-# workflow, because a pipeline that is never exercised is a pipeline nobody can trust.
+# Checks run on every change to the server. An artefact is built when somebody tags one — `server-v1.2.3` — so a
+# release is a deliberate act with a name, rather than whatever main happened to hold that afternoon.
 on:
   push:
     branches: [main]
     paths: ["server/**", ".github/workflows/server.yml"]
+    tags: ["server-v*"]
   pull_request:
     paths: ["server/**", ".github/workflows/server.yml"]
   workflow_dispatch:
 
 jobs:
   check:
-    name: Typecheck, test, and build something that runs
+    name: Typecheck and test
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: server
     steps:
       - uses: actions/checkout@v4
-
       - uses: oven-sh/setup-bun@v2
         with:
           # Pinned: the version this was developed and verified against. Raise it deliberately, not by drift.
           bun-version: 1.4.2
-
       - name: Cache installed packages
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('server/bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
-
       - run: bun install --frozen-lockfile
-
       - run: bun run typecheck
-
       # The tests point DATA_DIR at a scratch folder, so nothing here downloads a model
       - run: bun test
+
+  release:
+    name: Build, prove it runs, and publish
+    if: startsWith(github.ref, 'refs/tags/server-v')
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Cache installed packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('server/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
 
       - name: Build the executable and its archive
         run: bun run build --archive
 
-      # The check that matters. Four separate things — sharp's binding, pino's transports, the shared libraries, a
-      # metadata polyfill — were invisible to every test and only appeared when somebody ran the binary. The doctor
-      # exits non-zero when something would stop the server, so this catches that class before a release does.
+      # The check that matters. Four separate faults in the first compiled binary — sharp's ESM binding, pino's
+      # transports, the shared libraries, a metadata polyfill — were invisible to every test and appeared only when
+      # somebody ran the thing. The doctor exits non-zero when something would stop the server; nothing ships until
+      # an unpacked copy, somewhere else on the disk, answers for itself.
       - name: Unpack the archive elsewhere and ask it how it is
         run: |
           mkdir -p /tmp/unpacked
@@ -52,8 +72,7 @@ jobs:
           cd /tmp/unpacked
           ./app --doctor
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: manga-reader-ubuntu64
-          path: server/dist/manga-reader-ubuntu64.tar.gz
-          retention-days: 14
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/manga-reader-ubuntu64.tar.gz --title "${{ github.ref_name }}" --generate-notes --repo "${{ github.repository }}" || gh release upload "${{ github.ref_name }}" dist/manga-reader-ubuntu64.tar.gz --clobber --repo "${{ github.repository }}"

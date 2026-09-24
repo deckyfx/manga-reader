@@ -1,48 +1,69 @@
 name: Extension
 
-# Also on changes to the server's routes: the extension's types are generated from them, so a route that changes
-# shape breaks the extension's build and nowhere else.
+# Also watches the server's routes: the extension's types are generated from them, so a route that changes shape
+# breaks the extension's build and nothing else. Tag `extension-v1.2.3` to build one for the store.
 on:
   push:
     branches: [main]
     paths: ["extension/**", "server/src/api.ts", "server/src/plugins/**", ".github/workflows/extension.yml"]
+    tags: ["extension-v*"]
   pull_request:
     paths: ["extension/**", "server/src/api.ts", "server/src/plugins/**", ".github/workflows/extension.yml"]
   workflow_dispatch:
 
 jobs:
-  build:
+  check:
     name: Typecheck and build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
-
       - name: Cache installed packages
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('server/bun.lock', 'extension/bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
-
       # The server's packages too: the extension's typecheck regenerates its API types from the server's sources
       - run: bun install --frozen-lockfile
         working-directory: server
+      - run: bun install --frozen-lockfile
+        working-directory: extension
+      - run: bun run typecheck
+        working-directory: extension
+      # --no-bump: a check has no business changing the version in the files it is checking
+      - run: bun run build.ts --dev --no-bump
+        working-directory: extension
 
+  release:
+    name: Build the store package and publish
+    if: startsWith(github.ref, 'refs/tags/extension-v')
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+        working-directory: server
       - run: bun install --frozen-lockfile
         working-directory: extension
 
-      - run: bun run typecheck
+      # The tag is the version: extension-v1.2.3 builds 1.2.3, rather than bumping whatever main last held. The
+      # manifest is written to match, so what the store receives says the same thing the tag does.
+      - name: Build at the tagged version
         working-directory: extension
+        run: |
+          version="${GITHUB_REF_NAME#extension-v}"
+          bun run typecheck
+          bun run build.ts --version="$version"
 
-      - run: bun run build:dev
-        working-directory: extension
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: manga-reader-chrome
-          path: extension/manga-reader-chrome.zip
-          retention-days: 14
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" extension/manga-reader-chrome.zip --title "${{ github.ref_name }}" --generate-notes --repo "${{ github.repository }}" || gh release upload "${{ github.ref_name }}" extension/manga-reader-chrome.zip --clobber --repo "${{ github.repository }}"
