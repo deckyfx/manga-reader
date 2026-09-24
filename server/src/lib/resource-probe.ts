@@ -70,6 +70,40 @@ export const gpuReadable = gpuDir !== null;
 
 const cores = navigator.hardwareConcurrency;
 
+/** One reading of the machine. Percentages are of a single core, memory is bytes. */
+export interface MachineSample {
+  cpu: number;
+  cores: number;
+  rss: number;
+  gpu: number | null;
+  vramUsed: number | null;
+  vramTotal: number | null;
+}
+
+/** The cursor a standing reading measures its processor share against: the previous such reading. */
+let lastStanding = { cpu: process.cpuUsage(), at: performance.now() };
+
+/**
+ * The machine as it is now, for a watcher rather than around a piece of work: processor share since the last such
+ * reading, memory held, and the GPU if it can be read. Kept apart from the probe's own sampling so the two can't
+ * eat each other's intervals — a probe measures a window it owns; this measures the gap between two glances.
+ */
+export function sampleMachine(): MachineSample {
+  const now = performance.now();
+  const cpu = process.cpuUsage();
+  const elapsed = now - lastStanding.at;
+  const used = (cpu.user - lastStanding.cpu.user + (cpu.system - lastStanding.cpu.system)) / 1000;
+  lastStanding = { cpu, at: now };
+  return {
+    cpu: elapsed > 0 ? (used / elapsed) * 100 : 0,
+    cores,
+    rss: process.memoryUsage.rss(),
+    gpu: gpuDir ? readNumber(`${gpuDir}/gpu_busy_percent`) : null,
+    vramUsed: gpuDir ? readNumber(`${gpuDir}/mem_info_vram_used`) : null,
+    vramTotal: gpuDir ? readNumber(`${gpuDir}/mem_info_vram_total`) : null,
+  };
+}
+
 /**
  * Starts watching, and hands back the way to stop. Call `stop()` when the work is done to get what it cost; the
  * sampling stops with it, and the timer never holds the process open.
