@@ -16,6 +16,7 @@ import { routeRoot, spaRoutes } from "@/plugins/route-spa";
 
 const bootLog = childLogger("boot");
 
+
 async function migrateDb(): Promise<void> {
   const { MigrationManager } = await import("@/db/migration-manager");
   await MigrationManager.init();

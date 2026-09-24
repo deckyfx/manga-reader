@@ -2,19 +2,10 @@
   "folders": [
     {
       "path": ".",
-      "name": "web-ocr"
-    },
-    {
-      "path": "manga-reader",
-      "name": "manga-reader (reference)"
+      "name": "manga-reader"
     }
   ],
   "settings": {
-    // Hide manga-reader from the root folder view (it lives in its own workspace folder above)
-    "files.exclude": {
-      "manga-reader": true
-    },
-
     // C# / .NET (desktop app)
     "dotnet.defaultSolution": "WebOcr.slnx",
     "omnisharp.enableEditorConfigSupport": true,

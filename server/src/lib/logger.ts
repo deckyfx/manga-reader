@@ -14,8 +14,9 @@
  */
 
 import pino from "pino";
+import pretty from "pino-pretty";
 import { mkdirSync, readdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 // Read directly rather than through env.ts, so the logger stays importable from anywhere without a cycle
 const LOG_DIR = `${Bun.env.DATA_DIR ?? "./data"}/logs`;
@@ -23,6 +24,9 @@ mkdirSync(LOG_DIR, { recursive: true });
 
 /** How many days of logs to keep. */
 const KEEP_DAYS = 14;
+
+/** The log file this process writes to, when it is the one choosing it (the compiled binary); null otherwise. */
+let activeFile: string | null = null;
 /** How often the sweep runs while the server is up. */
 const SWEEP_EVERY_MS = 24 * 60 * 60 * 1000;
 
@@ -43,7 +47,7 @@ const LOG_FILE = /^server\.(\d{4}-\d{2}-\d{2})\.\d+\.log$/;
  * Sweeping here instead means the limit holds however the server is run. Only this module's own dated files are
  * touched; anything else in the folder is somebody else's business.
  */
-export function sweepOldLogs(dir: string, keepDays = KEEP_DAYS, now = new Date()): string[] {
+export function sweepOldLogs(dir: string, keepDays = KEEP_DAYS, now = new Date(), inUse = activeFile): string[] {
   const cutoff = new Date(now);
   cutoff.setDate(cutoff.getDate() - keepDays);
   // Local time, because that is how pino-roll names the files. Read as UTC, a machine east of Greenwich would
@@ -55,6 +59,9 @@ export function sweepOldLogs(dir: string, keepDays = KEEP_DAYS, now = new Date()
       const dated = LOG_FILE.exec(name);
       // ISO dates compare as text, so this is simply "before the cutoff day"
       if (!dated || dated[1]! >= oldest) continue;
+      // Never the one being written to. A compiled binary picks its file at boot and keeps it, so a server left
+      // running for longer than the fortnight would otherwise sweep away its own log from under itself
+      if (inUse !== null && name === basename(inUse)) continue;
       try {
         unlinkSync(join(dir, name));
         removed.push(name);
@@ -94,6 +101,15 @@ export function rollingFileOptions(dir: string): Record<string, unknown> {
   };
 }
 
+/** How a line is printed for a person to read, whether by the transport or in process (see compiledDestinations). */
+const PRETTY = {
+  colorize: true,
+  translateTime: "SYS:HH:MM:ss.l",
+  ignore: "pid,hostname",
+  messageFormat: "{module} {msg}",
+  errorLikeObjectKeys: ["err", "error"],
+};
+
 const isDev = (Bun.env.NODE_ENV ?? "development") !== "production";
 /**
  * A test run logs warnings and worse only: an info line per request would bury the one failure worth reading. Still
@@ -118,19 +134,39 @@ export function scheduleLogSweep(dir: string, everyMs = SWEEP_EVERY_MS): () => v
 
 scheduleLogSweep(LOG_DIR);
 
-const transport = pino.transport({
+/**
+ * Whether this is the compiled executable rather than a run from source.
+ *
+ * It matters because pino's transports are resolved by name, in a worker, when the logger is built — and a
+ * compiled binary has no node_modules to resolve them from, so asking for one stops the server before it starts.
+ * The binary therefore writes straight to its destinations: the same JSON, without the pretty printing or the
+ * rolling, which is the usual shape for something run as a service anyway.
+ */
+const COMPILED = Bun.main.startsWith("/$bunfs/");
+
+/**
+ * Where the compiled binary writes: the same two places as a run from source, reached differently.
+ *
+ * pino-pretty is used here as a stream rather than a transport — the same printer, in this process instead of a
+ * worker — because a transport is resolved by name at runtime, which a binary cannot do. The terminal therefore
+ * looks the same as it does from source; only the file loses its rolling, and the boot's date names it instead.
+ */
+function compiledDestinations(): pino.MultiStreamRes {
+  const file = `${LOG_DIR}/server.${localDay(new Date())}.1.log`;
+  activeFile = file;
+  return pino.multistream([
+    { level: consoleLevel as pino.Level, stream: pretty(PRETTY) },
+    { level: "info", stream: pino.destination({ dest: file, append: true, sync: false }) },
+  ]);
+}
+
+const transport = COMPILED ? null : pino.transport({
   targets: [
     // ── Colourful terminal ──────────────────────────────────────────────────
     {
       target: "pino-pretty",
       level: consoleLevel,
-      options: {
-        colorize: true,
-        translateTime: "SYS:HH:MM:ss.l",
-        ignore: "pid,hostname",
-        messageFormat: "{module} {msg}",
-        errorLikeObjectKeys: ["err", "error"],
-      },
+      options: PRETTY,
     },
     // ── Rotating JSON file ──────────────────────────────────────────────────
     {
@@ -152,7 +188,7 @@ export const logger = pino(
       error: pino.stdSerializers.err,
     },
   },
-  transport,
+  transport ?? compiledDestinations(),
 );
 
 /** Returns a child logger tagged with a module name (shown in terminal). */

@@ -2,7 +2,7 @@
  * Full-page translation jobs, shared by the extension route (POST /api/translate-page) and the Studio
  * (POST /studio/api/pages): admission (limits, dedupe, cache) and the pipeline run with stage tracking.
  */
-import sharp from "sharp";
+import sharp from "@/lib/sharp";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";

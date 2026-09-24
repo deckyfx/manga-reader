@@ -9,7 +9,7 @@
  * Used by the regression runner (scripts/regress.ts) to tell a better clean from a worse one, and meant for the
  * self-check after clean that flags blocks with leftover ink.
  */
-import sharp from "sharp";
+import sharp from "@/lib/sharp";
 import type { Box } from "@/lib/mask";
 
 /**

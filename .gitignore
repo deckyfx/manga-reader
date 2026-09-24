@@ -36,7 +36,6 @@ TODO.txt
 # ── etc ────────────────────────────────────────────────────────────────────────
 mighty-wiggling-cascade.md
 server/data/
-manga-reader/
 extension/selfhost-ocr.zip
 
 # ── Claude Code worktrees (isolated checkouts, never committed) ───────────────

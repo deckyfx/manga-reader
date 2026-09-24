@@ -107,3 +107,18 @@ describe("the rotating log file", () => {
     expect(sweepOldLogs(join(dir, "gone"))).toEqual([]);
   });
 });
+
+describe("the file being written to", () => {
+  test("is never swept away, however long the server has been up", () => {
+    const dir = scratch();
+    // A binary picks its file at boot and keeps it. Left running past the fortnight, that name falls behind the
+    // cutoff — and the sweep would take the log out from under the process still writing to it.
+    const active = join(dir, "server.2026-09-01.1.log");
+    writeFileSync(active, "still being written\n");
+    writeFileSync(join(dir, "server.2026-09-02.1.log"), "an older run\n");
+
+    const removed = sweepOldLogs(dir, 14, new Date(2026, 8, 30, 12, 0, 0), active);
+    expect(removed).toEqual(["server.2026-09-02.1.log"]);
+    expect(readdirSync(dir)).toEqual(["server.2026-09-01.1.log"]);
+  });
+});

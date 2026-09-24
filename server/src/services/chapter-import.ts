@@ -3,7 +3,7 @@
  * translated page (`<page id>/original.png`), so the pipeline can run over it later without re-uploading anything.
  * Imported pages start idle with no stages; a chapter batch run (or "run again" in the Studio) translates them.
  */
-import sharp from "sharp";
+import sharp from "@/lib/sharp";
 import { unzip, type Unzipped } from "fflate";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";

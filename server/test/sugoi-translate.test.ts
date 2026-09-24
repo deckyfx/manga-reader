@@ -189,3 +189,84 @@ describe("translating a page's blocks together", () => {
     expect(translationBatchSize()).toBe(50);
   });
 });
+
+describe("a translator having a bad moment", () => {
+  test("a server still warming up is waited for, not given up on", async () => {
+    let calls = 0;
+    const stub = Bun.serve({
+      port: 0,
+      fetch: () => {
+        calls++;
+        // Two refusals, as a container loading its model answers, then the real thing
+        if (calls <= 2) return new Response("loading", { status: 503 });
+        return Response.json(["Let's go, Kate!"]);
+      },
+    });
+    try {
+      settings({ sugoi: stub.url.href });
+      registerTranslateHandler();
+      const result = await inferenceQueue.enqueue<{ text: string }, { translatedText: string }>(
+        "translate",
+        { text: "行くぞケイト" },
+      );
+      expect(result.translatedText).toBe("Let's go, Kate!");
+      expect(calls).toBe(3);
+    } finally {
+      stub.stop(true);
+    }
+  });
+
+  test("a server answering nonsense is not asked twice", async () => {
+    let calls = 0;
+    const stub = Bun.serve({
+      port: 0,
+      fetch: () => {
+        calls++;
+        return Response.json({ unexpected: true });
+      },
+    });
+    try {
+      settings({ sugoi: stub.url.href });
+      registerTranslateHandler();
+      await expect(inferenceQueue.enqueue("translate", { text: "テスト" })).rejects.toThrow(/shape/);
+      // The same request would be answered the same way: trying again would only bury the reason
+      expect(calls).toBe(1);
+    } finally {
+      stub.stop(true);
+    }
+  });
+});
+
+describe("an answer that never finished", () => {
+  test("a body cut off mid-flight is tried again; one that isn't JSON is not", async () => {
+    let calls = 0;
+    const stub = Bun.serve({
+      port: 0,
+      fetch: () => {
+        calls++;
+        if (calls === 1) {
+          // A connection that dies partway through the body: the answer never arrives in full
+          const cut = new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('["half a transl'));
+              controller.error(new Error("connection reset by peer"));
+            },
+          });
+          return new Response(cut, { headers: { "content-type": "application/json" } });
+        }
+        // A complete answer that is not JSON: the server saying something we don't understand
+        return new Response("<html>gateway</html>", { status: 200, headers: { "content-type": "text/html" } });
+      },
+    });
+    try {
+      settings({ sugoi: stub.url.href });
+      registerTranslateHandler();
+      await expect(inferenceQueue.enqueue("translate", { text: "テスト" })).rejects.toThrow(/isn't JSON/);
+      // Two calls: the lost connection was worth repeating, the page that came back instead was not — and it is
+      // the second that surfaced. Checked by breaking each classification in turn and watching this fail.
+      expect(calls).toBe(2);
+    } finally {
+      stub.stop(true);
+    }
+  });
+});

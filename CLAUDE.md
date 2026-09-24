@@ -24,7 +24,12 @@ cd server
 bun install
 bun run dev              # bun --hot src/index.ts, listens on :3579 (the user runs the server; don't start it yourself)
 bun run typecheck        # tsc --noEmit (covers src/, client/, scripts/)
-bun run build            # embed migrations → typecheck → single executable ./app
+bun run build            # embed migrations → typecheck → ./dist/app + dist/lib/*.so (built from src/boot.ts)
+bun run build --archive  # …and dist/web-ocr-<target>.tar.gz, for handing to CI or to a machine
+bun run build --target=macos-arm64   # ubuntu64 (default), linux-arm64, macos-arm64, macos-x64, windows64
+bun run start            # runs the built binary; it loads dist/lib itself, so no LD_LIBRARY_PATH is needed
+./dist/app --doctor      # what this machine can and cannot run: libraries, models, fonts, folders
+./dist/app --setup       # ask the settings questions again and write .env
 bun run db:generate      # after changing src/db/schema.ts: drizzle-kit generate + re-embed migrations
 bun run page <image>     # run the page pipeline from the CLI (scripts/page.ts)
 bun run types:api        # emit API types for the extension's Eden client (server/types/)
@@ -50,6 +55,12 @@ dotnet run
 
 ## Server architecture
 
+**Entry** (`src/boot.ts`): the one entry for source runs and the executable alike. Before the server is imported it
+loads the shared libraries the embedded addons need, and answers `--help`, `--version`, `--doctor` and `--setup` —
+importing the server *does* things (the database module creates its file, the logger its folder), so a question
+about the machine must be answered first. A first run with no `.env` and somebody watching is offered the setup
+questions, and this run uses the answers.
+
 **Boot** (`src/index.ts`): run embedded Drizzle migrations, fail page jobs interrupted by the last shutdown and sweep leftover deleted-page folders, download and load models (`bootState` tracks readiness; `/health` reports it), then listen. `env.ts` is the typed config (port, `DATABASE_URL`, model repos/dirs/enabled flags, `DEEPL_API_KEY`, …).
 
 **HTTP** is Elysia, one plugin per area:
@@ -60,7 +71,13 @@ dotnet run
 
 **Database**: SQLite through Drizzle (`src/db/schema.ts`). Migrations live in `src/db/migrations/` and are embedded into `src/db/migrations-embedded.ts` so the single executable carries them. Stores in `src/stores/` (e.g. `PageStore`: pages, per-stage state, blocks with style / area JSON) are the source of truth; page folders under `data/jobs/<id>/` hold images only.
 
-**Page pipeline** (`src/services/page-pipeline.ts`): detect → OCR → translate → clean text (→ clean SFX) → render (burn). Each stage has a fresh / stale / error state; edits mark later stages stale. Work is serialized through `src/queue/page-queue.ts` (`withPageLock` per page, `runExclusiveResult` for CPU/ONNX work).
+**Page pipeline** (`src/services/page-pipeline.ts`): detect → OCR → translate → clean text (→ clean SFX) → render (burn). Each stage has a fresh / stale / error state; edits mark later stages stale. Work is serialized through `src/queue/page-queue.ts` (`withPageLock` per page, `runExclusiveResult` for CPU/ONNX work — a label makes the queue log what the work cost).
+
+**What gets cleaned** (`src/services/block-filter.ts`): the detector marks anything letter-like, so blocks are filtered out of cleaning in two passes — geometry at detect (specks, slivers, page numbers in the margin) and, once read, anything that says nothing (`……`, `！？`). Excluded blocks are kept and drawn dashed, never dropped; the Studio can switch them back on. A re-read that changes inclusion marks the clean stages stale.
+
+**Translation** (`src/services/translate-service.ts`, `translation-engine.ts`): one resolver decides the engine (built-in ONNX, DeepL, or a self-hosted Sugoi at `SUGOI_URL`) for every route and the pipeline alike — clients say *whether* to translate, never *how*. A page's blocks go in one request (50 at a time for DeepL, 64 for Sugoi, 1 for the built-in model, which has no round trip to save); a wrong-length answer is an error, since position is all that ties a translation to its block. Transient failures (429, 5xx, a container still loading) are retried with backoff (`src/lib/retry.ts`); a malformed answer is not.
+
+**Resource measurement** (`src/lib/resource-probe.ts`, `src/services/resource-monitor.ts`): each stage is sampled while it runs and logged with what it used (processor, resident memory and what the stage added, GPU where sysfs can report it). `/api/resources/events` streams the same readings to the Studio's display, sampling only while somebody watches.
 
 **Lettering** is shared code: `src/shared/typeset.ts` (browser-safe, opentype.js + hyphen) lays out and draws text for both the server burn and the Studio's live preview, so they match. Text areas are stored unshifted on blocks; style offset / box are applied on top (see `.coderabbit.yaml`).
 
@@ -85,5 +102,11 @@ Key files: `background.ts` (service worker), `content.ts` (overlay + selection),
 - **Never commit `server/.env`**: it holds a real DeepL API key. Stage specific files, never `git add -A`.
 - **Drizzle migrations are committed and embedded**: change `src/db/schema.ts`, then `bun run db:generate` (it re-embeds). Never edit or delete existing migration files.
 - **`server/data/` is gitignored**: models, the SQLite database, page folders and logs are runtime-only.
+- **A compiled binary resolves nothing from disk**: everything comes from its virtual filesystem, so anything that
+  requires a package *by name at runtime* fails there — sharp's ESM build (hence `src/lib/sharp.ts` and its `.cjs`
+  shim) and pino's transports (hence the compiled branch in `src/lib/logger.ts`). Native `.node` addons are embedded
+  by bundling, but the shared libraries they dlopen are not, so `bun run build` copies those into `dist/lib/` and
+  `src/boot.ts` — the binary's entry — loads them before the server's imports run (`src/lib/native-libs.ts`).
 - **Don't run the server**: the user runs it. Test in-process with `app.handle()` and a scratch `DATABASE_URL`; never delete anything under `data/` that a test didn't create.
+- **A test that pins behaviour should be checked by breaking the behaviour**: remove the fix, watch the test fail, put it back. Twice in one session a test passed for the wrong reason and only this caught it.
 - **`desktop/bin/`, `desktop/obj/`, `*/publish/`** are gitignored build output.

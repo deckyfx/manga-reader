@@ -60,7 +60,7 @@ async function runOcr(input: unknown, signal?: AbortSignal): Promise<OcrOutput> 
   const start = Date.now();
   const tag = start.toString(36); // short unique tag per request
 
-  const sharp = (await import("sharp")).default;
+  const sharp = (await import("@/lib/sharp")).default;
   const SIZE = 224;
 
   if (env.OCR_DEBUG) {

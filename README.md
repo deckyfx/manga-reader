@@ -11,13 +11,13 @@ A browser extension (MV3) that lets you select any region on screen and extract 
 ## Features
 
 - Click the toolbar button, drag to select a region — text appears instantly
-- **Dual engine**: Tesseract.js (offline, in-browser) or the self-hosted server (faster, optional DeepL translation)
+- **Dual engine**: Tesseract.js (offline, in-browser) or the self-hosted server (faster, and it translates)
 - **Japanese vertical text** support via `jpn_vert` traineddata (reads columns right-to-left)
 - Per-word dictionary panel (Jisho or local Jitendex) with romaji and JLPT tags
 - Draggable, resizable result panel
-- DeepL translation (client-side or server-side)
+- **Translation the server decides**: the built-in model, DeepL, or a self-hosted Sugoi — chosen once in the server's settings, so every device gets the same answer
 - **Page translation**: detect text, OCR, translate, clean the lettering and typeset the translation, replacing the image in the open tab
-- **Studio** (`/studio`): edit detected regions, paint the text mask, re-clean areas, and move / resize / rotate / restyle the lettering with a live preview that matches the final image
+- **Studio** (`/studio`): edit detected regions, paint the text mask, re-clean areas, and move / resize / rotate / restyle the lettering with a live preview that matches the final image — with a display of what the machine is doing while it works on a page
 - **Library** (`/manage`): series → volume (optional) → chapter → page, with cover art, tags, ZIP / CBZ import, drag-to-reorder, whole-chapter translation and export
 - **Reader** (`/read`): browse by title, tag or status and read a chapter right to left or left to right, resuming where you left off
 - Editing a page never changes what readers see until it is published
@@ -31,6 +31,7 @@ server/        Self-hosted server: OCR, translation, page pipeline, Studio (Bun 
 extension/     Browser extension (TypeScript + Bun)
 desktop/       Desktop companion app (Avalonia / C#)
 docs/          Studio, library and reader plan
+tools/         sugoi/: a Sugoi translation server in a container, for the server to use
 WebOcr.slnx    .NET solution for the desktop app
 ```
 
@@ -77,6 +78,22 @@ The server binds to `127.0.0.1` by default. Set `HOST=0.0.0.0` to reach it from 
 
 `data/secret.key` appears on first start and encrypts the authenticator secrets. Back it up with the database: without it, enrolled authenticator apps stop working and have to be set up again.
 
+### Choosing a translator
+
+Three engines, picked in **Settings → Translation** by an admin and remembered across restarts:
+
+| | needs | notes |
+|---|---|---|
+| built-in | nothing | Opus-MT, downloaded on first run. Always available. |
+| DeepL | `DEEPL_API_KEY` in `server/.env` | Fastest to set up, best general prose. |
+| Sugoi | `SUGOI_URL` — see [`tools/sugoi/`](tools/sugoi/) | Self-hosted, tuned for Japanese fiction. **Research use only**, see its README. |
+
+`auto` takes the best one configured. A page's blocks are translated in **one request** rather than one each, which
+on a nine-bubble page cut translation from about four seconds to under one; a translator having a bad moment (a 429,
+or a container still loading) is waited out and tried again, while an answer that makes no sense is not.
+
+Whichever is chosen, the extension and the desktop app use it: they ask whether to translate, not how.
+
 ### Connecting the extension
 
 1. In the server's UI, open `/user` → **API keys** and create one. It is shown once.
@@ -87,16 +104,33 @@ For a plain-`http` address that isn't on this machine (a LAN server, say), the e
 
 Without a key the server refuses OCR, translation and page jobs. The desktop app takes the same key in its settings.
 
-To build a single executable: `bun run build` (outputs `server/app`).
+To build an executable: `bun run build`. It writes `server/dist/app` and copies the shared libraries its native
+parts need into `server/dist/lib/`, which the binary loads itself at startup — so `./dist/app` runs as it is, with
+`lib/` kept beside it. It reads the `.env` of whatever directory you start it from, so `bun run start` from
+`server/` behaves like the dev server, models and database included.
+
+Started with no `.env` and someone there to answer, it asks a few questions — port, whether the network may reach
+it, which reader and translator, whether to translate whole pages — writes them, and carries on. Unattended it
+skips the questions and takes the defaults, so it can be started by a service manager. `--setup` asks again,
+`--doctor` reports what this machine can and cannot run (libraries, models, fonts, folders) and exits non-zero if
+something would stop the server.
+
+`bun run build --archive` also writes `dist/web-ocr-<target>.tar.gz` — the binary and its libraries, ready to hand
+to CI or to a machine. `--target=` picks one of `ubuntu64` (the default), `linux-arm64`, `macos-arm64`,
+`macos-x64` or `windows64`; the JavaScript cross-compiles, but the native libraries come from the machine doing the
+building, so a build for another platform lands in its own folder and says what is missing.
+
+The models are not inside the binary; they are downloaded on first run into `DATA_DIR`.
 
 ## Server Features
 
-- ONNX OCR (Manga-OCR) and local Japanese→English translation (Opus-MT), with optional DeepL
+- ONNX OCR (Manga-OCR or Baberu) and Japanese→English translation: the built-in Opus-MT, DeepL, or a self-hosted Sugoi
 - Jitendex dictionary lookups with Kuromoji tokenization (`/analyze`)
 - Page pipeline: comic text detection, block OCR and translation, LaMa inpainting to clean lettering, bubble-aware typesetting
 - Studio for correcting and re-lettering pages, with per-stage state, partial re-runs, publish history and rollback
 - Library of series, volumes, chapters and pages: import, reorder, batch translate, export, and a reader that is served published pages only
 - Accounts with roles (admin, contributor, reader), authenticator apps and passkeys as second factors, and API keys for the extension and the desktop app
+- What each page costs the machine, in the log and live in the Studio: processor, memory and GPU per stage
 - SQLite (Drizzle) with migrations embedded in the build
 - `/health` reports readiness while models load
 

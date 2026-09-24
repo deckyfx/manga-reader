@@ -9,7 +9,9 @@
  *   clean      clean-text.png (bubbles, captions)  ·  clean-sfx.png (sound effects, optional)
  *   render     patches/<id>.png, render-overlay.png, result.png
  */
-import sharp, { type OverlayOptions, type Sharp } from "sharp";
+import sharp from "@/lib/sharp";
+// Types only, erased at build: the value has to come through the shim (see lib/sharp.ts)
+import type { OverlayOptions, Sharp } from "sharp";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { blockOwnerMask, labelComponents, maskFromImage, maskToPng, selectBlockMask, type BlockKind, type Box } from "@/lib/mask";
@@ -18,7 +20,8 @@ import { getBubbleDetector } from "@/services/bubble-service";
 import { getInpainter, inpaintModelPath, type CleanMethod } from "@/services/inpaint-service";
 import { leftoverInk } from "@/services/clean-check";
 import { getTypesetter, isDarkBackground, separateAreas, textAreaFor, type TextArea } from "@/services/typeset-service";
-import { sfxExclusion } from "@/services/sfx-filter";
+import { childLogger } from "@/lib/logger";
+import { blockExclusion, readsAsNothing } from "@/services/block-filter";
 import { rectArea, shiftArea, storedArea, typesetPage, type StoredArea, type TextStyle, type TypesetEntry } from "@/shared/typeset";
 
 export type PageStage = "detecting" | "ocr" | "translating" | "cleaning" | "typesetting";
@@ -74,6 +77,8 @@ export interface ProgressUpdate {
 export type ProgressReporter = (update: ProgressUpdate) => void;
 
 /** OCR and translation are injected so the server can route them through its inference queue. */
+const log = childLogger("pipeline");
+
 export interface PipelineEngines {
   ocr(image: Buffer): Promise<string>;
   /** Translates several texts at once, answering in the same order. */
@@ -213,11 +218,12 @@ export class PagePipeline {
       source,
       width: result.width,
       height: result.height,
-      // Page numbers and texture specks the detector took for sound effects start out of cleaning (see sfx-filter)
+      // Page numbers, texture specks and slivers of tone start out of cleaning (see block-filter): cleaning is the
+      // expensive stage and the one that paints over artwork, so it is the slowest way to be wrong
       blocks: result.blocks.map((b, i) => ({
         id: i + 1,
         ...b,
-        include: b.kind !== "sfx" || sfxExclusion(b, result.width, result.height) === null,
+        include: blockExclusion(b.kind, b, result.width, result.height) === null,
         source_text: null,
         translated_text: null,
       })),
@@ -269,9 +275,26 @@ export class PagePipeline {
       await Bun.write(this.path(`crops/${b.id}.png`), crop);
       const read = await readText(crop);
       // A new reading needs translating and lettering again; the same reading changes nothing
-      if (read !== b.source_text) {
+      const previous = b.source_text;
+      const changed = read !== previous;
+      if (changed) {
         b.needs_translate = true;
         b.needs_render = true;
+        // A new reading that says nothing at all — no text, or only punctuation, which reads the same in either
+        // language — takes the block out of cleaning: painting over artwork to remove nothing costs the artwork.
+        // It stays on the page, dashed, for anyone who thinks the reader was wrong.
+        //
+        // Only on a *new* reading, though. Someone who put such a block back means it, and reading it again to the
+        // same nothing is no reason to overrule them.
+        if (readsAsNothing(read)) {
+          if (b.include) log.info({ block: b.id, read }, "Block reads as nothing: leaving it out of cleaning");
+          b.include = false;
+        } else if (!b.include && readsAsNothing(previous) && blockExclusion(b.kind, b, job.width, job.height) === null) {
+          // It says something now, and what kept it out was the old reading rather than its shape or somebody's
+          // decision about a block that did say something. A better crop or another engine earns it its place back.
+          log.info({ block: b.id, read }, "Block reads as text after all: putting it back");
+          b.include = true;
+        }
       }
       b.source_text = read;
     }
@@ -289,7 +312,9 @@ export class PagePipeline {
    * as it was, progress included.
    */
   async translate(job: PageJob, engines: Pick<PipelineEngines, "translate" | "batchSize">, blockIds?: number[]): Promise<string | null> {
-    const targets = job.blocks.filter((b) => b.kind === "text" && b.source_text?.trim() && (!blockIds || blockIds.includes(b.id)));
+    // `include` is one decision, not three: a block left out of cleaning must not be translated or lettered
+    // either, or the page ends up with English printed over Japanese nobody removed
+    const targets = job.blocks.filter((b) => b.kind === "text" && b.include && b.source_text?.trim() && (!blockIds || blockIds.includes(b.id)));
     this.report({ stage: "translating", message: `Translating ${targets.length} text blocks…`, fraction: 0 });
     let engine: string | null = null;
     const size = Math.max(1, engines.batchSize());
@@ -530,7 +555,7 @@ export class PagePipeline {
   /** Typeset translations inside each bubble on the latest cleaned page → result.png. */
   async render(job: PageJob): Promise<RenderResult> {
     // Text blocks carry translations; sound-effect regions are re-lettered when given text in the Studio
-    const targets = job.blocks.filter((b) => (b.kind === "text" || b.kind === "sfx") && b.translated_text?.trim());
+    const targets = job.blocks.filter((b) => (b.kind === "text" || b.kind === "sfx") && b.include && b.translated_text?.trim());
     this.report({ stage: "typesetting", message: `Typesetting ${targets.length} translations…`, fraction: 0 });
 
     const { input, page, rgb, width, height, areas } = await this.findAreas(job);

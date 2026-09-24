@@ -517,11 +517,18 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
           if (stage === "ocr") {
             const covered = covers(job.blocks.filter((b) => b.kind === "text"));
             const before = texts("source_text");
+            // Reading a block can also decide it says nothing, which takes it out of cleaning — and a page
+            // already cleaned around it is then cleaned wrongly, whatever its stage row says
+            const included = (): string => JSON.stringify(job.blocks.map((b) => [b.id, b.include]));
+            const includedBefore = included();
             await pipeline.ocr(job, pageEngines.ocr, ids);
+            // Cleaning covered the wrong blocks, and the burned image was made from them: both are out of date
+            if (included() !== includedBefore) await PageStore.markStale(params.id, ["clean_text", "clean_sfx", "render"]);
             return { wholeStage: covered, changed: texts("source_text") !== before };
           }
           if (stage === "translate") {
-            const covered = covers(job.blocks.filter((b) => b.kind === "text" && b.source_text?.trim()));
+            // The same blocks translate() works on, or a run that skipped the excluded ones would look partial
+            const covered = covers(job.blocks.filter((b) => b.kind === "text" && b.include && b.source_text?.trim()));
             const before = texts("translated_text");
             await pipeline.translate(job, pageEngines, ids);
             return { wholeStage: covered, changed: texts("translated_text") !== before };
