@@ -38,7 +38,10 @@ describe("the rotating log file", () => {
     expect(files).toHaveLength(1);
     // server.2026-09-23.1.log — the date is the part that was missing
     expect(files[0]).toMatch(/^server\.\d{4}-\d{2}-\d{2}\.1\.log$/);
-    expect(files[0]).toContain(new Date().toISOString().slice(0, 10));
+    // The local day, which is how pino-roll names it — near midnight the UTC one is a different date
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    expect(files[0]).toContain(today);
   });
 
   test("a fortnight is kept and the rest swept, however the server is run", () => {
@@ -54,6 +57,22 @@ describe("the rotating log file", () => {
     expect(left).toHaveLength(15);
     expect(left[0]).toBe("server.2026-09-06.1.log");
     expect(left).toContain("server.2026-09-20.1.log");
+  });
+
+  test("measures the fortnight by the local day, as the file name does", () => {
+    const dir = scratch();
+    // Just after midnight in Jakarta is still the day before in UTC: the file is named for the local day, so the
+    // cutoff has to be read the same way or a day's logs go early (or late, west of Greenwich)
+    for (const day of ["01", "02", "03"]) writeFileSync(join(dir, `server.2026-09-${day}.1.log`), "old\n");
+    const justAfterMidnightLocal = new Date("2026-09-16T00:30:00");
+    expect(sweepOldLogs(dir, 14, justAfterMidnightLocal)).toEqual(["server.2026-09-01.1.log"]);
+    expect(readdirSync(dir).sort()).toEqual(["server.2026-09-02.1.log", "server.2026-09-03.1.log"]);
+  });
+
+  test("leaves retention to the sweep, not to a count of files", () => {
+    // pino-roll's limit counts files, and a busy day can roll several: keeping "14 files" would throw away
+    // yesterday to keep four of today's
+    expect(rollingFileOptions("/tmp/x")).not.toHaveProperty("limit");
   });
 
   test("sweeps only its own logs, and survives a folder that isn't there", () => {

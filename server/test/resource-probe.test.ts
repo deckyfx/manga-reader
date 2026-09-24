@@ -71,6 +71,16 @@ describe("what a whole run cost", () => {
     expect(total.gpuPeak).toBe(95);
   });
 
+  test("video memory is its own reading, kept or missing on its own", () => {
+    // How busy a GPU is and how much of its memory is used come from different files: either can be missing
+    const busyOnly = usage({ gpuAvg: 40, gpuPeak: 60, vramPeak: null });
+    const vramOnly = usage({ gpuAvg: null, gpuPeak: null, vramPeak: 2_000_000 });
+    expect(totalUsage([busyOnly]).vramPeak).toBeNull();
+    // …and a VRAM reading isn't thrown away just because that stage couldn't read the load
+    expect(totalUsage([vramOnly]).vramPeak).toBe(2_000_000);
+    expect(totalUsage([busyOnly, vramOnly]).vramPeak).toBe(2_000_000);
+  });
+
   test("nothing at all is not a division by zero", () => {
     const total = totalUsage([]);
     expect(total.wallMs).toBe(0);

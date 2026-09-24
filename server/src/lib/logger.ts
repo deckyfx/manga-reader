@@ -24,6 +24,12 @@ mkdirSync(LOG_DIR, { recursive: true });
 /** How many days of logs to keep. */
 const KEEP_DAYS = 14;
 
+/** A date as pino-roll writes it into a file name: the local day, not the UTC one. */
+function localDay(when: Date): string {
+  const month = String(when.getMonth() + 1).padStart(2, "0");
+  return `${when.getFullYear()}-${month}-${String(when.getDate()).padStart(2, "0")}`;
+}
+
 /** A log this module wrote: server.<date>.<number>.log, and nothing else in the folder. */
 const LOG_FILE = /^server\.(\d{4}-\d{2}-\d{2})\.\d+\.log$/;
 
@@ -38,7 +44,9 @@ const LOG_FILE = /^server\.(\d{4}-\d{2}-\d{2})\.\d+\.log$/;
 export function sweepOldLogs(dir: string, keepDays = KEEP_DAYS, now = new Date()): string[] {
   const cutoff = new Date(now);
   cutoff.setDate(cutoff.getDate() - keepDays);
-  const oldest = cutoff.toISOString().slice(0, 10);
+  // Local time, because that is how pino-roll names the files. Read as UTC, a machine east of Greenwich would
+  // measure the fortnight from a different day than the one in the name, and one west of it would sweep a day early
+  const oldest = localDay(cutoff);
   const removed: string[] = [];
   try {
     for (const name of readdirSync(dir)) {
@@ -69,8 +77,9 @@ export function sweepOldLogs(dir: string, keepDays = KEEP_DAYS, now = new Date()
  * happens to still be running at midnight, so a server restarted through the day appends to the same file for
  * ever. With it, the name is decided from the date at startup, so a restart on a new day opens a new file.
  *
- * `removeOtherLogFiles` makes the fortnight's limit count the files on disk rather than the ones this run created.
- * Without it a restart forgets everything older, and nothing is ever cleared away.
+ * No `limit` is passed, deliberately. pino-roll's limit counts *files*, not days, and a busy day can roll several
+ * of them past the size cap — so "keep 14" could throw away a log from yesterday while keeping four from today.
+ * Age is what this wants to keep, so sweepOldLogs keeps it, by the date in the name.
  */
 export function rollingFileOptions(dir: string): Record<string, unknown> {
   return {
@@ -79,7 +88,6 @@ export function rollingFileOptions(dir: string): Record<string, unknown> {
     dateFormat: "yyyy-MM-dd",
     frequency: "daily",
     size: "10m",
-    limit: { count: 14, removeOtherLogFiles: true },
     mkdir: true,
   };
 }

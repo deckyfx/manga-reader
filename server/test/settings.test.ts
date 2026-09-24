@@ -36,6 +36,18 @@ describe("choosing an engine", () => {
     expect(remembered).toBe("local");
   });
 
+  test("is an admin's to change, though anyone may read the settings", async () => {
+    const { cookie } = await signedIn("contributor");
+    const refused = await call("PATCH", "/api/settings/engine", { engine: "deepl" }, { cookie });
+    expect(refused.status).toBe(403);
+    const inpaint = await call("PATCH", "/api/settings/inpaint-engine", { engine: "lama" }, { cookie });
+    expect(inpaint.status).toBe(403);
+    // …and the engine is unchanged by the attempt
+    const unchanged: string = runtimeSettings.preferredTranslationEngine;
+    expect(unchanged).toBe("local");
+    expect((await call("GET", "/api/settings", undefined, { cookie })).status).toBe(200);
+  });
+
   test("refuses an engine that isn't one", async () => {
     const { cookie } = await signedIn("admin");
     const refused = await call("PATCH", "/api/settings/engine", { engine: "google" }, { cookie });

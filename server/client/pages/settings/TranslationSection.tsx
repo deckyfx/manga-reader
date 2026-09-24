@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { getSettings, patchEngine, patchInpaintEngine } from "../../api";
+import { useAuth } from "../../auth/AuthProvider";
 import { fieldClass } from "../../lib/styles";
 import { ReadyIcon } from "./ReadyIcon";
 
@@ -10,6 +11,9 @@ import { ReadyIcon } from "./ReadyIcon";
  */
 export function TranslationSection() {
   const qc = useQueryClient();
+  // The engine is the whole server's, and it is remembered: an admin chooses it. Everyone else can see what it is.
+  const { can } = useAuth();
+  const mayChange = can("admin");
   const settingsQ = useQuery({ queryKey: ["settings"], queryFn: getSettings });
   const settings = settingsQ.data;
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["settings"] });
@@ -38,7 +42,7 @@ export function TranslationSection() {
     { value: "deepl", label: settings.deepl_configured ? "DeepL" : "DeepL — set DEEPL_API_KEY", ready: settings.deepl_configured },
     { value: "local", label: "built-in model", ready: true },
   ];
-  const saving = translationM.isPending || inpaintM.isPending;
+  const saving = translationM.isPending || inpaintM.isPending || !mayChange;
 
   return (
     <div className="flex max-w-2xl flex-col gap-2 text-sm">
@@ -76,6 +80,7 @@ export function TranslationSection() {
           {["auto", "lama", "flood_fill"].map((engine) => <option key={engine} value={engine}>{engine}</option>)}
         </select>
       </div>
+      {!mayChange && <p className="text-xs text-gray-500">Only an admin can change which engine this server uses.</p>}
       {(translationM.error ?? inpaintM.error) && (
         <p className="text-sm text-red-400">{(translationM.error ?? inpaintM.error)?.message}</p>
       )}

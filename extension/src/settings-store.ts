@@ -65,7 +65,11 @@ async function retire(synced: Partial<Settings>): Promise<void> {
     ]);
     const old = { ...fromLocal, ...fromSync };
     if (!Object.hasOwn(synced, "translate") && Object.keys(old).length > 0) {
-      const wanted = (old.serverTranslation ?? "none") !== "none" || (old.clientTranslation ?? "none") !== "none";
+      // Each of the two only ever applied to one engine — serverTranslation in server mode, clientTranslation in
+      // Tesseract mode — and both were saved whatever the engine. Reading both would turn translation on for every
+      // Tesseract user who never touched the server tab, since serverTranslation defaulted to "auto".
+      const was = synced.ocrEngine === "server" ? old.serverTranslation : old.clientTranslation;
+      const wanted = (was ?? "none") !== "none";
       await chrome.storage.sync.set({ translate: wanted });
       synced.translate = wanted;
     }

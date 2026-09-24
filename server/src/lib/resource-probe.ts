@@ -173,6 +173,7 @@ export function totalUsage(parts: readonly Usage[]): Usage {
   const wallMs = parts.reduce((sum, p) => sum + p.wallMs, 0);
   const cpuMs = parts.reduce((sum, p) => sum + p.cpuMs, 0);
   const gpuParts = parts.filter((p) => p.gpuAvg !== null);
+  const vramParts = parts.filter((p) => p.vramPeak !== null);
   const gpuWall = gpuParts.reduce((sum, p) => sum + p.wallMs, 0);
   return {
     wallMs,
@@ -183,7 +184,9 @@ export function totalUsage(parts: readonly Usage[]): Usage {
     rssPeak: Math.max(0, ...parts.map((p) => p.rssPeak)),
     gpuAvg: gpuWall > 0 ? gpuParts.reduce((sum, p) => sum + (p.gpuAvg ?? 0) * p.wallMs, 0) / gpuWall : null,
     gpuPeak: gpuParts.length > 0 ? Math.max(0, ...gpuParts.map((p) => p.gpuPeak ?? 0)) : null,
-    vramPeak: gpuParts.length > 0 ? Math.max(0, ...gpuParts.map((p) => p.vramPeak ?? 0)) : null,
+    // Its own reading: how busy a GPU is and how much of its memory is in use come from separate files, and
+    // either can be missing without the other. Counting a missing one as zero would understate the total
+    vramPeak: vramParts.length > 0 ? Math.max(...vramParts.map((p) => p.vramPeak ?? 0)) : null,
     cores,
   };
 }
