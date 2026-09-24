@@ -1,0 +1,48 @@
+name: Extension
+
+# Also on changes to the server's routes: the extension's types are generated from them, so a route that changes
+# shape breaks the extension's build and nowhere else.
+on:
+  push:
+    branches: [main]
+    paths: ["extension/**", "server/src/api.ts", "server/src/plugins/**", ".github/workflows/extension.yml"]
+  pull_request:
+    paths: ["extension/**", "server/src/api.ts", "server/src/plugins/**", ".github/workflows/extension.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Typecheck and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Cache installed packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('server/bun.lock', 'extension/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      # The server's packages too: the extension's typecheck regenerates its API types from the server's sources
+      - run: bun install --frozen-lockfile
+        working-directory: server
+
+      - run: bun install --frozen-lockfile
+        working-directory: extension
+
+      - run: bun run typecheck
+        working-directory: extension
+
+      - run: bun run build:dev
+        working-directory: extension
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manga-reader-chrome
+          path: extension/manga-reader-chrome.zip
+          retention-days: 14
