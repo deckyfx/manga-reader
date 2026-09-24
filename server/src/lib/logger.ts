@@ -23,6 +23,8 @@ mkdirSync(LOG_DIR, { recursive: true });
 
 /** How many days of logs to keep. */
 const KEEP_DAYS = 14;
+/** How often the sweep runs while the server is up. */
+const SWEEP_EVERY_MS = 24 * 60 * 60 * 1000;
 
 /** A date as pino-roll writes it into a file name: the local day, not the UTC one. */
 function localDay(when: Date): string {
@@ -100,7 +102,21 @@ const isDev = (Bun.env.NODE_ENV ?? "development") !== "production";
 const isTest = Bun.env.NODE_ENV === "test";
 const consoleLevel = isTest ? "warn" : isDev ? "debug" : "info";
 
-sweepOldLogs(LOG_DIR);
+/**
+ * Sweeps now and every day after, until the returned function is called.
+ *
+ * Startup alone isn't enough: nothing else prunes these — pino-roll only cleans up when it is given a file limit,
+ * and a file limit is not an age — so a server left running for a fortnight would keep every log it ever wrote.
+ */
+export function scheduleLogSweep(dir: string, everyMs = SWEEP_EVERY_MS): () => void {
+  sweepOldLogs(dir);
+  const timer = setInterval(() => sweepOldLogs(dir), everyMs);
+  // Never a reason to keep the process alive for this
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
+scheduleLogSweep(LOG_DIR);
 
 const transport = pino.transport({
   targets: [

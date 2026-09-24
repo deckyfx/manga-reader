@@ -41,6 +41,10 @@ describe("measuring work", () => {
     expect(usageFields(usage({ gpuAvg: null }))).toMatchObject({ gpuAvgPct: null, gpuPeakPct: null });
     // A GPU that answers 0 is a different answer from one that doesn't
     expect(describeUsage(usage({ gpuAvg: 0, gpuPeak: 0 }))).toContain("gpu avg 0%");
+    // The two readings come from different files: a missing load must not hide the memory that was read
+    const vramOnly = describeUsage(usage({ gpuAvg: null, gpuPeak: null, vramPeak: 2_147_483_648 }));
+    expect(vramOnly).toContain("gpu n/a");
+    expect(vramOnly).toContain("vram 2.00 GB");
   });
 });
 

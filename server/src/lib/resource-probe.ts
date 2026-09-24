@@ -147,10 +147,11 @@ export function describeUsage(usage: Usage): string {
   const seconds = `${(usage.wallMs / 1000).toFixed(1)}s`;
   const cpu = `cpu avg ${Math.round(usage.cpuAvg)}% peak ${Math.round(usage.cpuPeak)}% of ${usage.cores * 100}%`;
   const rss = `rss avg ${gb(usage.rssAvg)} peak ${gb(usage.rssPeak)}`;
-  const gpu = usage.gpuAvg === null
-    ? "gpu n/a"
-    : `gpu avg ${Math.round(usage.gpuAvg)}% peak ${Math.round(usage.gpuPeak ?? 0)}%${usage.vramPeak !== null ? ` vram ${gb(usage.vramPeak)}` : ""}`;
-  return `${seconds} · ${cpu} · ${rss} · ${gpu}`;
+  // Said apart, because they are read apart: a machine can report its video memory and not its load, or the other
+  // way round, and a line that hides one behind the other loses a reading that was there
+  const load = usage.gpuAvg === null ? "gpu n/a" : `gpu avg ${Math.round(usage.gpuAvg)}% peak ${Math.round(usage.gpuPeak ?? 0)}%`;
+  const vram = usage.vramPeak === null ? "" : ` vram ${gb(usage.vramPeak)}`;
+  return `${seconds} · ${cpu} · ${rss} · ${load}${vram}`;
 }
 
 /** The same numbers as fields, for a structured log. Bytes become megabytes and percentages whole numbers. */

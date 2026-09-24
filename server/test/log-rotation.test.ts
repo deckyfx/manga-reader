@@ -10,7 +10,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rollingFileOptions, sweepOldLogs } from "@/lib/logger";
+import { rollingFileOptions, scheduleLogSweep, sweepOldLogs } from "@/lib/logger";
 
 const dirs: string[] = [];
 const scratch = (): string => {
@@ -27,8 +27,12 @@ async function writeLog(dir: string): Promise<string[]> {
   const { default: pinoRoll } = await import("pino-roll");
   const stream = await pinoRoll(rollingFileOptions(dir));
   stream.write(`${JSON.stringify({ level: 30, msg: "hello" })}\n`);
-  await new Promise((resolve) => setTimeout(resolve, 60));
-  stream.end();
+  // Waited for, not slept through: a write slower than a fixed delay would have this read the folder mid-flight
+  await new Promise<void>((resolve) => {
+    stream.once("close", resolve);
+    stream.once("finish", resolve);
+    stream.end();
+  });
   return readdirSync(dir);
 }
 
@@ -73,6 +77,22 @@ describe("the rotating log file", () => {
     // pino-roll's limit counts files, and a busy day can roll several: keeping "14 files" would throw away
     // yesterday to keep four of today's
     expect(rollingFileOptions("/tmp/x")).not.toHaveProperty("limit");
+  });
+
+  test("keeps sweeping while the server runs, not only when it starts", async () => {
+    const dir = scratch();
+    writeFileSync(join(dir, "server.2020-01-01.1.log"), "ancient\n");
+    // Nothing else prunes these, so a server up for a fortnight has to sweep as it goes
+    const stop = scheduleLogSweep(dir, 40);
+    expect(readdirSync(dir)).toEqual([]);
+    writeFileSync(join(dir, "server.2020-01-02.1.log"), "ancient too\n");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    stop();
+    expect(readdirSync(dir)).toEqual([]);
+    // …and stops when told to
+    writeFileSync(join(dir, "server.2020-01-03.1.log"), "left alone\n");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(readdirSync(dir)).toEqual(["server.2020-01-03.1.log"]);
   });
 
   test("sweeps only its own logs, and survives a folder that isn't there", () => {
