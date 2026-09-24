@@ -48,6 +48,9 @@ export const getSettings = () => unwrap(api.api.settings.get());
 
 export const patchEngine = (engine: string) => unwrap(api.api.settings.engine.patch({ engine }));
 
+export const patchInpaintEngine = (engine: string) =>
+  unwrap(api.api.settings["inpaint-engine"].patch({ engine }));
+
 // ── Accounts ──────────────────────────────────────────────────────────────────
 
 export type UserRole = "admin" | "contributor" | "reader";

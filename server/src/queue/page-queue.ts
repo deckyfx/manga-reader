@@ -1,4 +1,5 @@
 import { childLogger } from "@/lib/logger";
+import { describeUsage, startProbe, usageFields } from "@/lib/resource-probe";
 
 const log = childLogger("page-queue");
 
@@ -10,16 +11,25 @@ let pageQueue: Promise<void> = Promise.resolve();
  * same models. The task starts after the previous one settles; if it fails, the error is logged here (callers
  * that need the outcome use `runExclusiveResult`).
  */
-export function runExclusive(task: () => Promise<void>): void {
+export function runExclusive(task: () => Promise<void>, label?: string): void {
   pageQueue = pageQueue
     .then(async () => {
-      await task();
+      // Measured here, where the task actually starts: the time a task spent waiting its turn is not work it did
+      const probe = label === undefined ? null : startProbe();
+      try {
+        await task();
+      } finally {
+        if (probe && label !== undefined) {
+          const usage = probe.stop();
+          log.info({ work: label, ...usageFields(usage) }, `${label} · ${describeUsage(usage)}`);
+        }
+      }
     })
     .catch((err: unknown) => log.error({ err }, "Page queue task failed"));
 }
 
 /** Like `runExclusive`, but resolves with the task's result, or rejects with its error (including a synchronous throw). */
-export function runExclusiveResult<T>(task: () => Promise<T>): Promise<T> {
+export function runExclusiveResult<T>(task: () => Promise<T>, label?: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     runExclusive(async () => {
       try {
@@ -27,7 +37,7 @@ export function runExclusiveResult<T>(task: () => Promise<T>): Promise<T> {
       } catch (err) {
         reject(err);
       }
-    });
+    }, label);
   });
 }
 

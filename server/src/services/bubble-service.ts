@@ -8,6 +8,7 @@ import * as ort from "onnxruntime-node";
 import sharp from "sharp";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
+import { bootState } from "@/boot-state";
 import { env } from "@/env";
 import { childLogger } from "@/lib/logger";
 import type { Box } from "@/lib/mask";
@@ -84,12 +85,28 @@ let sharedDetector: Promise<BubbleDetector | null> | null = null;
 /** Process-wide detector, loaded on first use; null when the model file is missing or fails to load. */
 export function getBubbleDetector(): Promise<BubbleDetector | null> {
   sharedDetector ??= existsSync(bubbleModelPath())
-    ? BubbleDetector.load(bubbleModelPath()).catch((err: unknown) => {
-        // The detector is optional: fall back to text-detector grouping, and retry loading on the next page
-        sharedDetector = null;
-        log.warn({ err }, "Bubble detector unavailable — falling back to text-detector grouping");
-        return null;
-      })
+    ? BubbleDetector.load(bubbleModelPath())
+        .then((detector) => {
+          bootState.bubbleReady = true;
+          return detector;
+        })
+        .catch((err: unknown) => {
+          // The detector is optional: fall back to text-detector grouping, and retry loading on the next page
+          sharedDetector = null;
+          bootState.bubbleReady = false;
+          log.warn({ err }, "Bubble detector unavailable — falling back to text-detector grouping");
+          return null;
+        })
     : Promise.resolve(null);
   return sharedDetector;
+}
+
+/**
+ * Loads the detector at boot, as the other models are loaded. It would otherwise arrive with the first page, and
+ * until then /health and the settings page would report the detector as not ready while it was merely untouched.
+ */
+export async function loadBubbleModel(): Promise<void> {
+  if (!existsSync(bubbleModelPath())) throw new Error(`Bubble detector model not found at ${bubbleModelPath()}`);
+  if ((await getBubbleDetector()) === null) throw new Error(`Bubble detector could not be loaded from ${bubbleModelPath()}`);
+  log.info("Bubble detector loaded");
 }

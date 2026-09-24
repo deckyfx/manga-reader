@@ -4,7 +4,7 @@ import { join } from "path";
 import { env } from "@/env";
 import { inferenceHandlers } from "@/queue/inference-queue";
 import { bootState } from "@/boot-state";
-import { runtimeSettings } from "@/stores/settings-store";
+import { resolveTranslationEngine } from "@/services/translation-engine";
 import { childLogger } from "@/lib/logger";
 
 const log = childLogger("translate");
@@ -18,7 +18,7 @@ export interface TranslateInput {
 
 export interface TranslateOutput {
   translatedText: string;
-  engine: "local" | "deepl";
+  engine: "local" | "deepl" | "sugoi";
   processingTimeMs: number;
 }
 
@@ -84,9 +84,17 @@ export async function loadTranslateModel(): Promise<void> {
     );
   }
 
-  inferenceHandlers.translate = runTranslate as (input: unknown, signal: AbortSignal) => Promise<unknown>;
+  registerTranslateHandler();
   bootState.translateReady = true;
   log.info(`Translate model loaded (BOS=${modelBosToken}, EOS=${modelEosToken})`);
+}
+
+/**
+ * Takes translation jobs. Called at boot whatever the local model does: DeepL and Sugoi translate without it, and
+ * only this handler can reach them.
+ */
+export function registerTranslateHandler(): void {
+  inferenceHandlers.translate = runTranslate as (input: unknown, signal: AbortSignal) => Promise<unknown>;
 }
 
 async function runTranslate(input: unknown, signal?: AbortSignal): Promise<TranslateOutput> {
@@ -95,20 +103,12 @@ async function runTranslate(input: unknown, signal?: AbortSignal): Promise<Trans
   }
   const { text, engine, targetLang = "en" } = input as TranslateInput;
 
-  // Resolve which engine to use: explicit request → runtime setting → env default.
-  const resolved = engine === "deepl" || engine === "local"
-    ? engine
-    : runtimeSettings.preferredTranslationEngine !== "local" && env.DEEPL_API_KEY
-      ? "deepl"
-      : "local";
-
-  if (resolved === "deepl") {
-    if (!env.DEEPL_API_KEY) throw new Error("DeepL API key not configured");
-    return runDeepL(text, targetLang);
-  }
+  const resolved = resolveTranslationEngine(engine);
+  if (resolved === "sugoi") return runSugoi(text, signal);
+  if (resolved === "deepl") return runDeepL(text, targetLang, signal);
 
   if (!encoderSession || !decoderSession || !tokenizer) {
-    throw new Error("Translate model not loaded");
+    throw new Error("No translator available: the built-in model isn't loaded, and no DeepL key or Sugoi server is set");
   }
 
   const start = Date.now();
@@ -160,14 +160,48 @@ async function runTranslate(input: unknown, signal?: AbortSignal): Promise<Trans
   return { translatedText, engine: "local", processingTimeMs: Date.now() - start };
 }
 
-async function runDeepL(text: string, targetLang: string): Promise<TranslateOutput> {
+/**
+ * A self-hosted Sugoi server (the Sugoi Toolkit's own, or the one in tools/sugoi/). It speaks the format Sugoi
+ * clients use: `{ content, message: "translate sentences" }`, answering with the translation — a string, or a
+ * one-item list when asked with a list. Japanese to English only, so the target language is not its business.
+ */
+/**
+ * The request's own deadline, and the queue's if it has one: a job the queue has given up on should stop waiting
+ * for an answer nobody will read, rather than holding its turn until its own timeout runs out.
+ */
+function until(ms: number, signal?: AbortSignal): AbortSignal {
+  const deadline = AbortSignal.timeout(ms);
+  return signal ? AbortSignal.any([signal, deadline]) : deadline;
+}
+
+async function runSugoi(text: string, signal?: AbortSignal): Promise<TranslateOutput> {
+  const start = Date.now();
+  let response: Response;
+  try {
+    response = await fetch(env.SUGOI_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: text, message: "translate sentences" }),
+      signal: until(env.SUGOI_TIMEOUT_MS, signal),
+    });
+  } catch (err) {
+    throw new Error(`Sugoi server unreachable at ${env.SUGOI_URL}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!response.ok) throw new Error(`Sugoi server answered ${response.status}`);
+  const answer: unknown = await response.json();
+  const translatedText = typeof answer === "string" ? answer : Array.isArray(answer) && typeof answer[0] === "string" ? answer[0] : null;
+  if (translatedText === null) throw new Error("Sugoi server answered in a shape this doesn't understand");
+  return { translatedText, engine: "sugoi", processingTimeMs: Date.now() - start };
+}
+
+async function runDeepL(text: string, targetLang: string, signal?: AbortSignal): Promise<TranslateOutput> {
   const start = Date.now();
   const key = env.DEEPL_API_KEY ?? "";
   // Free-tier keys end with :fx; paid keys use api.deepl.com
   const host = key.endsWith(":fx") ? "api-free.deepl.com" : "api.deepl.com";
   const res = await fetch(`https://${host}/v2/translate`, {
     method: "POST",
-    signal: AbortSignal.timeout(15_000),
+    signal: until(15_000, signal),
     headers: {
       "Authorization": `DeepL-Auth-Key ${key}`,
       "Content-Type": "application/json",

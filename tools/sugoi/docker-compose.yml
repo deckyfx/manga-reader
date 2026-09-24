@@ -1,0 +1,21 @@
+services:
+  sugoi:
+    build: .
+    container_name: sugoi-translator
+    # Loopback only: this is a translator for the server on this machine, not something to expose
+    ports: ["127.0.0.1:14366:14366"]
+    volumes: ["sugoi-models:/models"]
+    environment:
+      # "cuda" with an NVIDIA runtime; the CPU is fast enough for a page at a time
+      SUGOI_DEVICE: cpu
+      SUGOI_BEAM_SIZE: "5"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:14366/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+
+volumes:
+  sugoi-models:

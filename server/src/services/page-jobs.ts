@@ -7,6 +7,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { childLogger } from "@/lib/logger";
+import { describeUsage, startProbe, totalUsage, usageFields, type Usage } from "@/lib/resource-probe";
 import { runExclusiveResult, withPageLock } from "@/queue/page-queue";
 import { enginesNotReady, pageEngines as engines } from "@/services/page-engines";
 import { missingPipelineModels, normalisePage, PagePipeline, type PageStage, type ProgressUpdate } from "@/services/page-pipeline";
@@ -88,16 +89,29 @@ async function runJob(id: string, page: Buffer, options: SubmitPageOptions): Pro
   };
   const pipeline = new PagePipeline(pageDir(id), onProgress, PageStore.repository(id));
   let current: StageName = "detect";
+  // What each stage cost, kept so the run can report its own total at the end
+  const costs: Usage[] = [];
+  /** Runs a stage under the probe and says what it took; the stage's own work is unchanged. */
+  const measure = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
+    const probe = startProbe();
+    try {
+      return await run();
+    } finally {
+      const usage = probe.stop();
+      costs.push(usage);
+      log.info({ jobId: id, stage: name, ...usageFields(usage) }, `${name} · ${describeUsage(usage)}`);
+    }
+  };
   const stage = async (name: StageName, run: () => Promise<unknown>): Promise<void> => {
     current = name;
-    await run();
+    await measure(name, run);
     await PageStore.setStage(id, name, "fresh");
   };
 
   try {
     await PageStore.update(id, { status: "running", cleanSfx: options.cleanSfx, errorMessage: null });
     await PageStore.clearStages(id);
-    const { job } = await pipeline.detect(page, options.source);
+    const { job } = await measure("detect", () => pipeline.detect(page, options.source));
     await PageStore.setStage(id, "detect", "fresh");
     await stage("ocr", () => pipeline.ocr(job, engines.ocr));
     await stage("translate", () => pipeline.translate(job, engines.translate));
@@ -108,7 +122,8 @@ async function runJob(id: string, page: Buffer, options: SubmitPageOptions): Pro
 
     const result = Buffer.from(await Bun.file(pipeline.path("result.png")).arrayBuffer()).toString("base64");
     emit({ type: "done", stage: "done", message: "Translation complete", progress: 1, result, result_url: resultUrl(id), elapsed_ms: Date.now() - started });
-    log.info({ jobId: id, ms: Date.now() - started }, "Page translated");
+    const total = totalUsage(costs);
+    log.info({ jobId: id, stage: "total", ...usageFields(total) }, `Page translated · ${describeUsage(total)}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ err, jobId: id, stage: current }, "Page translation failed");

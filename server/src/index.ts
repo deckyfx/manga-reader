@@ -62,6 +62,10 @@ async function migrateDb(): Promise<void> {
     }
   }
 
+  // Engine choices an admin made last time
+  const { loadRuntimeSettings } = await import("@/stores/settings-store");
+  await loadRuntimeSettings();
+
   // The scan log keeps only what the admin's retention allows, swept now and once a day after that
   const { ScanStore } = await import("@/stores/scan-store");
   const { serverPolicy } = await import("@/services/server-settings");
@@ -155,9 +159,13 @@ async function loadModels(): Promise<void> {
       : (await import("@/services/ocr-service")).loadOcrModel;
     await load().catch((err: Error) => { loadErrors.push(`OCR (${env.OCR_ENGINE}): ${err.message}`); });
   }
-  if (env.TRANSLATE_MODEL_ENABLED) {
-    const { loadTranslateModel } = await import("@/services/translate-service");
-    await loadTranslateModel().catch((err: Error) => { loadErrors.push(`Translate: ${err.message}`); });
+  {
+    // The handler is registered either way: DeepL and Sugoi don't need the local model
+    const { loadTranslateModel, registerTranslateHandler } = await import("@/services/translate-service");
+    registerTranslateHandler();
+    if (env.TRANSLATE_MODEL_ENABLED) {
+      await loadTranslateModel().catch((err: Error) => { loadErrors.push(`Translate: ${err.message}`); });
+    }
   }
   if (env.TEXT_SEG_MODEL_ENABLED) {
     const { loadTextSegModel } = await import("@/services/text-seg-service");
@@ -167,6 +175,12 @@ async function loadModels(): Promise<void> {
   if (env.INPAINT_MODEL_ENABLED) {
     const { loadInpaintModel } = await import("@/services/inpaint-service");
     await loadInpaintModel().catch((err: Error) => bootLog.warn({ err }, "Inpaint model unavailable"));
+  }
+
+  if (env.BUBBLE_MODEL_ENABLED) {
+    // Optional too: without it, blocks are grouped by the text detector alone
+    const { loadBubbleModel } = await import("@/services/bubble-service");
+    await loadBubbleModel().catch((err: Error) => bootLog.warn({ err }, "Bubble detector unavailable"));
   }
 
   // Dictionary is non-fatal (health reports "degraded"); /analyze needs both tokenizer and index.

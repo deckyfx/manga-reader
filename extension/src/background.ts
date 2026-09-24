@@ -216,13 +216,14 @@ async function handleLocalDone(
 ): Promise<void> {
   const settings = await loadSettings();
 
+  // Translating is the server's job, engine and all; without one there is nothing to ask
   let translation: string | null = null;
-  if (text.trim() && settings.clientTranslation === "deepl" && settings.deeplApiKey) {
-    translation = await translateDeepL(text, settings.deeplTargetLang, settings.deeplApiKey)
-      .catch((e) => {
-        console.warn("DeepL translation failed:", e);
-        return null;
-      });
+  if (text.trim() && settings.translate && settings.serverUrl) {
+    const { data, error } = await serverApi(settings.serverUrl, usableApiKey(settings))
+      .translate.post({ text })
+      .catch((e: unknown) => ({ data: null, error: e }));
+    if (error) console.warn("Translation failed:", error);
+    translation = data?.translation ?? null;
   }
 
   sendToTab(tabId, { type: "ocr-result", text, translation, elapsed_ms } satisfies ToContentMsg);
@@ -245,7 +246,7 @@ async function runServerFlow(
   try {
     const { data, error } = await serverApi(settings.serverUrl, usableApiKey(settings)).ocr.post({
       image: `data:image/jpeg;base64,${imageB64}`,
-      translate_engine: settings.serverTranslation,
+      translate: settings.translate,
     });
 
     if (error) {
@@ -311,32 +312,6 @@ async function handleImageUpdated(relay: ImageUpdatedRelayMsg): Promise<void> {
       .filter((t) => t.id !== undefined)
       .map((t) => chrome.tabs.sendMessage(t.id!, msg).catch(() => { /* tab may not have content script */ }))
   );
-}
-
-// ── DeepL client-side translation ─────────────────────────────────────────────
-
-async function translateDeepL(
-  text: string,
-  targetLang: string,
-  apiKey: string,
-): Promise<string> {
-  // Free-tier keys end with ":fx"; pro keys don't
-  const baseUrl = apiKey.endsWith(":fx")
-    ? "https://api-free.deepl.com"
-    : "https://api.deepl.com";
-
-  const res = await fetch(`${baseUrl}/v2/translate`, {
-    method: "POST",
-    headers: {
-      "Authorization": `DeepL-Auth-Key ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ text: [text], target_lang: targetLang }),
-  });
-
-  if (!res.ok) throw new Error(`DeepL ${res.status}`);
-  const data = await res.json() as { translations: { text: string }[] };
-  return data.translations[0]?.text ?? "";
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

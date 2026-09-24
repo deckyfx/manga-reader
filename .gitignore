@@ -41,3 +41,6 @@ extension/selfhost-ocr.zip
 
 # ── Claude Code worktrees (isolated checkouts, never committed) ───────────────
 .claude/worktrees/
+
+# Python bytecode (tools/sugoi)
+__pycache__/

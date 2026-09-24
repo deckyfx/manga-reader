@@ -534,7 +534,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
           }
           await pipeline.render(job);
           return { wholeStage: true, changed: true };
-        });
+        }, `page ${params.id} ${stage}`);
         if (wholeStage) await PageStore.setStage(params.id, stage, "fresh");
         if (changed && RUNNABLE[stage].length > 0) await PageStore.markStale(params.id, [...RUNNABLE[stage]]);
       } catch (err) {
@@ -567,7 +567,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
           if (!job) throw new Error("page has no blocks yet");
           const pipeline = new PagePipeline(pageDir(params.id), () => {}, PageStore.repository(params.id));
           await pipeline.placeText(job);
-        });
+        }, `page ${params.id} place`);
       } catch (err) {
         // Nothing to place on yet (e.g. not cleaned): the preview simply waits
         return status(409, { error: err instanceof Error ? err.message : String(err) });
@@ -664,7 +664,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
             await pipeline.refreshCleanCheck(job);
             await pipeline.writeJob(job);
           }
-        });
+        }, `page ${params.id} re-clean`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error({ err, pageId: params.id }, "Studio re-clean failed");

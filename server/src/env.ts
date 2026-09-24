@@ -165,9 +165,21 @@ class EnvConfig {
 
   get DEEPL_API_KEY(): string | undefined { return Bun.env.DEEPL_API_KEY || undefined; }
 
-  get PREFERRED_TRANSLATION_ENGINE(): "auto" | "local" | "deepl" {
+  get PREFERRED_TRANSLATION_ENGINE(): "auto" | "local" | "deepl" | "sugoi" {
     const v = Bun.env.PREFERRED_TRANSLATION_ENGINE ?? "auto";
-    return (["auto", "local", "deepl"].includes(v) ? v : "auto") as "auto" | "local" | "deepl";
+    return (["auto", "local", "deepl", "sugoi"].includes(v) ? v : "auto") as "auto" | "local" | "deepl" | "sugoi";
+  }
+
+  /**
+   * A self-hosted Sugoi translation server (tools/sugoi/ sets one up): its address, e.g.
+   * http://127.0.0.1:14366. Empty means no Sugoi, and the engine is refused.
+   */
+  get SUGOI_URL(): string { return Bun.env.SUGOI_URL?.trim() ?? ""; }
+  /** How long one Sugoi request may take; a page's blocks are translated one after another. */
+  get SUGOI_TIMEOUT_MS(): number {
+    // A timeout that isn't a positive number would abort every request the moment it starts
+    const ms = Number(Bun.env.SUGOI_TIMEOUT_MS);
+    return Number.isFinite(ms) && ms > 0 ? ms : 30_000;
   }
 
   get INPAINT_ENGINE(): "auto" | "lama" | "flood_fill" {
