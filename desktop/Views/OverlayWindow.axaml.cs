@@ -4,9 +4,9 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
-using WebOcrDesktop.ViewModels;
+using MangaReaderDesktop.ViewModels;
 
-namespace WebOcrDesktop.Views;
+namespace MangaReaderDesktop.Views;
 
 public partial class OverlayWindow : Window
 {

@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using SharpHook;
 using SharpHook.Data;
 
-namespace WebOcrDesktop.Services;
+namespace MangaReaderDesktop.Services;
 
 /// <summary>
 /// Listens for Super+Shift+O globally using SharpHook (libUIOHook).

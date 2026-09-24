@@ -1,9 +1,9 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="using:WebOcrDesktop.ViewModels"
-             xmlns:c="using:WebOcrDesktop.Controls"
-             xmlns:m="using:WebOcrDesktop.Models"
-             x:Class="WebOcrDesktop.Controls.TokenList"
+             xmlns:vm="using:MangaReaderDesktop.ViewModels"
+             xmlns:c="using:MangaReaderDesktop.Controls"
+             xmlns:m="using:MangaReaderDesktop.Models"
+             x:Class="MangaReaderDesktop.Controls.TokenList"
              x:DataType="vm:MainViewModel">
 
     <ScrollViewer HorizontalScrollBarVisibility="Disabled"

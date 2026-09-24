@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using Avalonia;
 
-namespace WebOcrDesktop;
+namespace MangaReaderDesktop;
 
 class Program
 {
@@ -12,7 +12,7 @@ class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        _singleInstanceMutex = new Mutex(initiallyOwned: true, name: "WebOcrDesktop_SingleInstance_v1", out bool createdNew);
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, name: "MangaReaderDesktop_SingleInstance_v1", out bool createdNew);
 
         if (!createdNew)
         {

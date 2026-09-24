@@ -32,7 +32,7 @@ extension/     Browser extension (TypeScript + Bun)
 desktop/       Desktop companion app (Avalonia / C#)
 docs/          Studio, library and reader plan
 tools/         sugoi/: a Sugoi translation server in a container, for the server to use
-WebOcr.slnx    .NET solution for the desktop app
+MangaReader.slnx    .NET solution for the desktop app
 ```
 
 ## Extension Setup

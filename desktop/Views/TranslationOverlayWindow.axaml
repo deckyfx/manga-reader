@@ -1,6 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        x:Class="WebOcrDesktop.Views.TranslationOverlayWindow"
+        x:Class="MangaReaderDesktop.Views.TranslationOverlayWindow"
         Background="Transparent"
         TransparencyLevelHint="Transparent"
         WindowDecorations="None"

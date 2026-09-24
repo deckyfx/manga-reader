@@ -10,10 +10,10 @@ using Avalonia;
 using Avalonia.Input.Platform;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
-using WebOcrDesktop.Models;
-using WebOcrDesktop.Services;
+using MangaReaderDesktop.Models;
+using MangaReaderDesktop.Services;
 
-namespace WebOcrDesktop.ViewModels;
+namespace MangaReaderDesktop.ViewModels;
 
 public enum AppStatus { Idle, Capturing, Selecting, Analyzing, Error }
 

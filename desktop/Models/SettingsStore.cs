@@ -6,7 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace WebOcrDesktop.Models;
+namespace MangaReaderDesktop.Models;
 
 public static class SettingsStore
 {

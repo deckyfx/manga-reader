@@ -10,7 +10,7 @@ extension/   Browser extension (MV3, TypeScript + Bun)
 desktop/     Avalonia desktop companion (C#, .NET 10); talks to the server's /health, /ocr, /analyze
 docs/        PLAN_dashboard_studio.md: the Studio / reader plan with per-phase design notes
 tools/       sugoi/: a containerised Sugoi translation server the Bun server can use (SUGOI_URL)
-WebOcr.slnx  .NET solution for the desktop app
+MangaReader.slnx  .NET solution for the desktop app
 ```
 
 The ASP.NET Core (C#) server was removed; its last version is tagged `csharp-server-final`.

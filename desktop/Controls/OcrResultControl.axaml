@@ -1,7 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="using:WebOcrDesktop.ViewModels"
-             x:Class="WebOcrDesktop.Controls.OcrResultControl"
+             xmlns:vm="using:MangaReaderDesktop.ViewModels"
+             x:Class="MangaReaderDesktop.Controls.OcrResultControl"
              x:DataType="vm:MainViewModel">
 
     <StackPanel Spacing="10" Margin="12,10">

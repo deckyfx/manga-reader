@@ -4,7 +4,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Avalonia;
 
-namespace WebOcrDesktop.ViewModels;
+namespace MangaReaderDesktop.ViewModels;
 
 public class OverlayViewModel : INotifyPropertyChanged
 {

@@ -3,7 +3,7 @@ using System.Globalization;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
 
-namespace WebOcrDesktop.ViewModels;
+namespace MangaReaderDesktop.ViewModels;
 
 /// <summary>Returns true when the status is a busy state (capturing / selecting / analyzing).</summary>
 public sealed class StatusToBoolConverter : IValueConverter

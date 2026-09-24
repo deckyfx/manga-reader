@@ -29,9 +29,17 @@ a clean name now rather than a compatibility shim carried for ever, for an exten
 - **Environment variables** — `DATA_DIR`, `OCR_ENGINE` and the rest were never prefixed, so there is nothing to
   rename and nobody's `.env` breaks.
 - **Log file names** — `server.<date>.log` already says what it is.
-- **The desktop app** — `WebOcrDesktop.csproj`, its namespaces and `WebOcr.slnx`. Two strings and a great deal of
-  mechanical churn through every `.cs` file, on a component parked until the server, client and extension settle.
 - **The checkout directory** — somebody's shell, editor and running processes point at it; that is theirs to do.
+
+### The desktop app, after all
+
+Deferred at first as churn on a parked component, then done in the same pass on request: `MangaReader.slnx`,
+`MangaReaderDesktop.csproj`, every namespace, `x:Class` and XAML `using:`, the single-instance mutex, the assembly
+identity in the manifest, and the launch configuration. It builds with no warnings.
+
+One of those is not only a name: the desktop keeps downloaded Tesseract language data in an application-data
+folder that was called `WebOcr` and is now `MangaReader`. An existing install will not find its old copy and will
+fetch the data again — a few megabytes, once.
 
 ### Harmless by inspection
 

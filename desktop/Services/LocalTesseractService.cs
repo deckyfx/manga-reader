@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Tesseract;
 
-namespace WebOcrDesktop.Services;
+namespace MangaReaderDesktop.Services;
 
 /// <summary>
 /// Wraps Tesseract.NET for local (offline) OCR.
@@ -15,7 +15,7 @@ public sealed class LocalTesseractService : IDisposable
 {
     private static readonly string DataRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "WebOcr");
+        "MangaReader");
 
     /// <summary>Returns the tessdata directory for a given quality level.</summary>
     public static string TessDataDir(string quality) =>

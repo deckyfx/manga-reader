@@ -7,7 +7,7 @@
   ],
   "settings": {
     // C# / .NET (desktop app)
-    "dotnet.defaultSolution": "WebOcr.slnx",
+    "dotnet.defaultSolution": "MangaReader.slnx",
     "omnisharp.enableEditorConfigSupport": true,
     "csharp.semanticHighlighting.enabled": true,
 

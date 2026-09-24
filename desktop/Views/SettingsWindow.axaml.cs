@@ -4,10 +4,10 @@ using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using WebOcrDesktop.Models;
-using WebOcrDesktop.ViewModels;
+using MangaReaderDesktop.Models;
+using MangaReaderDesktop.ViewModels;
 
-namespace WebOcrDesktop.Views;
+namespace MangaReaderDesktop.Views;
 
 public partial class SettingsWindow : Window
 {

@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
-using WebOcrDesktop.Models;
-using WebOcrDesktop.Services;
+using MangaReaderDesktop.Models;
+using MangaReaderDesktop.Services;
 
-namespace WebOcrDesktop.ViewModels;
+namespace MangaReaderDesktop.ViewModels;
 
 public class SettingsViewModel : INotifyPropertyChanged
 {

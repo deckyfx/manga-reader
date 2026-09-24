@@ -7,10 +7,10 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using SkiaSharp;
-using WebOcrDesktop.ViewModels;
-using WebOcrDesktop.Views;
+using MangaReaderDesktop.ViewModels;
+using MangaReaderDesktop.Views;
 
-namespace WebOcrDesktop;
+namespace MangaReaderDesktop;
 
 public partial class App : Application
 {

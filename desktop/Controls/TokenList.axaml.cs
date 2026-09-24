@@ -1,6 +1,6 @@
 using Avalonia.Controls;
 
-namespace WebOcrDesktop.Controls;
+namespace MangaReaderDesktop.Controls;
 
 public partial class TokenList : UserControl
 {
