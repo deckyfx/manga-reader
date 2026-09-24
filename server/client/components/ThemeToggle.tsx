@@ -1,6 +1,6 @@
-import { useState } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
-import { readTheme, saveTheme, type Theme } from "../lib/theme";
+import type { Theme } from "../lib/theme";
+import { useThemeStore } from "../stores/theme";
 
 const ORDER: Theme[] = ["system", "light", "dark"];
 const LOOK: Record<Theme, { icon: typeof Sun; label: string }> = {
@@ -11,14 +11,11 @@ const LOOK: Record<Theme, { icon: typeof Sun; label: string }> = {
 
 /** Cycles system → day → night. The choice is remembered per browser. */
 export function ThemeToggle({ expanded }: { expanded: boolean }) {
-  const [theme, setTheme] = useState<Theme>(readTheme);
+  const theme = useThemeStore((state) => state.theme);
+  const setTheme = useThemeStore((state) => state.setTheme);
   const { icon: Icon, label } = LOOK[theme];
 
-  const next = () => {
-    const following = ORDER[(ORDER.indexOf(theme) + 1) % ORDER.length] ?? "system";
-    setTheme(following);
-    saveTheme(following);
-  };
+  const next = () => setTheme(ORDER[(ORDER.indexOf(theme) + 1) % ORDER.length] ?? "system");
 
   return (
     <button

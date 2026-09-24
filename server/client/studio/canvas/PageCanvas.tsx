@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useImperativeHandle, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { Canvas, Circle, Ellipse, FabricImage, Line, Point, Polyline, Rect, util, type FabricObject } from "fabric";
 import {
   createBlock,
@@ -29,22 +29,22 @@ import { CommandHistory, type Command } from "./history";
 import { MaskLayers, type Area, type StrokeRecord } from "./mask-layers";
 import { LetteringObject, letteringIdOf } from "./lettering-object";
 import type { Toolset } from "../toolset";
+import { canvasSession, ifCurrent, showsTextLayer, useCanvasStore } from "../../stores/canvas";
+
+/** What the canvas is set to right now, for handlers registered once (see the store). */
+const canvasState = () => useCanvasStore.getState();
 import {
-  DEFAULT_BRUSH,
   isTyping,
   MAX_ZOOM,
   MIN_REGION,
   MIN_ZOOM,
   PANEL_OUTER_HEIGHT,
   PANEL_WIDTH,
-  readWheelMode,
   WHEEL_MAX_DELTA,
-  WHEEL_MODE_KEY,
   WHEEL_ZOOM_RATE,
   type CanvasActions,
   type EditMode,
   type Tool,
-  type WheelMode,
 } from "./config";
 
 import { CanvasToolbar } from "./CanvasToolbar";
@@ -82,69 +82,71 @@ export function PageCanvas({
 
   // The toolset starts where the previous page of the workspace left it; read once, since the canvas owns it after
   const [startingToolset] = useState<Toolset>(() => initialToolset ?? {});
-  const [tool, setTool] = useState<Tool>(startingToolset.tool ?? "select");
-  const [kind, setKind] = useState<RegionKind>(startingToolset.kind ?? "text");
-  const [brushLayer, setBrushLayer] = useState<MaskLayerName>(startingToolset.brushLayer ?? "add");
-  const [brushSize, setBrushSize] = useState(startingToolset.brushSize ?? DEFAULT_BRUSH);
-  const [showMask, setShowMask] = useState(startingToolset.showMask ?? false);
-  /** Spots painted into the add layer that haven't been re-cleaned yet, in page pixels. */
-  const [paintedAreas, setPaintedAreas] = useState<Area[]>([]);
-  const [recleaning, setRecleaning] = useState(false);
+  // Opened with the toolset the previous page was left with. In a layout effect, so the store is set before paint
+  // without updating the outgoing canvas — which is still mounted while this one renders — mid-render. The ref
+  // keeps StrictMode's second mount in development from opening the page twice.
+  const opened = useRef(false);
+  useLayoutEffect(() => {
+    if (opened.current) return;
+    opened.current = true;
+    useCanvasStore.getState().open(startingToolset);
+  }, [startingToolset]);
+  const { tool, kind, brushLayer, brushSize, showMask, showText, mode, paintedAreas, recleaning, zoom, busyCount, error } = useCanvasStore();
+  /**
+   * The page these rendered values belong to. The first render of a new canvas reads the store before the layout
+   * effect above opens it, so it holds the *previous* page's tools — and an effect from that render runs all the
+   * same. Anything that tells the editor what it is looking at, or writes to the workspace's remembered toolset,
+   * has to sit out that one render, or it would report the page the user just left.
+   */
+  const session = useCanvasStore((state) => state.session);
+  const rendersThisPage = (): boolean => session === useCanvasStore.getState().session;
+  const { setTool, setMode, setBrushLayer, setBrushSize, setShowMask, setPaintedAreas, setRecleaning, setZoom, addBusy, setError } = useCanvasStore.getState();
   /** Bumped to load the mask layers from the server again (after a failed save). */
   const [layersNonce, setLayersNonce] = useState(0);
   const maskRef = useRef<MaskLayers | null>(null);
   const brushCursorRef = useRef<Circle | null>(null);
-  const [mode, setMode] = useState<EditMode>(startingToolset.mode ?? "regions");
-  const [showText, setShowText] = useState(startingToolset.showText ?? true);
   /** Floating lettering objects by block id. */
   const letteringRef = useRef(new Map<number, LetteringObject>());
   const panelHostRef = useRef<HTMLDivElement>(null);
   const [panelPosition, setPanelPosition] = useState<{ left: number; top: number } | null>(null);
   /** Where the user dragged the lettering panel; it stays there for every selection until it's set to follow again. */
   const [panelPin, setPanelPin] = useState<{ left: number; top: number } | null>(null);
-  const [wheelMode, setWheelModeState] = useState<WheelMode>(readWheelMode);
-  const setWheelMode = (mode: WheelMode) => {
-    setWheelModeState(mode);
-    try {
-      localStorage.setItem(WHEEL_MODE_KEY, mode);
-    } catch {
-      // Not persisted; the choice still applies for this visit
-    }
-  };
-  const [zoom, setZoom] = useState(1);
-  const [busyCount, setBusyCount] = useState(0);
-  const [error, setError] = useState<string | null>(null);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const historyRef = useRef<CommandHistory | null>(null);
   historyRef.current ??= new CommandHistory(rerender);
   const history = historyRef.current;
 
-  // Latest props for handlers registered once on the canvas
-  const showTextLayer = mode === "lettering" || (showText && textPreviewAvailable);
+  // Latest props for handlers registered once on the canvas; what the canvas is *set to* lives in the store, which
+  // those handlers read with getState()
+  const showTextLayer = showsTextLayer(useCanvasStore.getState(), textPreviewAvailable);
   const live = useRef({
-    pageId, page, blocks, disabled, tool, kind, wheelMode, brushLayer, brushSize, showMask, showTextLayer, mode, selectedId, lettering,
+    pageId, page, blocks, disabled, selectedId, lettering, textPreviewAvailable,
     onSelect, onDetail, onReload, onImagesChanged, onStylePreview, relayout, onModeChange, onToolsetChange,
   });
   live.current = {
-    pageId, page, blocks, disabled, tool, kind, wheelMode, brushLayer, brushSize, showMask, showTextLayer, mode, selectedId, lettering,
+    pageId, page, blocks, disabled, selectedId, lettering, textPreviewAvailable,
     onSelect, onDetail, onReload, onImagesChanged, onStylePreview, relayout, onModeChange, onToolsetChange,
   };
 
   // Every toolset change is handed on, so the workspace's next page opens with it
   useEffect(() => {
+    if (!rendersThisPage()) return;
     live.current.onToolsetChange?.({ tool, kind, brushLayer, brushSize, showMask, mode, showText });
-  }, [tool, kind, brushLayer, brushSize, showMask, mode, showText]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, kind, brushLayer, brushSize, showMask, mode, showText, session]);
 
   /** Runs server changes one after another; a failure shows the error, drops the history and reloads the page. */
   const enqueue = useCallback((task: () => Promise<void>) => {
-    setBusyCount((n) => n + 1);
+    // Whatever this reports belongs to the page open now; a page opened meanwhile has its own busy count and error
+    const session = canvasSession();
+    addBusy(1);
     queueRef.current = queueRef.current
       .then(async () => {
         await task();
-        setError(null);
+        ifCurrent(session, () => setError(null));
       })
       .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : String(err));
+        ifCurrent(session, () => setError(err instanceof Error ? err.message : String(err)));
         history.clear();
         for (const entry of entriesRef.current.values()) entry.key = "";
         // The reload brings back the server's styles: pending canvas baselines no longer apply
@@ -153,7 +155,7 @@ export function PageCanvas({
         // A failed layer save leaves the overlay ahead of the server: show what the server has
         setLayersNonce((n) => n + 1);
       })
-      .finally(() => setBusyCount((n) => n - 1));
+      .finally(() => ifCurrent(session, () => addBusy(-1)));
   }, [history]);
 
   /** Applies a change now and records it for undo. */
@@ -269,9 +271,13 @@ export function PageCanvas({
       mask.apply(record, state);
       if (maskRef.current === mask) canvasRef.current?.requestRenderAll();
     };
+    // The page this stroke was painted on; its saves can land after another page has opened
+    const strokeSession = canvasSession();
     /** Queues the stroke's area for Re-clean: only when the change can add pixels to the effective mask. */
     const markForReclean = () => {
-      if (live.current.pageId === pageId) setPaintedAreas((areas) => [...areas, record.area]);
+      // Not `live.current.pageId === pageId` — both are this canvas's own, so that was always true. The painted
+      // areas are shared, and the next page must not be offered a Re-clean of coordinates from this one.
+      ifCurrent(strokeSession, () => setPaintedAreas((areas) => [...areas, record.area]));
     };
     perform({
       label: record.layer === "add" ? "Paint mask" : "Erase mask",
@@ -433,13 +439,13 @@ export function PageCanvas({
       cancelDrawing();
       if (points.length < 3) return;
       const geometry = polygonGeometry(points, live.current.page);
-      if (geometry.w >= MIN_REGION && geometry.h >= MIN_REGION) createRegion(live.current.kind, geometry);
+      if (geometry.w >= MIN_REGION && geometry.h >= MIN_REGION) createRegion(canvasState().kind, geometry);
     };
 
     const addPolygonPoint = (scene: { x: number; y: number }) => {
       const p = pagePoint(scene, live.current.page);
       const scale = canvas.getZoom();
-      const style = draftOptions(live.current.kind);
+      const style = draftOptions(canvasState().kind);
       if (!polygon) {
         polygon = { points: [], markers: [], outline: null, rubber: new Line([p.x, p.y, p.x, p.y], { ...style, fill: undefined }) };
         canvas.add(polygon.rubber);
@@ -460,7 +466,7 @@ export function PageCanvas({
         radius: 4 / scale,
         originX: "center",
         originY: "center",
-        fill: REGION_COLORS[live.current.kind].stroke,
+        fill: REGION_COLORS[canvasState().kind].stroke,
         selectable: false,
         evented: false,
       });
@@ -475,7 +481,7 @@ export function PageCanvas({
     const deleteSelected = () => {
       const active = canvas.getActiveObject();
       // Lettering stands for its region: deleting it removes the region (undoable)
-      const id = blockIdOf(active) ?? letteringIdOf(active) ?? (live.current.mode === "lettering" ? live.current.selectedId ?? undefined : undefined);
+      const id = blockIdOf(active) ?? letteringIdOf(active) ?? (canvasState().mode === "lettering" ? live.current.selectedId ?? undefined : undefined);
       if (id !== undefined && !live.current.disabled) deleteRegion(id);
     };
 
@@ -494,7 +500,7 @@ export function PageCanvas({
       const e = opt.e;
       e.preventDefault();
       e.stopPropagation();
-      const mode = live.current.wheelMode;
+      const mode = canvasState().wheelMode;
       // Wheels report pixels, lines (Firefox) or pages: normalise to pixels, and cap one event so a flick can't jump levels
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.getHeight() : 1;
       const deltaX = Math.max(-WHEEL_MAX_DELTA, Math.min(WHEEL_MAX_DELTA, e.deltaX * unit));
@@ -534,7 +540,7 @@ export function PageCanvas({
       const focused = document.activeElement;
       if (focused instanceof HTMLElement && isTyping(focused)) focused.blur();
       // Lettering mode: pressing a region that has no lettering yet selects it (so its lettering can be typed)
-      if (live.current.mode === "lettering" && !opt.target && !spaceRef.current && e.button !== 1) {
+      if (canvasState().mode === "lettering" && !opt.target && !spaceRef.current && e.button !== 1) {
         const p = opt.scenePoint;
         const hit = live.current.blocks
           .filter((b) => (b.kind === "text" || b.kind === "sfx") && p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h)
@@ -542,25 +548,26 @@ export function PageCanvas({
         live.current.onSelect(hit ? hit.id : null);
       }
       // Pan: space-drag or middle-drag with any tool, or dragging empty space with the select tool or in Lettering mode
-      const panTool = live.current.mode === "lettering" || live.current.tool === "select";
+      const panTool = canvasState().mode === "lettering" || canvasState().tool === "select";
       if (spaceRef.current || e.button === 1 || (panTool && !opt.target)) {
         panning = { x: e.clientX, y: e.clientY };
         canvas.setCursor("grabbing");
         return;
       }
-      if (live.current.mode === "lettering") return;
-      if (live.current.tool === "brush") {
+      if (canvasState().mode === "lettering") return;
+      if (canvasState().tool === "brush") {
         const mask = maskRef.current;
         if (live.current.disabled || !mask || e.button === 2) return;
         painting = true;
         mask.setVisible(true);
-        mask.beginStroke(live.current.brushLayer, pagePoint(opt.scenePoint, live.current.page), live.current.brushSize);
+        mask.beginStroke(canvasState().brushLayer, pagePoint(opt.scenePoint, live.current.page), canvasState().brushSize);
         canvas.requestRenderAll();
         return;
       }
       const current = live.current;
-      if (current.disabled || current.tool === "select") return;
-      if (current.tool === "polygon") {
+      const { tool, kind } = canvasState();
+      if (current.disabled || tool === "select") return;
+      if (tool === "polygon") {
         // Pressing an existing region doesn't start a polygon; once one is being drawn, points may land on
         // top of other regions (outlining a bubble that already has a detected box inside it)
         if (opt.target && !polygon) return;
@@ -570,8 +577,8 @@ export function PageCanvas({
       // Pressing on an existing region selects or moves it instead of drawing on top
       if (opt.target) return;
       const start = pagePoint(opt.scenePoint, current.page);
-      const style = draftOptions(current.kind);
-      const obj = current.tool === "rect"
+      const style = draftOptions(kind);
+      const obj = tool === "rect"
         ? new Rect({ ...style, left: start.x, top: start.y, width: 1, height: 1 })
         : new Ellipse({ ...style, left: start.x, top: start.y, rx: 0.5, ry: 0.5 });
       canvas.add(obj);
@@ -587,8 +594,8 @@ export function PageCanvas({
         return;
       }
       const p = pagePoint(opt.scenePoint, live.current.page);
-      if (live.current.mode === "regions" && live.current.tool === "brush") {
-        brushCursor.set({ left: p.x, top: p.y, radius: live.current.brushSize / 2, visible: true });
+      if (canvasState().mode === "regions" && canvasState().tool === "brush") {
+        brushCursor.set({ left: p.x, top: p.y, radius: canvasState().brushSize / 2, visible: true });
         canvas.bringObjectToFront(brushCursor);
         if (painting) maskRef.current?.strokeTo(p);
         canvas.requestRenderAll();
@@ -624,15 +631,15 @@ export function PageCanvas({
       const geometry = geometryOf(obj, live.current.page);
       canvas.remove(obj);
       canvas.requestRenderAll();
-      if (geometry.w >= MIN_REGION && geometry.h >= MIN_REGION) createRegion(live.current.kind, geometry);
+      if (geometry.w >= MIN_REGION && geometry.h >= MIN_REGION) createRegion(canvasState().kind, geometry);
     });
 
     canvas.on("mouse:dblclick", () => {
-      if (live.current.mode === "lettering") {
+      if (canvasState().mode === "lettering") {
         focusLetteringText();
         return;
       }
-      if (live.current.tool === "polygon") finishPolygon();
+      if (canvasState().tool === "polygon") finishPolygon();
     });
 
     // Live re-wrap while a lettering box is resized (once per frame)
@@ -774,7 +781,7 @@ export function PageCanvas({
       .then(() => {
         if (controller.signal.aborted || canvasRef.current !== canvas) return;
         mask.attach(canvas);
-        mask.setVisible(live.current.mode === "regions" && (live.current.showMask || live.current.tool === "brush"));
+        mask.setVisible(canvasState().mode === "regions" && (canvasState().showMask || canvasState().tool === "brush"));
         maskRef.current = mask;
         canvas.requestRenderAll();
       })
@@ -827,9 +834,10 @@ export function PageCanvas({
 
   // Switching modes tells the editor (Lettering switches the background to the cleaned page)
   useEffect(() => {
+    if (!rendersThisPage()) return;
     live.current.onModeChange?.(mode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [mode, session]);
 
   // A different page starts a fresh history and has nothing painted yet
   useEffect(() => {
@@ -838,9 +846,7 @@ export function PageCanvas({
   }, [pageId, history]);
 
   // Keyboard: tools, undo / redo, delete, polygon finish / cancel, fit, space to pan
-  useCanvasShortcuts({
-    enqueue, history, canvasRef, spaceRef, actionsRef, live, setMode, setTool, setBrushLayer, setBrushSize, setShowMask, focusLetteringText,
-  });
+  useCanvasShortcuts({ enqueue, history, canvasRef, spaceRef, actionsRef, live, focusLetteringText });
 
   /** Keeps the floating lettering panel next to the selected block, above or below it depending on the room. */
   const updatePanelRef = useRef<() => void>(() => {});
@@ -887,7 +893,8 @@ export function PageCanvas({
     // The areas belong to this page: the queued run must not re-clean, or update, a page opened meanwhile
     const targetPageId = pageId;
     if (areas.length === 0) return;
-    setBusyCount((n) => n + 1);
+    const session = canvasSession();
+    addBusy(1);
     setRecleaning(true);
     queueRef.current = queueRef.current
       .then(async () => {
@@ -896,16 +903,18 @@ export function PageCanvas({
           if (live.current.pageId !== targetPageId) return;
           live.current.onDetail(detail);
           live.current.onImagesChanged();
-          setPaintedAreas((current) => current.filter((area) => !used.includes(area)));
-          setError(null);
+          ifCurrent(session, () => {
+            setPaintedAreas((current) => current.filter((area) => !used.includes(area)));
+            setError(null);
+          });
         } catch (err) {
-          if (live.current.pageId === targetPageId) setError(err instanceof Error ? err.message : String(err));
+          if (live.current.pageId === targetPageId) ifCurrent(session, () => setError(err instanceof Error ? err.message : String(err)));
         }
       })
-      .finally(() => {
+      .finally(() => ifCurrent(session, () => {
         setRecleaning(false);
-        setBusyCount((n) => n - 1);
-      });
+        addBusy(-1);
+      }));
   };
 
 
@@ -913,36 +922,15 @@ export function PageCanvas({
     <section className="flex-1 min-w-0 min-h-0 flex flex-col">
       <CanvasToolbar
         toolbarStart={toolbarStart}
-        mode={mode}
-        setMode={setMode}
-        tool={tool}
-        setTool={setTool}
         disabled={disabled}
-        brushLayer={brushLayer}
-        setBrushLayer={setBrushLayer}
-        brushSize={brushSize}
-        setBrushSize={setBrushSize}
-        kind={kind}
-        setKind={setKind}
-        showMask={showMask}
-        setShowMask={setShowMask}
-        setShowText={setShowText}
         textPreviewAvailable={textPreviewAvailable}
-        showTextLayer={showTextLayer}
         reclean={reclean}
-        recleaning={recleaning}
         recleanTargets={recleanTargets}
         recleanTitle={recleanTitle}
-        paintedAreas={paintedAreas}
         enqueue={enqueue}
         history={history}
-        busyCount={busyCount}
         actionsRef={actionsRef}
         selectedId={selectedId}
-        wheelMode={wheelMode}
-        setWheelMode={setWheelMode}
-        zoom={zoom}
-        error={error}
       />
       <div ref={panelHostRef} className="relative flex-1 min-h-0 overflow-hidden">
         <div ref={hostRef} className="absolute inset-0" />

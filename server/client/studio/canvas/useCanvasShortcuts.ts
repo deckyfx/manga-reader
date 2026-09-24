@@ -2,10 +2,10 @@
  * The page canvas's keyboard: tool keys, undo / redo, delete, polygon finish / cancel, fit and zoom, the brush keys,
  * and Space to pan. Split out of PageCanvas.tsx; registered once per history, reading the latest state through `live`.
  */
-import { useEffect, type Dispatch, type MutableRefObject, type RefObject, type SetStateAction } from "react";
+import { useEffect, type MutableRefObject, type RefObject } from "react";
 import type { Canvas } from "fabric";
-import type { MaskLayerName } from "../../api";
-import { isTyping, MAX_BRUSH, MIN_BRUSH, type CanvasActions, type EditMode, type Tool } from "./config";
+import { useCanvasStore } from "../../stores/canvas";
+import { isTyping, type CanvasActions, type Tool } from "./config";
 import type { CommandHistory } from "./history";
 
 interface ShortcutDeps {
@@ -15,21 +15,15 @@ interface ShortcutDeps {
   /** Whether Space is held (panning). */
   spaceRef: MutableRefObject<boolean>;
   actionsRef: RefObject<CanvasActions | null>;
-  /** The canvas's latest props and state, read when a key is pressed. */
-  live: RefObject<{ mode: EditMode; tool: Tool; selectedId: number | null; onSelect: (id: number | null) => void }>;
-  setMode: Dispatch<SetStateAction<EditMode>>;
-  setTool: Dispatch<SetStateAction<Tool>>;
-  setBrushLayer: Dispatch<SetStateAction<MaskLayerName>>;
-  setBrushSize: Dispatch<SetStateAction<number>>;
-  setShowMask: Dispatch<SetStateAction<boolean>>;
+  /** The canvas's latest props, read when a key is pressed; what it is set to comes from the store. */
+  live: RefObject<{ selectedId: number | null; onSelect: (id: number | null) => void }>;
   /** Puts the keyboard in the floating panel's lettering text field. */
   focusLetteringText: () => void;
 }
 
-export function useCanvasShortcuts({
-  enqueue, history, canvasRef, spaceRef, actionsRef, live, setMode, setTool, setBrushLayer, setBrushSize, setShowMask, focusLetteringText,
-}: ShortcutDeps): void {
+export function useCanvasShortcuts({ enqueue, history, canvasRef, spaceRef, actionsRef, live, focusLetteringText }: ShortcutDeps): void {
   useEffect(() => {
+    const { setMode, setTool, setBrushLayer, setBrushSize, setShowMask } = useCanvasStore.getState();
     const undo = () => enqueue(() => history.undo());
     const redo = () => enqueue(() => history.redo());
     const onKeyDown = (e: KeyboardEvent) => {
@@ -69,13 +63,13 @@ export function useCanvasShortcuts({
       else if (key === "p") pickTool("polygon");
       else if (key === "b") pickTool("brush");
       else if (key === "l") setMode((current) => (current === "lettering" ? "regions" : "lettering"));
-      else if (key === "enter" && live.current.mode === "lettering" && live.current.selectedId !== null) {
+      else if (key === "enter" && useCanvasStore.getState().mode === "lettering" && live.current.selectedId !== null) {
         e.preventDefault();
         focusLetteringText();
       }
       else if (key === "x") setBrushLayer((layer) => (layer === "add" ? "erase" : "add"));
-      else if (key === "[") setBrushSize((size) => Math.max(MIN_BRUSH, Math.round(size / 1.25)));
-      else if (key === "]") setBrushSize((size) => Math.min(MAX_BRUSH, Math.round(size * 1.25)));
+      else if (key === "[") setBrushSize((size) => size / 1.25);
+      else if (key === "]") setBrushSize((size) => size * 1.25);
       else if (key === "m") setShowMask((shown) => !shown);
       else if (key === "enter") actionsRef.current?.finishPolygon();
       else if (key === "escape") {
@@ -93,8 +87,8 @@ export function useCanvasShortcuts({
       spaceRef.current = false;
       const canvas = canvasRef.current;
       if (canvas) {
-        canvas.skipTargetFind = live.current.mode === "regions" && live.current.tool === "brush";
-        canvas.setCursor(live.current.mode === "regions" && live.current.tool !== "select" ? "crosshair" : "default");
+        canvas.skipTargetFind = useCanvasStore.getState().mode === "regions" && useCanvasStore.getState().tool === "brush";
+        canvas.setCursor(useCanvasStore.getState().mode === "regions" && useCanvasStore.getState().tool !== "select" ? "crosshair" : "default");
       }
     };
     window.addEventListener("keydown", onKeyDown);

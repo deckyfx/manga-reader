@@ -4,17 +4,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, CheckSquare, FolderInput, FolderPlus, Layers, Loader2, Plus, Search, Trash2, X, Link2 } from "lucide-react";
 import { createWorkspace, importWorkspacePageUrls, listPages, listWorkspaces, pageFileUrl, type PageScope, type StudioPageSummary } from "../api";
 import { ChapterPicker } from "../components/ChapterPicker";
+import { useReadingStore } from "../stores/reading";
 import { DiscardPageDialog } from "../components/DiscardPageDialog";
 import { FinalizeDialog } from "../components/FinalizeDialog";
 import { SelectionBar } from "../components/SelectionBar";
-import { usePageSelection } from "../hooks/usePageSelection";
+import { usePageSelection } from "../stores/selection";
 import { Modal } from "../components/Modal";
 import { AddPageUrlsDialog } from "../components/AddPageUrlsDialog";
 import { NewPageDialog } from "../components/NewPageDialog";
 import { StudioPageCard, pageLabel } from "../components/StudioPageCard";
 import { useToast } from "../components/Toast";
 
-const SCOPE_KEY = "studio-scope";
 const SCOPES: { value: PageScope; label: string; hint: string }[] = [
   { value: "inbox", label: "Inbox", hint: "Drafts: pages from the extension and uploads, not filed into a chapter yet" },
   { value: "chapter", label: "In chapters", hint: "Pages that belong to a chapter — editing one changes what people read once you publish" },
@@ -33,27 +33,18 @@ function workspaceName(urls: string[]): string {
   return `Imported ${new Date().toLocaleDateString()}`;
 }
 
-function readScope(): PageScope {
-  try {
-    const saved = localStorage.getItem(SCOPE_KEY);
-    return saved === "chapter" || saved === "all" ? saved : "inbox";
-  } catch {
-    return "inbox";
-  }
-}
-
 /** The Studio: the workspaces being worked on, then the loose pages (Inbox drafts and chapter pages). */
 export function StudioPagesPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
-  const [search, setSearch] = useState("");
+  const { scope, search } = useReadingStore();
+  const { setScope, setSearch } = useReadingStore.getState();
   const [filing, setFiling] = useState<StudioPageSummary | null>(null);
   const [discarding, setDiscarding] = useState<StudioPageSummary | null>(null);
-  const selection = usePageSelection();
+  const selection = usePageSelection("studio");
   /** The picked pages, while the finalize dialog asks about them. */
   const [finalizingIds, setFinalizingIds] = useState<string[] | null>(null);
-  const [scope, setScopeState] = useState<PageScope>(readScope);
   const [newWorkspace, setNewWorkspace] = useState<string | null>(null);
   const [importingUrls, setImportingUrls] = useState(false);
   // The workspace an address import made, kept across retries: a second attempt fills the gaps in that workspace
@@ -61,14 +52,6 @@ export function StudioPagesPage() {
   const importWorkspace = useRef<number | null>(null);
   const toast = useToast();
 
-  const setScope = (next: PageScope) => {
-    setScopeState(next);
-    try {
-      localStorage.setItem(SCOPE_KEY, next);
-    } catch {
-      // Not remembered for next time; the choice still applies now
-    }
-  };
 
   const query = { filed: scope, ...(search.trim() ? { q: search.trim() } : {}) };
   const pagesQ = useQuery({ queryKey: ["studio-pages", query], queryFn: () => listPages(query), refetchInterval: 5000 });

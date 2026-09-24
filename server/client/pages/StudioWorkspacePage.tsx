@@ -16,7 +16,7 @@ import { AddPageUrlsDialog } from "../components/AddPageUrlsDialog";
 import { ChapterPicker } from "../components/ChapterPicker";
 import { FinalizeDialog } from "../components/FinalizeDialog";
 import { SelectionBar } from "../components/SelectionBar";
-import { usePageSelection } from "../hooks/usePageSelection";
+import { usePageSelection } from "../stores/selection";
 import { LoadFailure } from "../components/LoadFailure";
 import { Modal } from "../components/Modal";
 import { forgetWorkspace } from "../lib/optimistic";
@@ -39,7 +39,7 @@ export function StudioWorkspacePage() {
   const [filing, setFiling] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [importingUrls, setImportingUrls] = useState(false);
-  const selection = usePageSelection();
+  const selection = usePageSelection(`workspace:${id}`);
   const [finalizingIds, setFinalizingIds] = useState<string[] | null>(null);
   // Where the address list's first send started, so sending the same list again fills the same positions
   const urlStart = useRef<{ workspaceId: number; index: number } | null>(null);

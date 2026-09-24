@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -44,23 +44,13 @@ import { usePageJobEvents } from "../hooks/usePageJobEvents";
 import { PageCanvas, type PageCanvasHandle } from "../studio/canvas/PageCanvas";
 import { buildLettering, relayoutBlock, useTypesetter } from "../studio/text/typesetter";
 import { readToolset, saveToolset, toolsetScope } from "../studio/toolset";
+import { useEditorPage, useEditorStore } from "../stores/editor";
 import { ProcessingView, StageCompare, FinalizedView } from "../studio/editor/views";
 import { BlockEditor, blockCheck, SfxBlockRow } from "../studio/editor/BlockRows";
 import { LetteringPanel } from "../studio/editor/StyleEditor";
 import { HistoryPanel } from "../studio/editor/HistoryPanel";
 
 const isBusy = (status: string | undefined) => status === "queued" || status === "running";
-
-const PANEL_COLLAPSED_KEY = "studio-editor-panel-collapsed";
-
-/** Saved side-panel state; storage can be unavailable (private mode), so default to expanded. */
-function readPanelCollapsed(): boolean {
-  try {
-    return localStorage.getItem(PANEL_COLLAPSED_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
 
 /** The stage that writes each page image; the original is always there. */
 const IMAGE_STAGE: Partial<Record<PageImage, string>> = {
@@ -112,21 +102,40 @@ export function StudioPageEditor() {
     }, release);
   }, []);
 
-  const [view, setView] = useState<"canvas" | "compare">("canvas");
-  const [canvasImage, setCanvasImage] = useState<PageImage>("original.png");
-  const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
-  const [panelCollapsed, setPanelCollapsedState] = useState(readPanelCollapsed);
-  const setPanelCollapsed = (collapsed: boolean) => {
-    setPanelCollapsedState(collapsed);
-    try {
-      localStorage.setItem(PANEL_COLLAPSED_KEY, collapsed ? "1" : "0");
-    } catch {
-      // Not persisted; the choice still applies for this visit
-    }
+  // What the editor is showing: shared with the canvas, the block list and the lettering panel. Page-specific
+  // state comes through useEditorPage, which holds the defaults until the store is this page's; the panel is a
+  // habit of the person's, not a property of the page
+  const { view, canvasImage, selectedBlock, imagesNonce } = useEditorPage(id);
+  const panelCollapsed = useEditorStore((state) => state.panelCollapsed);
+  const { setView, setCanvasImage, selectBlock: setSelectedBlock, setPanelCollapsed, imagesChanged } = useEditorStore.getState();
+  // A page opens fresh: nothing selected, no image rewritten yet. In a layout effect, not during render: this
+  // editor is keyed by page, so a render-phase reset would notify the outgoing editor while this one renders.
+  /** Which opening of the editor this component is, so its own leftovers can be told from the next visit's. */
+  const opening = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    useEditorStore.getState().openPage(id);
+    opening.current = useEditorStore.getState().session;
+  }, [id]);
+  /**
+   * Whether the editor is still showing this page. Work started here can finish after the user has moved on — a
+   * mutation's onSuccess runs whether or not the component is still mounted, and so do the canvas's callbacks —
+   * and the editor's state is shared with whatever page is open now.
+   */
+  const showingThisPage = (): boolean => useEditorStore.getState().pageId === id;
+  /**
+   * Whether this editor is still the one open. Stricter than the page: leaving the page and coming back opens a
+   * new editor with the same id, and the first visit's leftovers must not reach into the second's.
+   */
+  const thisEditor = (): boolean => showingThisPage() && useEditorStore.getState().session === opening.current;
+  /**
+   * Selecting a block, but only for the editor that asked. The canvas selects the region it has just created,
+   * which it can only do once the server has answered — by then the user may have moved on, or come back to a
+   * fresh editor of the same page, and the selection is shared.
+   */
+  const selectBlock = (blockId: number | null): void => {
+    if (thisEditor()) setSelectedBlock(blockId);
   };
   const canvasHandle = useRef<PageCanvasHandle>(null);
-  /** Bumped when a cleaned image is rewritten, so image URLs change and the browser loads the new file. */
-  const [imagesNonce, setImagesNonce] = useState(0);
 
   const [published, setPublished] = useState<{ revision: number; notified: number } | null>(null);
   const onPublished = (result: { revision: number; notified: number }) => {
@@ -138,7 +147,7 @@ export function StudioPageEditor() {
   const translateAllM = useMutation({ mutationFn: () => runStage(id, "translate"), onSuccess: setDetail });
   const afterClean = (detail: StudioPageDetail) => {
     setDetail(detail);
-    setImagesNonce((n) => n + 1);
+    if (showingThisPage()) imagesChanged();
   };
   const cleanTextM = useMutation({ mutationFn: () => runStage(id, "clean_text"), onSuccess: afterClean });
   const cleanSfxM = useMutation({ mutationFn: () => runStage(id, "clean_sfx"), onSuccess: afterClean });
@@ -202,7 +211,7 @@ export function StudioPageEditor() {
     mutationFn: (blockId: number) => deleteBlock(id, blockId),
     onSuccess: (next) => {
       setDetail(next);
-      setSelectedBlock(null);
+      selectBlock(null);
     },
   });
   /** Deletes a region: undoable through the canvas when it's open, otherwise after a confirmation. */
@@ -342,7 +351,10 @@ export function StudioPageEditor() {
       onSelect: () => afterSaves("translate-all", () => translateAllM.mutate()),
       unavailable: unavailableWhen(translating, [translateAllM.isPending, "Already translating"], [queued.has("translate-all"), "Waiting for edits to save"]),
       pending: translateAllM.isPending,
-      attention: stageStatus("translate") === "stale",
+      // Only when a block's source text has changed since it was translated — which is what the flag means, set
+      // when a reading or an edit changes the Japanese and cleared when it is translated. The translate stage's own
+      // status would add nothing and hides this on a page that has never been translated at all.
+      attention: blocks.some((block) => block.needs_translate),
     },
     {
       key: "render",
@@ -581,10 +593,10 @@ export function StudioPageEditor() {
             blocks={blocks}
             disabled={busy}
             selectedId={selectedBlock}
-            onSelect={setSelectedBlock}
+            onSelect={selectBlock}
             onDetail={setDetail}
             onReload={() => void qc.invalidateQueries({ queryKey: ["studio-page", id] })}
-            onImagesChanged={() => setImagesNonce((n) => n + 1)}
+            onImagesChanged={() => { if (showingThisPage()) imagesChanged(); }}
             lettering={letteringPlan.items}
             textPreviewAvailable={canvasImage === "clean-text.png" || canvasImage === "clean-sfx.png"}
             onStylePreview={setBlockStyle}
@@ -673,13 +685,13 @@ export function StudioPageEditor() {
           {typesetterError && <p className="text-xs text-red-400">Lettering preview unavailable: {typesetterError}</p>}
           {placeError && <p className="text-xs text-amber-400">Couldn't place the lettering yet: {placeError}</p>}
           {textBlocks.map((block) => (
-            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} setBlockStyle={setBlockStyle} onDelete={() => void removeBlock(block.id)} />
+            <BlockEditor key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} afterSaves={afterSaves} queued={queued} selected={selectedBlock === block.id} onSelect={() => selectBlock(block.id)} setBlockStyle={setBlockStyle} onDelete={() => void removeBlock(block.id)} />
           ))}
           {sfxBlocks.length > 0 && (
             <div className="pt-2 border-t border-gray-800 space-y-1.5">
               <div className="text-xs text-gray-400">Sound effects · ticked ones are removed by Clean SFX; give one lettering to draw it again</div>
               {sfxBlocks.map((block) => (
-                <SfxBlockRow key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} selected={selectedBlock === block.id} onSelect={() => setSelectedBlock(block.id)} setBlockStyle={setBlockStyle} onDelete={() => void removeBlock(block.id)} />
+                <SfxBlockRow key={block.id} pageId={page.id} block={block} disabled={busy} onChanged={setDetail} trackSave={trackSave} selected={selectedBlock === block.id} onSelect={() => selectBlock(block.id)} setBlockStyle={setBlockStyle} onDelete={() => void removeBlock(block.id)} />
               ))}
             </div>
           )}

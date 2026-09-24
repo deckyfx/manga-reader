@@ -5,19 +5,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, Maximize, Minimize, Move
 import { getChapter, readPageImageUrl, type ReadPage } from "../api";
 import { Reviews } from "../components/Reviews";
 import { clearProgress, saveProgress } from "../lib/read-progress";
-
-type FitMode = "height" | "width" | "original";
-
-const FIT_KEY = "read-fit-mode";
-
-function readFitMode(): FitMode {
-  try {
-    const saved = localStorage.getItem(FIT_KEY);
-    return saved === "width" || saved === "original" ? saved : "height";
-  } catch {
-    return "height";
-  }
-}
+import { useReadingStore, type FitMode } from "../stores/reading";
 
 const FIT_CLASS: Record<FitMode, string> = {
   height: "max-h-full max-w-full object-contain",
@@ -47,17 +35,9 @@ export function ReaderPage() {
 
   const chapterQ = useQuery({ queryKey: ["chapter", chapterId], queryFn: () => getChapter(chapterId), enabled: Number.isFinite(chapterId) });
 
-  const [fit, setFitState] = useState<FitMode>(readFitMode);
-  const setFit = (mode: FitMode) => {
-    setFitState(mode);
-    try {
-      localStorage.setItem(FIT_KEY, mode);
-    } catch {
-      // Not persisted; the choice still applies for this visit
-    }
-  };
+  const { fit, showReviews } = useReadingStore();
+  const { setFit, setShowReviews } = useReadingStore.getState();
   const [immersive, setImmersive] = useState(false);
-  const [showReviews, setShowReviews] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   /** Which third of the view the pointer is over, to show that side's arrow. */
@@ -274,7 +254,7 @@ export function ReaderPage() {
         />
         <span>{page.has_result ? "translated" : "original"}</span>
         <button
-          onClick={() => setShowReviews((open) => !open)}
+          onClick={() => setShowReviews(!showReviews)}
           className={`flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-gray-800 ${showReviews ? "text-gray-200" : ""}`}
           title="What readers made of this chapter"
         >
