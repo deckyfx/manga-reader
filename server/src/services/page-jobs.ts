@@ -114,7 +114,7 @@ async function runJob(id: string, page: Buffer, options: SubmitPageOptions): Pro
     const { job } = await measure("detect", () => pipeline.detect(page, options.source));
     await PageStore.setStage(id, "detect", "fresh");
     await stage("ocr", () => pipeline.ocr(job, engines.ocr));
-    await stage("translate", () => pipeline.translate(job, engines.translate));
+    await stage("translate", () => pipeline.translate(job, engines));
     await stage("clean_text", () => pipeline.clean(job, "text"));
     if (options.cleanSfx) await stage("clean_sfx", () => pipeline.clean(job, "sfx"));
     await stage("render", () => pipeline.render(job));

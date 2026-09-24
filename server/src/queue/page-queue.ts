@@ -6,19 +6,29 @@ const log = childLogger("page-queue");
 /** Tail of the page work queue; always settles successfully so a failed task never breaks the chain. */
 let pageQueue: Promise<void> = Promise.resolve();
 
+/** What the queue is running, while it runs it. Only labelled work says what it is; the rest reads as busy. */
+let running: string | null = null;
+
+/** What the server is working on at this moment, or null when the queue is idle. */
+export function currentWork(): string | null {
+  return running;
+}
+
 /**
  * Page work (full runs and Studio re-runs) runs one task at a time: every stage is CPU-bound and shares the
  * same models. The task starts after the previous one settles; if it fails, the error is logged here (callers
  * that need the outcome use `runExclusiveResult`).
  */
-export function runExclusive(task: () => Promise<void>, label?: string): void {
+export function runExclusive(task: () => Promise<void>, label?: string): Promise<void> {
   pageQueue = pageQueue
     .then(async () => {
       // Measured here, where the task actually starts: the time a task spent waiting its turn is not work it did
       const probe = label === undefined ? null : startProbe();
+      running = label ?? "page work";
       try {
         await task();
       } finally {
+        running = null;
         if (probe && label !== undefined) {
           const usage = probe.stop();
           log.info({ work: label, ...usageFields(usage) }, `${label} · ${describeUsage(usage)}`);
@@ -26,19 +36,22 @@ export function runExclusive(task: () => Promise<void>, label?: string): void {
       }
     })
     .catch((err: unknown) => log.error({ err }, "Page queue task failed"));
+  return pageQueue;
 }
 
 /** Like `runExclusive`, but resolves with the task's result, or rejects with its error (including a synchronous throw). */
 export function runExclusiveResult<T>(task: () => Promise<T>, label?: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    runExclusive(async () => {
-      try {
-        resolve(await task());
-      } catch (err) {
-        reject(err);
-      }
-    }, label);
-  });
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown };
+  // Settled after the queue's own bookkeeping, not inside the task: resolving from in there let the caller carry
+  // on while this task still counted as the work in progress, so a watcher saw work that had already finished
+  const finished = runExclusive(async () => {
+    try {
+      outcome = { ok: true, value: await task() };
+    } catch (error) {
+      outcome = { ok: false, error };
+    }
+  }, label);
+  return finished.then(() => (outcome.ok ? outcome.value : Promise.reject(outcome.error)));
 }
 
 /** Tail of each page's lock chain; removed once the page has no pending work. */

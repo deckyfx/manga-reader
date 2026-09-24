@@ -523,7 +523,7 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
           if (stage === "translate") {
             const covered = covers(job.blocks.filter((b) => b.kind === "text" && b.source_text?.trim()));
             const before = texts("translated_text");
-            await pipeline.translate(job, pageEngines.translate, ids);
+            await pipeline.translate(job, pageEngines, ids);
             return { wholeStage: covered, changed: texts("translated_text") !== before };
           }
           // Cleaning always covers the whole kind; to fix part of the page use POST …/reclean with areas. A new image

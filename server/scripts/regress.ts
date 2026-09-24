@@ -96,7 +96,7 @@ async function readOptions(name: string): Promise<CaseOptions> {
 }
 
 /** Runs one page through the pipeline into the run folder and measures it. */
-async function runPage(name: string, image: string, engines: { ocr: PipelineEngines["ocr"]; translate?: PipelineEngines["translate"] }): Promise<PageMetrics> {
+async function runPage(name: string, image: string, engines: { ocr: PipelineEngines["ocr"]; translate?: Pick<PipelineEngines, "translate" | "batchSize"> }): Promise<PageMetrics> {
   const options = await readOptions(name);
   const dir = join(RUN_DIR, name);
   await rm(dir, { recursive: true, force: true });

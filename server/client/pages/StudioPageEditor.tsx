@@ -42,6 +42,7 @@ import { useConfirm } from "../components/ConfirmDialog";
 import { pageStatus, StatusBadge } from "../components/StatusBadge";
 import { usePageJobEvents } from "../hooks/usePageJobEvents";
 import { PageCanvas, type PageCanvasHandle } from "../studio/canvas/PageCanvas";
+import { ResourceHud } from "../studio/ResourceHud";
 import { buildLettering, relayoutBlock, useTypesetter } from "../studio/text/typesetter";
 import { readToolset, saveToolset, toolsetScope } from "../studio/toolset";
 import { useEditorPage, useEditorStore } from "../stores/editor";
@@ -743,6 +744,7 @@ export function StudioPageEditor() {
           }}
         />
       )}
+      <ResourceHud />
     </div>
   );
 }

@@ -7,7 +7,7 @@ import { describeUsage, startProbe, totalUsage, usageFields, type Usage } from "
 
 /** A Usage with the fields a test cares about, and unremarkable values for the rest. */
 function usage(fields: Partial<Usage>): Usage {
-  return { wallMs: 1000, cpuMs: 1000, cpuAvg: 100, cpuPeak: 100, rssAvg: 0, rssPeak: 0, gpuAvg: null, gpuPeak: null, vramPeak: null, cores: 8, samples: 2, ...fields };
+  return { wallMs: 1000, cpuMs: 1000, cpuAvg: 100, cpuPeak: 100, rssAvg: 0, rssPeak: 0, rssAdded: 0, gpuAvg: null, gpuPeak: null, vramPeak: null, cores: 8, samples: 2, ...fields };
 }
 
 describe("measuring work", () => {
@@ -27,6 +27,9 @@ describe("measuring work", () => {
     // Memory is the process's own, which is never nothing — this is what the JS heap can't tell you
     expect(measured.rssPeak).toBeGreaterThan(1_000_000);
     expect(measured.rssPeak).toBeGreaterThanOrEqual(measured.rssAvg);
+    // Whatever it added is part of the peak, and never a negative number when memory was handed back
+    expect(measured.rssAdded).toBeGreaterThanOrEqual(0);
+    expect(measured.rssAdded).toBeLessThanOrEqual(measured.rssPeak);
   });
 
   test("an instant of work still reports rather than dividing by nothing", () => {
@@ -94,6 +97,12 @@ describe("what a whole run cost", () => {
     const total = totalUsage([short, long]);
     expect(total.cpuPeak).toBe(1200);
     expect(total.rssPeak).toBe(3_000_000_000);
+  });
+
+  test("what a run added is the worst stage, not the stages added up", () => {
+    // Stages hand their memory back between them, so a run doesn't need the sum of what each one took
+    const total = totalUsage([usage({ rssAdded: 500_000_000 }), usage({ rssAdded: 900_000_000 }), usage({ rssAdded: 100_000_000 })]);
+    expect(total.rssAdded).toBe(900_000_000);
   });
 
   test("a run with no GPU reading keeps null, and one with some averages only those", () => {

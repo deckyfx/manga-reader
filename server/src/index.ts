@@ -5,6 +5,7 @@ import { bootState } from "@/boot-state";
 import { logger, childLogger } from "@/lib/logger";
 import { loggerPlugin } from "@/plugins/plugin-logger";
 import { api } from "@/api";
+import { routeResources } from "@/plugins/route-resources";
 import { routeSettings } from "@/plugins/route-settings";
 import { studioPlugin } from "@/plugins/studio/index";
 import { authPlugin } from "@/plugins/auth/index";
@@ -219,6 +220,7 @@ const app = new Elysia({ serve: { routes: spaRoutes } })
   .use(authPlugin)
   .use(api)
   .use(routeSettings)
+  .use(routeResources)
   .use(studioPlugin)
   .use(readPlugin)
   .use(managePlugin)

@@ -68,6 +68,9 @@ const POLICY: { prefix: string; needs: UserRole | "public"; sessionOnly?: boolea
   { prefix: "/api/settings/engine", needs: "admin", sessionOnly: true },
   { prefix: "/api/settings/inpaint-engine", needs: "admin", sessionOnly: true },
   { prefix: "/api/settings", needs: "contributor" },
+  // What the machine is doing, for the Studio's own display: a person working on pages, in a browser. Not an API
+  // key's business — it says nothing about the library, and everything about the machine it runs on.
+  { prefix: "/api/resources", needs: "contributor", sessionOnly: true },
 ];
 
 /** The rule for a path; anything unlisted needs an admin through a browser, so a new route is never left open. */

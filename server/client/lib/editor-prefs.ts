@@ -20,3 +20,22 @@ export function savePanelCollapsed(collapsed: boolean): void {
     // Not persisted; the choice still applies for this visit
   }
 }
+
+const HUD_KEY = "studio-editor-hud";
+
+/** Whether the machine's readings are on show; defaults to off, since most work doesn't need them. */
+export function readHudOpen(): boolean {
+  try {
+    return localStorage.getItem(HUD_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveHudOpen(open: boolean): void {
+  try {
+    localStorage.setItem(HUD_KEY, open ? "1" : "0");
+  } catch {
+    // Not persisted; the choice still applies for this visit
+  }
+}
