@@ -29,6 +29,8 @@ export interface Usage {
   /** Resident memory in bytes: the whole process, models included. */
   rssAvg: number;
   rssPeak: number;
+  /** What the work added on top of what was already resident when it started; never below zero. */
+  rssAdded: number;
   /** 0–100, or null where no GPU could be read. */
   gpuAvg: number | null;
   gpuPeak: number | null;
@@ -75,6 +77,9 @@ const cores = navigator.hardwareConcurrency;
 export function startProbe(everyMs: number = SAMPLE_MS): { stop: () => Usage } {
   const startedAt = performance.now();
   const startedCpu = process.cpuUsage();
+  // What was already resident: this server holds its models for its whole life, so the figure that says what a
+  // stage cost is what it added to that, not the total it happened to run inside
+  const startedRss = process.memoryUsage.rss();
 
   let samples = 0;
   let rssTotal = 0;
@@ -139,6 +144,7 @@ export function startProbe(everyMs: number = SAMPLE_MS): { stop: () => Usage } {
         cpuPeak,
         rssAvg: samples > 0 ? rssTotal / samples : 0,
         rssPeak,
+        rssAdded: Math.max(0, rssPeak - startedRss),
         gpuAvg: gpuSamples > 0 ? gpuTotal / gpuSamples : null,
         gpuPeak,
         vramPeak,
@@ -155,7 +161,7 @@ const gb = (bytes: number): string => `${(bytes / 1_073_741_824).toFixed(2)} GB`
 export function describeUsage(usage: Usage): string {
   const seconds = `${(usage.wallMs / 1000).toFixed(1)}s`;
   const cpu = `cpu avg ${Math.round(usage.cpuAvg)}% peak ${Math.round(usage.cpuPeak)}% of ${usage.cores * 100}%`;
-  const rss = `rss avg ${gb(usage.rssAvg)} peak ${gb(usage.rssPeak)}`;
+  const rss = `rss peak ${gb(usage.rssPeak)} (+${gb(usage.rssAdded)})`;
   // Said apart, because they are read apart: a machine can report its video memory and not its load, or the other
   // way round, and a line that hides one behind the other loses a reading that was there
   const load = usage.gpuAvg === null ? "gpu n/a" : `gpu avg ${Math.round(usage.gpuAvg)}% peak ${Math.round(usage.gpuPeak ?? 0)}%`;
@@ -172,6 +178,7 @@ export function usageFields(usage: Usage): Record<string, number | null> {
     cpuPeakPct: Math.round(usage.cpuPeak),
     rssAvgMb: Math.round(usage.rssAvg / 1_048_576),
     rssPeakMb: Math.round(usage.rssPeak / 1_048_576),
+    rssAddedMb: Math.round(usage.rssAdded / 1_048_576),
     gpuAvgPct: usage.gpuAvg === null ? null : Math.round(usage.gpuAvg),
     gpuPeakPct: usage.gpuPeak === null ? null : Math.round(usage.gpuPeak),
     vramPeakMb: usage.vramPeak === null ? null : Math.round(usage.vramPeak / 1_048_576),
@@ -193,6 +200,8 @@ export function totalUsage(parts: readonly Usage[]): Usage {
     cpuPeak: Math.max(0, ...parts.map((p) => p.cpuPeak)),
     rssAvg: wallMs > 0 ? parts.reduce((sum, p) => sum + p.rssAvg * p.wallMs, 0) / wallMs : 0,
     rssPeak: Math.max(0, ...parts.map((p) => p.rssPeak)),
+    // The most any one stage added, not the sum: they hand the memory back between them
+    rssAdded: Math.max(0, ...parts.map((p) => p.rssAdded)),
     gpuAvg: gpuWall > 0 ? gpuParts.reduce((sum, p) => sum + (p.gpuAvg ?? 0) * p.wallMs, 0) / gpuWall : null,
     gpuPeak: gpuParts.length > 0 ? Math.max(0, ...gpuParts.map((p) => p.gpuPeak ?? 0)) : null,
     // Its own reading: how busy a GPU is and how much of its memory is in use come from separate files, and
