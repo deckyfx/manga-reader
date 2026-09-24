@@ -60,7 +60,13 @@ dotnet run
 
 **Database**: SQLite through Drizzle (`src/db/schema.ts`). Migrations live in `src/db/migrations/` and are embedded into `src/db/migrations-embedded.ts` so the single executable carries them. Stores in `src/stores/` (e.g. `PageStore`: pages, per-stage state, blocks with style / area JSON) are the source of truth; page folders under `data/jobs/<id>/` hold images only.
 
-**Page pipeline** (`src/services/page-pipeline.ts`): detect → OCR → translate → clean text (→ clean SFX) → render (burn). Each stage has a fresh / stale / error state; edits mark later stages stale. Work is serialized through `src/queue/page-queue.ts` (`withPageLock` per page, `runExclusiveResult` for CPU/ONNX work).
+**Page pipeline** (`src/services/page-pipeline.ts`): detect → OCR → translate → clean text (→ clean SFX) → render (burn). Each stage has a fresh / stale / error state; edits mark later stages stale. Work is serialized through `src/queue/page-queue.ts` (`withPageLock` per page, `runExclusiveResult` for CPU/ONNX work — a label makes the queue log what the work cost).
+
+**What gets cleaned** (`src/services/block-filter.ts`): the detector marks anything letter-like, so blocks are filtered out of cleaning in two passes — geometry at detect (specks, slivers, page numbers in the margin) and, once read, anything that says nothing (`……`, `！？`). Excluded blocks are kept and drawn dashed, never dropped; the Studio can switch them back on. A re-read that changes inclusion marks the clean stages stale.
+
+**Translation** (`src/services/translate-service.ts`, `translation-engine.ts`): one resolver decides the engine (built-in ONNX, DeepL, or a self-hosted Sugoi at `SUGOI_URL`) for every route and the pipeline alike — clients say *whether* to translate, never *how*. A page's blocks go in one request (50 at a time for DeepL, 64 for Sugoi, 1 for the built-in model, which has no round trip to save); a wrong-length answer is an error, since position is all that ties a translation to its block. Transient failures (429, 5xx, a container still loading) are retried with backoff (`src/lib/retry.ts`); a malformed answer is not.
+
+**Resource measurement** (`src/lib/resource-probe.ts`, `src/services/resource-monitor.ts`): each stage is sampled while it runs and logged with what it used (processor, resident memory and what the stage added, GPU where sysfs can report it). `/api/resources/events` streams the same readings to the Studio's display, sampling only while somebody watches.
 
 **Lettering** is shared code: `src/shared/typeset.ts` (browser-safe, opentype.js + hyphen) lays out and draws text for both the server burn and the Studio's live preview, so they match. Text areas are stored unshifted on blocks; style offset / box are applied on top (see `.coderabbit.yaml`).
 
@@ -86,4 +92,5 @@ Key files: `background.ts` (service worker), `content.ts` (overlay + selection),
 - **Drizzle migrations are committed and embedded**: change `src/db/schema.ts`, then `bun run db:generate` (it re-embeds). Never edit or delete existing migration files.
 - **`server/data/` is gitignored**: models, the SQLite database, page folders and logs are runtime-only.
 - **Don't run the server**: the user runs it. Test in-process with `app.handle()` and a scratch `DATABASE_URL`; never delete anything under `data/` that a test didn't create.
+- **A test that pins behaviour should be checked by breaking the behaviour**: remove the fix, watch the test fail, put it back. Twice in one session a test passed for the wrong reason and only this caught it.
 - **`desktop/bin/`, `desktop/obj/`, `*/publish/`** are gitignored build output.
