@@ -54,7 +54,9 @@ describe("the rotating log file", () => {
     for (let day = 1; day <= 20; day++) {
       writeFileSync(join(dir, `server.2026-09-${String(day).padStart(2, "0")}.1.log`), "old\n");
     }
-    const removed = sweepOldLogs(dir, 14, new Date("2026-09-20T12:00:00Z"));
+    // Local noon, not UTC: in UTC+12 a "Z" time on the 20th is already the 21st locally, and the cutoff — like
+    // the names pino-roll writes — is read locally
+    const removed = sweepOldLogs(dir, 14, new Date(2026, 8, 20, 12, 0, 0));
     const left = readdirSync(dir).sort();
     // A fortnight back from the 20th is the 6th: everything before it goes, and the day itself stays
     expect(removed.sort()).toEqual(["server.2026-09-01.1.log", "server.2026-09-02.1.log", "server.2026-09-03.1.log", "server.2026-09-04.1.log", "server.2026-09-05.1.log"]);

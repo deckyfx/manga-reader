@@ -3,7 +3,7 @@
  * server is the protocol its own clients speak (see tools/sugoi/).
  */
 import { afterAll, describe, expect, test } from "bun:test";
-import { inferenceQueue } from "@/queue/inference-queue";
+import { inferenceHandlers, inferenceQueue } from "@/queue/inference-queue";
 import { registerTranslateHandler } from "@/services/translate-service";
 import { resolveTranslationEngine } from "@/services/translation-engine";
 import { runtimeSettings, setRuntimeEngine } from "@/stores/settings-store";
@@ -92,6 +92,24 @@ describe("talking to a Sugoi server", () => {
       registerTranslateHandler();
       const attempt = inferenceQueue.enqueue("translate", { text: "テスト", engine: "sugoi" });
       await expect(attempt).rejects.toThrow(/shape/);
+    } finally {
+      stub.stop(true);
+    }
+  });
+});
+
+describe("giving up", () => {
+  test("a cancelled job stops waiting on the translator", async () => {
+    // A server that never answers: without the job's own signal this would hold on until the request's own timeout,
+    // long after whoever asked had gone
+    const stub = Bun.serve({ port: 0, fetch: () => new Promise<Response>(() => {}) });
+    try {
+      settings({ sugoi: stub.url.href });
+      registerTranslateHandler();
+      const giveUp = new AbortController();
+      const attempt = inferenceHandlers.translate({ text: "一" }, giveUp.signal);
+      giveUp.abort();
+      await expect(attempt).rejects.toThrow();
     } finally {
       stub.stop(true);
     }

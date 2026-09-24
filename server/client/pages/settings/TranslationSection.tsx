@@ -36,11 +36,16 @@ export function TranslationSection() {
   }
 
   /** An engine nobody configured is shown, but can't be chosen: the reason it's missing is the useful part. */
+  const localReady = settings.translate.enabled && settings.translate.ready;
+  const localLabel = settings.translate.enabled
+    ? localReady ? "built-in model" : "built-in model — still loading, or it failed to load"
+    : "built-in model — set TRANSLATE_MODEL_ENABLED";
   const engines: { value: string; label: string; ready: boolean }[] = [
     { value: "auto", label: "auto — the best one configured", ready: true },
     { value: "sugoi", label: settings.sugoi_configured ? "Sugoi" : "Sugoi — set SUGOI_URL (see tools/sugoi/)", ready: settings.sugoi_configured },
     { value: "deepl", label: settings.deepl_configured ? "DeepL" : "DeepL — set DEEPL_API_KEY", ready: settings.deepl_configured },
-    { value: "local", label: "built-in model", ready: true },
+    // Choosing it while it isn't loaded would set the server to an engine that answers 503
+    { value: "local", label: localLabel, ready: localReady },
   ];
   const saving = translationM.isPending || inpaintM.isPending || !mayChange;
 

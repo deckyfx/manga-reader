@@ -104,8 +104,8 @@ async function runTranslate(input: unknown, signal?: AbortSignal): Promise<Trans
   const { text, engine, targetLang = "en" } = input as TranslateInput;
 
   const resolved = resolveTranslationEngine(engine);
-  if (resolved === "sugoi") return runSugoi(text);
-  if (resolved === "deepl") return runDeepL(text, targetLang);
+  if (resolved === "sugoi") return runSugoi(text, signal);
+  if (resolved === "deepl") return runDeepL(text, targetLang, signal);
 
   if (!encoderSession || !decoderSession || !tokenizer) {
     throw new Error("No translator available: the built-in model isn't loaded, and no DeepL key or Sugoi server is set");
@@ -165,7 +165,16 @@ async function runTranslate(input: unknown, signal?: AbortSignal): Promise<Trans
  * clients use: `{ content, message: "translate sentences" }`, answering with the translation — a string, or a
  * one-item list when asked with a list. Japanese to English only, so the target language is not its business.
  */
-async function runSugoi(text: string): Promise<TranslateOutput> {
+/**
+ * The request's own deadline, and the queue's if it has one: a job the queue has given up on should stop waiting
+ * for an answer nobody will read, rather than holding its turn until its own timeout runs out.
+ */
+function until(ms: number, signal?: AbortSignal): AbortSignal {
+  const deadline = AbortSignal.timeout(ms);
+  return signal ? AbortSignal.any([signal, deadline]) : deadline;
+}
+
+async function runSugoi(text: string, signal?: AbortSignal): Promise<TranslateOutput> {
   const start = Date.now();
   let response: Response;
   try {
@@ -173,7 +182,7 @@ async function runSugoi(text: string): Promise<TranslateOutput> {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content: text, message: "translate sentences" }),
-      signal: AbortSignal.timeout(env.SUGOI_TIMEOUT_MS),
+      signal: until(env.SUGOI_TIMEOUT_MS, signal),
     });
   } catch (err) {
     throw new Error(`Sugoi server unreachable at ${env.SUGOI_URL}: ${err instanceof Error ? err.message : String(err)}`);
@@ -185,14 +194,14 @@ async function runSugoi(text: string): Promise<TranslateOutput> {
   return { translatedText, engine: "sugoi", processingTimeMs: Date.now() - start };
 }
 
-async function runDeepL(text: string, targetLang: string): Promise<TranslateOutput> {
+async function runDeepL(text: string, targetLang: string, signal?: AbortSignal): Promise<TranslateOutput> {
   const start = Date.now();
   const key = env.DEEPL_API_KEY ?? "";
   // Free-tier keys end with :fx; paid keys use api.deepl.com
   const host = key.endsWith(":fx") ? "api-free.deepl.com" : "api.deepl.com";
   const res = await fetch(`https://${host}/v2/translate`, {
     method: "POST",
-    signal: AbortSignal.timeout(15_000),
+    signal: until(15_000, signal),
     headers: {
       "Authorization": `DeepL-Auth-Key ${key}`,
       "Content-Type": "application/json",
