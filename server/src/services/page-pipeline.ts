@@ -18,7 +18,8 @@ import { getBubbleDetector } from "@/services/bubble-service";
 import { getInpainter, inpaintModelPath, type CleanMethod } from "@/services/inpaint-service";
 import { leftoverInk } from "@/services/clean-check";
 import { getTypesetter, isDarkBackground, separateAreas, textAreaFor, type TextArea } from "@/services/typeset-service";
-import { sfxExclusion } from "@/services/sfx-filter";
+import { childLogger } from "@/lib/logger";
+import { blockExclusion, readsAsNothing } from "@/services/block-filter";
 import { rectArea, shiftArea, storedArea, typesetPage, type StoredArea, type TextStyle, type TypesetEntry } from "@/shared/typeset";
 
 export type PageStage = "detecting" | "ocr" | "translating" | "cleaning" | "typesetting";
@@ -74,6 +75,8 @@ export interface ProgressUpdate {
 export type ProgressReporter = (update: ProgressUpdate) => void;
 
 /** OCR and translation are injected so the server can route them through its inference queue. */
+const log = childLogger("pipeline");
+
 export interface PipelineEngines {
   ocr(image: Buffer): Promise<string>;
   /** Translates several texts at once, answering in the same order. */
@@ -213,11 +216,12 @@ export class PagePipeline {
       source,
       width: result.width,
       height: result.height,
-      // Page numbers and texture specks the detector took for sound effects start out of cleaning (see sfx-filter)
+      // Page numbers, texture specks and slivers of tone start out of cleaning (see block-filter): cleaning is the
+      // expensive stage and the one that paints over artwork, so it is the slowest way to be wrong
       blocks: result.blocks.map((b, i) => ({
         id: i + 1,
         ...b,
-        include: b.kind !== "sfx" || sfxExclusion(b, result.width, result.height) === null,
+        include: blockExclusion(b.kind, b, result.width, result.height) === null,
         source_text: null,
         translated_text: null,
       })),
@@ -274,6 +278,13 @@ export class PagePipeline {
         b.needs_render = true;
       }
       b.source_text = read;
+      // Now that it has been read, a block that says nothing at all — no text, or only punctuation, which reads
+      // the same in either language — is left alone rather than cleaned and lettered back. It stays on the page,
+      // dashed, for anyone who thinks the reader was wrong.
+      if (readsAsNothing(read)) {
+        if (b.include) log.info({ block: b.id, read }, "Block reads as nothing: leaving it out of cleaning");
+        b.include = false;
+      }
     }
     await this.writeJob(job);
     this.report({ stage: "ocr", message: `Read ${targets.length} text blocks`, fraction: 1 });
