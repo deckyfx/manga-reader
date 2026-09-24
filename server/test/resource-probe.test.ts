@@ -7,7 +7,7 @@ import { describeUsage, startProbe, totalUsage, usageFields, type Usage } from "
 
 /** A Usage with the fields a test cares about, and unremarkable values for the rest. */
 function usage(fields: Partial<Usage>): Usage {
-  return { wallMs: 1000, cpuMs: 1000, cpuAvg: 100, cpuPeak: 100, rssAvg: 0, rssPeak: 0, gpuAvg: null, gpuPeak: null, vramPeak: null, cores: 8, ...fields };
+  return { wallMs: 1000, cpuMs: 1000, cpuAvg: 100, cpuPeak: 100, rssAvg: 0, rssPeak: 0, gpuAvg: null, gpuPeak: null, vramPeak: null, cores: 8, samples: 2, ...fields };
 }
 
 describe("measuring work", () => {
@@ -33,37 +33,35 @@ describe("measuring work", () => {
     const measured = startProbe().stop();
     expect(Number.isFinite(measured.cpuAvg)).toBe(true);
     expect(measured.rssAvg).toBeGreaterThan(0);
+    // The two at the ends, and nothing in between: the interval never had a chance to fire
+    expect(measured.samples).toBe(2);
     // Too little time passed to divide by: a sliver of work in a sliver of a window would read as hundreds of
     // percent, so no peak is claimed at all
     expect(measured.cpuPeak).toBe(0);
   });
 
-  test("the peak comes from a sampled window, with the sampler really ticking", async () => {
-    // The guard itself is pinned by the instant-probe test above, which reports no peak at all. This one covers
-    // the other half: that a probe left running still measures real windows. The sampler runs on a timer, so the
-    // work has to give the event loop a turn — a busy loop that never yields would leave the interval unfired,
-    // and the test would be measuring nothing but its own closing sample
+  test("a probe left running samples as it goes, not only at each end", async () => {
+    // Proved by the count, not inferred from the numbers: a peak above zero could as easily have come from the
+    // reading taken at the stop. Anything past the two at the ends is the interval having fired.
     const burn = (ms: number): number => {
       const until = Date.now() + ms;
       let n = 0;
       while (Date.now() < until) n += Math.sqrt(n + 1);
       return n;
     };
-    const breathe = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 150));
-
-    const probe = startProbe();
-    let n = burn(200);
-    await breathe();
-    n += burn(200);
-    await breathe();
-    // …and a short burst at the end, in the sliver between the last tick and the stop: the guard's whole purpose
-    n += burn(15);
+    // A short interval, asked for here so the test doesn't wait a second to watch it tick
+    const probe = startProbe(20);
+    let n = burn(30);
+    // The sampler runs on a timer: without giving the loop a turn, it would never run at all
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    n += burn(30);
+    await new Promise((resolve) => setTimeout(resolve, 40));
     const measured = probe.stop();
 
     expect(n).toBeGreaterThan(0);
-    // A tick landed, so a real window was measured
+    expect(measured.samples).toBeGreaterThan(2);
+    // …and those windows are what the peak came from: a plausible share of one core
     expect(measured.cpuPeak).toBeGreaterThan(0);
-    // One thread of work: a plausible share of one core, not what dividing by a sliver would give
     expect(measured.cpuPeak).toBeLessThan(200);
   });
 

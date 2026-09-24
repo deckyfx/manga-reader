@@ -13,7 +13,10 @@
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 
-/** How often the machine is looked at while work runs. Short enough to catch a spike, far too cheap to matter. */
+/**
+ * How often the machine is looked at while work runs. Short enough to catch a spike, far too cheap to matter.
+ * A caller may ask for a different interval — a test does, so it can watch the sampler tick without waiting.
+ */
 const SAMPLE_MS = 250;
 
 /** What one piece of work cost. Percentages are of a single core, so 100 is one core and `cores * 100` is the lot. */
@@ -32,6 +35,8 @@ export interface Usage {
   /** Video memory in use at its highest during the work, in bytes; null when it can't be read. */
   vramPeak: number | null;
   cores: number;
+  /** How many readings this is based on. Two means only the start and the stop: a very short piece of work. */
+  samples: number;
 }
 
 /** The sysfs directory of a GPU that reports how busy it is, or null. Looked for once. */
@@ -67,7 +72,7 @@ const cores = navigator.hardwareConcurrency;
  * Starts watching, and hands back the way to stop. Call `stop()` when the work is done to get what it cost; the
  * sampling stops with it, and the timer never holds the process open.
  */
-export function startProbe(): { stop: () => Usage } {
+export function startProbe(everyMs: number = SAMPLE_MS): { stop: () => Usage } {
   const startedAt = performance.now();
   const startedCpu = process.cpuUsage();
 
@@ -94,7 +99,7 @@ export function startProbe(): { stop: () => Usage } {
     // sample is left to accumulate into the next one rather than counted on its own.
     const now = performance.now();
     const elapsed = now - lastAt;
-    if (elapsed >= SAMPLE_MS / 2) {
+    if (elapsed >= everyMs / 2) {
       const cpu = process.cpuUsage();
       const used = (cpu.user - lastCpu.user + (cpu.system - lastCpu.system)) / 1000;
       cpuPeak = Math.max(cpuPeak, (used / elapsed) * 100);
@@ -115,7 +120,7 @@ export function startProbe(): { stop: () => Usage } {
   };
 
   sample();
-  const timer = setInterval(sample, SAMPLE_MS);
+  const timer = setInterval(sample, everyMs);
   timer.unref?.();
 
   return {
@@ -138,6 +143,7 @@ export function startProbe(): { stop: () => Usage } {
         gpuPeak,
         vramPeak,
         cores,
+        samples,
       };
     },
   };
@@ -169,6 +175,7 @@ export function usageFields(usage: Usage): Record<string, number | null> {
     gpuAvgPct: usage.gpuAvg === null ? null : Math.round(usage.gpuAvg),
     gpuPeakPct: usage.gpuPeak === null ? null : Math.round(usage.gpuPeak),
     vramPeakMb: usage.vramPeak === null ? null : Math.round(usage.vramPeak / 1_048_576),
+    samples: usage.samples,
   };
 }
 
@@ -192,5 +199,6 @@ export function totalUsage(parts: readonly Usage[]): Usage {
     // either can be missing without the other. Counting a missing one as zero would understate the total
     vramPeak: vramParts.length > 0 ? Math.max(...vramParts.map((p) => p.vramPeak ?? 0)) : null,
     cores,
+    samples: parts.reduce((sum, p) => sum + p.samples, 0),
   };
 }
