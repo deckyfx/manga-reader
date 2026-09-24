@@ -104,7 +104,7 @@ For a plain-`http` address that isn't on this machine (a LAN server, say), the e
 
 Without a key the server refuses OCR, translation and page jobs. The desktop app takes the same key in its settings.
 
-To build a single executable: `bun run build` (outputs `server/app`).
+To build a single executable: `bun run build` (outputs `server/dist/app`). The models are not in it — they are downloaded on first run — and it reads `DATA_DIR` and `DATABASE_URL` for where to keep them.
 
 ## Server Features
 

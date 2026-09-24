@@ -1,10 +1,13 @@
 import tailwind from "bun-plugin-tailwind";
 
 // Fullstack build: server entry bundles HTML import → React client + Tailwind inline.
-// Native modules (onnxruntime-node, sharp) stay external — must be alongside the binary.
+// Native modules (onnxruntime-node, sharp) stay external: they are resolved at runtime by walking up from the
+// binary, so dist/ works because server/node_modules is its parent. A binary copied elsewhere needs them beside it.
+const OUT = "./dist/app";
+
 const result = await Bun.build({
   entrypoints: ["./src/index.ts"],
-  compile: { outfile: "./app" },
+  compile: { outfile: OUT },
   plugins: [tailwind],
   target: "bun",
   minify: true,
@@ -20,4 +23,4 @@ if (!result.success) {
   process.exit(1);
 }
 
-console.log("Build complete → ./app");
+console.log(`Build complete → ${OUT}`);

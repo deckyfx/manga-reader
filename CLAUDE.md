@@ -24,7 +24,7 @@ cd server
 bun install
 bun run dev              # bun --hot src/index.ts, listens on :3579 (the user runs the server; don't start it yourself)
 bun run typecheck        # tsc --noEmit (covers src/, client/, scripts/)
-bun run build            # embed migrations → typecheck → single executable ./app
+bun run build            # embed migrations → typecheck → single executable ./dist/app
 bun run db:generate      # after changing src/db/schema.ts: drizzle-kit generate + re-embed migrations
 bun run page <image>     # run the page pipeline from the CLI (scripts/page.ts)
 bun run types:api        # emit API types for the extension's Eden client (server/types/)
