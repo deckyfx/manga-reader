@@ -82,3 +82,15 @@ describe("what a reading amounts to", () => {
     expect(readsAsNothing("123")).toBe(false);
   });
 });
+
+describe("a block someone put back", () => {
+  test("stays back when the reader says the same thing again", () => {
+    // The rule lives in the pipeline, but this is the case it exists for: a bubble that reads as `……` is excluded
+    // on the reading that found it, and re-reading to the same nothing must not overrule a person who re-included it
+    expect(readsAsNothing("……")).toBe(true);
+    const sameReading = (previous: string | null, read: string) => read !== previous;
+    expect(sameReading("……", "……")).toBe(false);
+    expect(sameReading("あ", "……")).toBe(true);
+    expect(sameReading(null, "……")).toBe(true);
+  });
+});

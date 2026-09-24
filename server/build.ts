@@ -29,11 +29,24 @@ type TargetName = keyof typeof TARGETS;
 
 const DIST = "./dist";
 
-/** The shared libraries the embedded addons load at runtime, as this machine has them. */
-const NATIVE_LIB_DIRS = [
-  "node_modules/onnxruntime-node/bin/napi-v6/linux/x64",
-  "node_modules/@img/sharp-libvips-linux-x64/lib",
-];
+/**
+ * Where this machine keeps the shared libraries the embedded addons open, per target — and only for the targets
+ * whose libraries this build knows how to carry.
+ *
+ * Linux alone, for now, and deliberately listed rather than derived: the file names differ by platform (.so,
+ * .dylib, .dll), and so do the names src/lib/native-libs.ts looks for when it loads them. A target missing from
+ * here still builds — the JavaScript cross-compiles fine — and says plainly that its native parts are not included,
+ * which is better than shipping a binary that looks complete and dies on its first image.
+ */
+const NATIVE_LIBS: Partial<Record<TargetName, string[]>> = {
+  ubuntu64: [
+    "node_modules/onnxruntime-node/bin/napi-v6/linux/x64",
+    "node_modules/@img/sharp-libvips-linux-x64/lib",
+  ],
+};
+
+/** The extension those libraries have, by platform; used to pick them out of their folders. */
+const LIB_SUFFIX: Record<string, string> = { linux: ".so", darwin: ".dylib", win32: ".dll" };
 
 const argument = (name: string): string | undefined =>
   Bun.argv.find((a) => a.startsWith(`--${name}=`))?.split("=").slice(1).join("=");
@@ -51,7 +64,12 @@ const archive = Bun.argv.includes("--archive");
  * does it happily; the libraries are ours, and we only have the ones that were installed here. A binary for
  * another platform therefore comes out incomplete, and says so rather than looking finished.
  */
-const nativeMatches = target.platform === process.platform && target.arch === process.arch;
+const libDirs = NATIVE_LIBS[requested] ?? [];
+/**
+ * Whether the native libraries for this target can come from this machine: the platforms must agree, *and* this
+ * build must know where that platform keeps them. Both, or the binary goes out without them.
+ */
+const nativeMatches = target.platform === process.platform && target.arch === process.arch && libDirs.length > 0;
 
 /**
  * Where this build lands. The one for this machine takes ./dist, which is what `bun run start` runs and what the
@@ -83,7 +101,7 @@ await rm(libDir, { recursive: true, force: true });
 let copied = 0;
 if (nativeMatches) {
   await mkdir(libDir, { recursive: true });
-  for (const dir of NATIVE_LIB_DIRS) {
+  for (const dir of libDirs) {
     let entries: string[];
     try {
       entries = await readdir(dir);
@@ -92,7 +110,7 @@ if (nativeMatches) {
       process.exit(1);
     }
     for (const entry of entries) {
-      if (!entry.includes(".so")) continue;
+      if (!entry.includes(LIB_SUFFIX[target.platform] ?? ".so")) continue;
       await Bun.write(join(libDir, basename(entry)), Bun.file(join(dir, entry)));
       copied++;
     }
@@ -134,7 +152,10 @@ if (archive) {
 console.log(`Build complete → ${join(OUT_DIR, target.binary)} for ${requested}`);
 if (nativeMatches) console.log(`  ${copied} shared libraries in ${libDir}, loaded by the binary itself`);
 else {
-  console.log(`  no shared libraries: this machine has ${process.platform}/${process.arch} builds and ${requested} needs ${target.platform}/${target.arch}.`);
-  console.log(`  The binary will start and then fail to load onnxruntime and sharp. Build it on a ${target.platform} machine,`);
-  console.log(`  or install those two packages for ${target.platform}/${target.arch} beside it and copy their .so files into lib/.`);
+  const why = libDirs.length === 0
+    ? `this build doesn't yet know where ${target.platform} keeps onnxruntime's and sharp's libraries`
+    : `this machine has ${process.platform}/${process.arch} builds and ${requested} needs ${target.platform}/${target.arch}`;
+  console.log(`  no shared libraries: ${why}.`);
+  console.log(`  The binary will start and then fail to load onnxruntime and sharp. Build it on a ${target.platform}`);
+  console.log(`  machine, and add its library folders to NATIVE_LIBS with the names native-libs.ts should preload.`);
 }

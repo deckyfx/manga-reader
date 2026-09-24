@@ -275,18 +275,22 @@ export class PagePipeline {
       await Bun.write(this.path(`crops/${b.id}.png`), crop);
       const read = await readText(crop);
       // A new reading needs translating and lettering again; the same reading changes nothing
-      if (read !== b.source_text) {
+      const changed = read !== b.source_text;
+      if (changed) {
         b.needs_translate = true;
         b.needs_render = true;
+        // A new reading that says nothing at all — no text, or only punctuation, which reads the same in either
+        // language — takes the block out of cleaning: painting over artwork to remove nothing costs the artwork.
+        // It stays on the page, dashed, for anyone who thinks the reader was wrong.
+        //
+        // Only on a *new* reading, though. Someone who put such a block back means it, and reading it again to the
+        // same nothing is no reason to overrule them.
+        if (readsAsNothing(read)) {
+          if (b.include) log.info({ block: b.id, read }, "Block reads as nothing: leaving it out of cleaning");
+          b.include = false;
+        }
       }
       b.source_text = read;
-      // Now that it has been read, a block that says nothing at all — no text, or only punctuation, which reads
-      // the same in either language — is left alone rather than cleaned and lettered back. It stays on the page,
-      // dashed, for anyone who thinks the reader was wrong.
-      if (readsAsNothing(read)) {
-        if (b.include) log.info({ block: b.id, read }, "Block reads as nothing: leaving it out of cleaning");
-        b.include = false;
-      }
     }
     await this.writeJob(job);
     this.report({ stage: "ocr", message: `Read ${targets.length} text blocks`, fraction: 1 });
