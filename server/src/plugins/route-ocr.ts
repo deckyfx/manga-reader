@@ -4,12 +4,15 @@ import { inferenceQueue } from "@/queue/inference-queue";
 import { OcrStore } from "@/stores/ocr-store";
 import { ScanStore } from "@/stores/scan-store";
 import { JobStore } from "@/stores/job-store";
+import { childLogger } from "@/lib/logger";
 import { ErrBody } from "@/lib/schemas";
 import { join } from "path";
 import { env } from "@/env";
 import { resolveTranslationEngine } from "@/services/translation-engine";
 import { PAGE_JOBS_DIR } from "@/stores/page-store";
 import { authContext } from "@/plugins/auth/index";
+
+const log = childLogger("ocr-route");
 
 export const routeOcr = new Elysia()
   // For `principal`: the guard in plugins/auth/guard.ts is what enforces the role, this is how the handler sees who
@@ -58,11 +61,17 @@ export const routeOcr = new Elysia()
 
       let translation: string | null = null;
       if (engine !== "none" && ocrResult.text) {
-        const tr = await inferenceQueue.enqueue<
-          { text: string; engine: string },
-          { translatedText: string; processingTimeMs: number }
-        >("translate", { text: ocrResult.text, engine });
-        translation = tr.translatedText;
+        try {
+          const tr = await inferenceQueue.enqueue<
+            { text: string; engine: string },
+            { translatedText: string; processingTimeMs: number }
+          >("translate", { text: ocrResult.text, engine });
+          translation = tr.translatedText;
+        } catch (err) {
+          // The reading succeeded and is worth having: a translator that is down or refusing costs the
+          // translation, not the text. The caller gets null, which is what "no translation" has always looked like.
+          log.warn({ err, engine }, "Translation failed; returning the text alone");
+        }
       }
 
       OcrStore.insertOcrLog({

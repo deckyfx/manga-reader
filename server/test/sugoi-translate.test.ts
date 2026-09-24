@@ -3,7 +3,9 @@
  * server is the protocol its own clients speak (see tools/sugoi/).
  */
 import { afterAll, describe, expect, test } from "bun:test";
+import { bootState } from "@/boot-state";
 import { inferenceHandlers, inferenceQueue } from "@/queue/inference-queue";
+import { enginesNotReady } from "@/services/page-engines";
 import { registerTranslateHandler } from "@/services/translate-service";
 import { resolveTranslationEngine } from "@/services/translation-engine";
 import { runtimeSettings, setRuntimeEngine } from "@/stores/settings-store";
@@ -94,6 +96,29 @@ describe("talking to a Sugoi server", () => {
       await expect(attempt).rejects.toThrow(/shape/);
     } finally {
       stub.stop(true);
+    }
+  });
+});
+
+describe("being ready to work on pages", () => {
+  test("a server translating elsewhere doesn't wait for a model it never loads", () => {
+    const wasOcr = bootState.ocrReady;
+    const wasTranslate = bootState.translateReady;
+    try {
+      bootState.ocrReady = true;
+      bootState.translateReady = false;
+      // Nothing configured: the built-in model is the only translator, so it does have to be loaded
+      settings({});
+      expect(enginesNotReady()).toMatch(/still loading/);
+      // …but a Sugoi server is somebody else's process, and it is ready whatever this one loaded
+      settings({ sugoi: "http://127.0.0.1:14366" });
+      expect(enginesNotReady()).toBeNull();
+      // OCR is this server's own work either way
+      bootState.ocrReady = false;
+      expect(enginesNotReady()).toMatch(/still loading/);
+    } finally {
+      bootState.ocrReady = wasOcr;
+      bootState.translateReady = wasTranslate;
     }
   });
 });

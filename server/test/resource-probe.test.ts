@@ -33,6 +33,22 @@ describe("measuring work", () => {
     const measured = startProbe().stop();
     expect(Number.isFinite(measured.cpuAvg)).toBe(true);
     expect(measured.rssAvg).toBeGreaterThan(0);
+    // Too little time passed to divide by: a sliver of work in a sliver of a window would read as hundreds of
+    // percent, so no peak is claimed at all
+    expect(measured.cpuPeak).toBe(0);
+  });
+
+  test("the peak is never taken from a window too short to measure", () => {
+    // Busy throughout, and stopped just after a tick — the closing sliver must not set the peak
+    const probe = startProbe();
+    const until = Date.now() + 320;
+    let n = 0;
+    while (Date.now() < until) n += Math.sqrt(n + 1);
+    const measured = probe.stop();
+    expect(n).toBeGreaterThan(0);
+    // One thread of work: a plausible share of one core, not a figure from dividing by a millisecond
+    expect(measured.cpuPeak).toBeLessThan(200);
+    expect(measured.cpuPeak).toBeGreaterThan(50);
   });
 
   test("a machine that can't read its GPU says so, rather than saying idle", () => {

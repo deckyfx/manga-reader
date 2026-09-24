@@ -88,16 +88,19 @@ export function startProbe(): { stop: () => Usage } {
     rssTotal += rss;
     if (rss > rssPeak) rssPeak = rss;
 
-    // This sample's share of a core, which is what a peak means: the busiest quarter-second, not the average
+    // This sample's share of a core, which is what a peak means: the busiest quarter-second, not the average.
+    // A window much shorter than that — the reading taken as the probe stops, moments after a tick — measures
+    // too little time to divide by: a stray millisecond of work in it would read as hundreds of percent. Such a
+    // sample is left to accumulate into the next one rather than counted on its own.
     const now = performance.now();
-    const cpu = process.cpuUsage();
     const elapsed = now - lastAt;
-    if (elapsed > 0) {
+    if (elapsed >= SAMPLE_MS / 2) {
+      const cpu = process.cpuUsage();
       const used = (cpu.user - lastCpu.user + (cpu.system - lastCpu.system)) / 1000;
       cpuPeak = Math.max(cpuPeak, (used / elapsed) * 100);
+      lastCpu = cpu;
+      lastAt = now;
     }
-    lastCpu = cpu;
-    lastAt = now;
 
     if (gpuDir) {
       const busy = readNumber(`${gpuDir}/gpu_busy_percent`);

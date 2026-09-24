@@ -1,6 +1,7 @@
 import { bootState } from "@/boot-state";
 import { inferenceQueue } from "@/queue/inference-queue";
 import type { PipelineEngines } from "@/services/page-pipeline";
+import { resolveTranslationEngine } from "@/services/translation-engine";
 
 /** OCR and translation go through the inference queue so page work doesn't race single bubble requests. */
 export const pageEngines: PipelineEngines = {
@@ -13,5 +14,9 @@ export const pageEngines: PipelineEngines = {
 
 /** Message for a 503 when OCR or translation models aren't loaded yet, or null when both are ready. */
 export function enginesNotReady(): string | null {
-  return bootState.ocrReady && bootState.translateReady ? null : "Server not ready — models still loading";
+  if (!bootState.ocrReady) return "Server not ready — models still loading";
+  // Only the built-in model has anything to wait for: a server translating through DeepL or Sugoi is ready to work
+  // on pages whether or not it ever loaded one
+  if (resolveTranslationEngine() === "local" && !bootState.translateReady) return "Server not ready — models still loading";
+  return null;
 }
