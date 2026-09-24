@@ -3,7 +3,7 @@
  * and in between for a partial clean — whatever colour the bubble is.
  */
 import { describe, expect, test } from "bun:test";
-import sharp from "sharp";
+import sharp from "@/lib/sharp";
 import { leftoverInk, overallInk } from "@/services/clean-check";
 
 const W = 100, H = 100;

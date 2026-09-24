@@ -5,7 +5,7 @@
  * Classes: 0 = bubble, 1 = text_bubble (text inside a bubble), 2 = text_free (text outside bubbles)
  */
 import * as ort from "onnxruntime-node";
-import sharp from "sharp";
+import sharp from "@/lib/sharp";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { bootState } from "@/boot-state";

@@ -6,7 +6,7 @@
  * (`det` line map is unused)
  */
 import * as ort from "onnxruntime-node";
-import sharp from "sharp";
+import sharp from "@/lib/sharp";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { env } from "@/env";

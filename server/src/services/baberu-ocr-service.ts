@@ -75,7 +75,7 @@ export class BaberuOcr {
 
   /** RGB, stretch the whole crop to 224×224 (no aspect-preserving pad — matches training), ImageNet-normalise. */
   private async preprocess(image: Buffer, debugTag?: string): Promise<ort.Tensor> {
-    const sharp = (await import("sharp")).default;
+    const sharp = (await import("@/lib/sharp")).default;
     const { data, info } = await sharp(image)
       .removeAlpha()
       .toColourspace("srgb")

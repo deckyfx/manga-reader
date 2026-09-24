@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import sharp from "@/lib/sharp";
 
 /** Axis-aligned box in page pixels. */
 export interface Box {

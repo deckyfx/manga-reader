@@ -5,7 +5,7 @@
  * LaMa inputs `image` float32[1,3,H,W] and `mask` float32[1,1,H,W] in [0,1]; output `inpainted` in [0,1].
  */
 import * as ort from "onnxruntime-node";
-import sharp from "sharp";
+import sharp from "@/lib/sharp";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { env } from "@/env";

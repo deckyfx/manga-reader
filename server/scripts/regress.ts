@@ -22,7 +22,7 @@
 import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { extname, join } from "node:path";
-import sharp from "sharp";
+import sharp from "@/lib/sharp";
 import type { Box } from "@/lib/mask";
 import { leftoverInk, overallInk, type InkReport } from "@/services/clean-check";
 import { PagePipeline, type PageJob, type PipelineEngines } from "@/services/page-pipeline";

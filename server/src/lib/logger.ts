@@ -118,7 +118,26 @@ export function scheduleLogSweep(dir: string, everyMs = SWEEP_EVERY_MS): () => v
 
 scheduleLogSweep(LOG_DIR);
 
-const transport = pino.transport({
+/**
+ * Whether this is the compiled executable rather than a run from source.
+ *
+ * It matters because pino's transports are resolved by name, in a worker, when the logger is built — and a
+ * compiled binary has no node_modules to resolve them from, so asking for one stops the server before it starts.
+ * The binary therefore writes straight to its destinations: the same JSON, without the pretty printing or the
+ * rolling, which is the usual shape for something run as a service anyway.
+ */
+const COMPILED = Bun.main.startsWith("/$bunfs/");
+
+/** Where the compiled binary writes: this boot's dated file, plus stdout for whatever collects it. */
+function compiledDestinations(): pino.MultiStreamRes {
+  const file = `${LOG_DIR}/server.${localDay(new Date())}.1.log`;
+  return pino.multistream([
+    { level: consoleLevel as pino.Level, stream: process.stdout },
+    { level: "info", stream: pino.destination({ dest: file, append: true, sync: false }) },
+  ]);
+}
+
+const transport = COMPILED ? null : pino.transport({
   targets: [
     // ── Colourful terminal ──────────────────────────────────────────────────
     {
@@ -152,7 +171,7 @@ export const logger = pino(
       error: pino.stdSerializers.err,
     },
   },
-  transport,
+  transport ?? compiledDestinations(),
 );
 
 /** Returns a child logger tagged with a module name (shown in terminal). */

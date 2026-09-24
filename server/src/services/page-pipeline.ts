@@ -9,7 +9,9 @@
  *   clean      clean-text.png (bubbles, captions)  ·  clean-sfx.png (sound effects, optional)
  *   render     patches/<id>.png, render-overlay.png, result.png
  */
-import sharp, { type OverlayOptions, type Sharp } from "sharp";
+import sharp from "@/lib/sharp";
+// Types only, erased at build: the value has to come through the shim (see lib/sharp.ts)
+import type { OverlayOptions, Sharp } from "sharp";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { blockOwnerMask, labelComponents, maskFromImage, maskToPng, selectBlockMask, type BlockKind, type Box } from "@/lib/mask";

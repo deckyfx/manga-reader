@@ -24,7 +24,8 @@ cd server
 bun install
 bun run dev              # bun --hot src/index.ts, listens on :3579 (the user runs the server; don't start it yourself)
 bun run typecheck        # tsc --noEmit (covers src/, client/, scripts/)
-bun run build            # embed migrations → typecheck → single executable ./dist/app
+bun run build            # embed migrations → typecheck → ./dist/app + dist/lib/*.so + dist/start.sh
+bun run start            # runs the built binary through start.sh (sets LD_LIBRARY_PATH for the native libraries)
 bun run db:generate      # after changing src/db/schema.ts: drizzle-kit generate + re-embed migrations
 bun run page <image>     # run the page pipeline from the CLI (scripts/page.ts)
 bun run types:api        # emit API types for the extension's Eden client (server/types/)
@@ -91,6 +92,10 @@ Key files: `background.ts` (service worker), `content.ts` (overlay + selection),
 - **Never commit `server/.env`**: it holds a real DeepL API key. Stage specific files, never `git add -A`.
 - **Drizzle migrations are committed and embedded**: change `src/db/schema.ts`, then `bun run db:generate` (it re-embeds). Never edit or delete existing migration files.
 - **`server/data/` is gitignored**: models, the SQLite database, page folders and logs are runtime-only.
+- **A compiled binary resolves nothing from disk**: everything comes from its virtual filesystem, so anything that
+  requires a package *by name at runtime* fails there — sharp's ESM build (hence `src/lib/sharp.ts` and its `.cjs`
+  shim) and pino's transports (hence the compiled branch in `src/lib/logger.ts`). Native `.node` addons are embedded
+  by bundling, but the shared libraries they dlopen are not, so `bun run build` copies those beside the binary.
 - **Don't run the server**: the user runs it. Test in-process with `app.handle()` and a scratch `DATABASE_URL`; never delete anything under `data/` that a test didn't create.
 - **A test that pins behaviour should be checked by breaking the behaviour**: remove the fix, watch the test fail, put it back. Twice in one session a test passed for the wrong reason and only this caught it.
 - **`desktop/bin/`, `desktop/obj/`, `*/publish/`** are gitignored build output.

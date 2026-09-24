@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import sharp from "sharp";
+import sharp from "@/lib/sharp";
 import { PagePipeline, type PageJob } from "@/services/page-pipeline";
 
 const W = 120, H = 120;

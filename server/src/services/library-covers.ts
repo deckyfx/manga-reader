@@ -2,7 +2,7 @@
  * Series cover images: uploads are normalised and stored under `data/covers/`, keyed by series id. A series without
  * an uploaded cover falls back to the first page of its first chapter (see the read plugin).
  */
-import sharp from "sharp";
+import sharp from "@/lib/sharp";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { MAX_IMAGE_BYTES } from "@/services/page-jobs";
