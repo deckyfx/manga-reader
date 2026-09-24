@@ -6,7 +6,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { bootState } from "@/boot-state";
 import { inferenceHandlers, inferenceQueue } from "@/queue/inference-queue";
 import { enginesNotReady } from "@/services/page-engines";
-import { registerTranslateHandler } from "@/services/translate-service";
+import { registerTranslateHandler, translationBatchSize } from "@/services/translate-service";
 import { resolveTranslationEngine } from "@/services/translation-engine";
 import { runtimeSettings, setRuntimeEngine } from "@/stores/settings-store";
 
@@ -138,5 +138,54 @@ describe("giving up", () => {
     } finally {
       stub.stop(true);
     }
+  });
+});
+
+describe("translating a page's blocks together", () => {
+  test("sends them in one request and keeps their order", async () => {
+    const asked: unknown[] = [];
+    const stub = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const body = await request.json() as { content: string | string[] };
+        asked.push(body.content);
+        const texts = Array.isArray(body.content) ? body.content : [body.content];
+        return Response.json(texts.map((t) => `[${t}]`));
+      },
+    });
+    try {
+      settings({ sugoi: stub.url.href });
+      registerTranslateHandler();
+      const result = await inferenceQueue.enqueue<{ texts: string[] }, { translations: string[]; engine: string }>(
+        "translate",
+        { texts: ["一", "二", "三"] },
+      );
+      // One round trip for the three of them, which is the whole point: the waiting is what costs
+      expect(asked).toEqual([["一", "二", "三"]]);
+      expect(result.translations).toEqual(["[一]", "[二]", "[三]"]);
+    } finally {
+      stub.stop(true);
+    }
+  });
+
+  test("a server that answers with the wrong number is an error, not a shuffle", async () => {
+    const stub = Bun.serve({ port: 0, fetch: () => Response.json(["only one"]) });
+    try {
+      settings({ sugoi: stub.url.href });
+      registerTranslateHandler();
+      // Position is all that ties a translation to its block, so a short answer must not be spread over them
+      await expect(inferenceQueue.enqueue("translate", { texts: ["一", "二"] })).rejects.toThrow(/1 translations for 2/);
+    } finally {
+      stub.stop(true);
+    }
+  });
+
+  test("how many go at once follows the engine", () => {
+    settings({});
+    expect(translationBatchSize()).toBe(1);
+    settings({ sugoi: "http://127.0.0.1:14366" });
+    expect(translationBatchSize()).toBe(64);
+    settings({ deepl: "key:fx", preferred: "deepl" });
+    expect(translationBatchSize()).toBe(50);
   });
 });

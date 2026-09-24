@@ -22,6 +22,28 @@ export interface TranslateOutput {
   processingTimeMs: number;
 }
 
+/** Several texts translated in one go, in the order they were given. */
+export interface TranslateManyOutput {
+  translations: string[];
+  engine: "local" | "deepl" | "sugoi";
+  processingTimeMs: number;
+}
+
+/**
+ * How many texts this server's engine will take in one request.
+ *
+ * A remote engine spends its time on the round trip, not the translating — a page's blocks sent one at a time cost
+ * one wait each, and the machine sits idle through all of them. Sent together they cost one wait. The built-in
+ * model has no round trip and no batching in its session, so it stays at one and keeps its per-block progress.
+ */
+export function translationBatchSize(): number {
+  switch (resolveTranslationEngine()) {
+    case "deepl": return 50; // the API's own limit per request
+    case "sugoi": return 64; // tools/sugoi caps a request at 128 sentences
+    default: return 1;
+  }
+}
+
 interface Tokenizer {
   encode: (text: string) => number[];
   decode: (ids: number[]) => string;
@@ -97,21 +119,36 @@ export function registerTranslateHandler(): void {
   inferenceHandlers.translate = runTranslate as (input: unknown, signal: AbortSignal) => Promise<unknown>;
 }
 
-async function runTranslate(input: unknown, signal?: AbortSignal): Promise<TranslateOutput> {
-  if (!input || typeof input !== "object" || typeof (input as TranslateInput).text !== "string") {
-    throw new Error("Invalid translate input: text must be a string");
-  }
-  const { text, engine, targetLang = "en" } = input as TranslateInput;
+async function runTranslate(input: unknown, signal?: AbortSignal): Promise<TranslateOutput | TranslateManyOutput> {
+  if (!input || typeof input !== "object") throw new Error("Invalid translate input");
+  const asked = input as TranslateInput & { texts?: unknown };
+  // One text or several: a caller with several gets them back in the same order, and pays one round trip
+  const many = Array.isArray(asked.texts);
+  if (!many && typeof asked.text !== "string") throw new Error("Invalid translate input: text must be a string");
+  if (many && !(asked.texts as unknown[]).every((t) => typeof t === "string"))
+    throw new Error("Invalid translate input: texts must be strings");
+  const texts = many ? (asked.texts as string[]) : [asked.text];
+  const { engine, targetLang = "en" } = asked;
+  const one = (result: TranslateManyOutput): TranslateOutput | TranslateManyOutput =>
+    many ? result : { translatedText: result.translations[0] ?? "", engine: result.engine, processingTimeMs: result.processingTimeMs };
 
   const resolved = resolveTranslationEngine(engine);
-  if (resolved === "sugoi") return runSugoi(text, signal);
-  if (resolved === "deepl") return runDeepL(text, targetLang, signal);
+  if (resolved === "sugoi") return one(await runSugoi(texts, signal));
+  if (resolved === "deepl") return one(await runDeepL(texts, targetLang, signal));
 
   if (!encoderSession || !decoderSession || !tokenizer) {
     throw new Error("No translator available: the built-in model isn't loaded, and no DeepL key or Sugoi server is set");
   }
+  const localStart = Date.now();
+  const translations: string[] = [];
+  // One at a time: the session takes one sequence, and there is no round trip to save by grouping them
+  for (const each of texts) translations.push(await runLocal(each, signal));
+  return one({ translations, engine: "local", processingTimeMs: Date.now() - localStart });
+}
 
-  const start = Date.now();
+/** The built-in model, one text at a time. */
+async function runLocal(text: string, signal?: AbortSignal): Promise<string> {
+  if (!encoderSession || !decoderSession || !tokenizer) throw new Error("Translate model not loaded");
 
   const MAX_INPUT_LEN = 512;
   // Pre-check raw text length before BPE: ≈ MAX_INPUT_LEN × 4 chars is a safe upper bound.
@@ -156,8 +193,7 @@ async function runTranslate(input: unknown, signal?: AbortSignal): Promise<Trans
     genIds.push(maxIdx);
   }
 
-  const translatedText = tokenizer.decode(genIds.slice(1));
-  return { translatedText, engine: "local", processingTimeMs: Date.now() - start };
+  return tokenizer.decode(genIds.slice(1));
 }
 
 /**
@@ -174,53 +210,71 @@ function until(ms: number, signal?: AbortSignal): AbortSignal {
   return signal ? AbortSignal.any([signal, deadline]) : deadline;
 }
 
-async function runSugoi(text: string, signal?: AbortSignal): Promise<TranslateOutput> {
+async function runSugoi(texts: string[], signal?: AbortSignal): Promise<TranslateManyOutput> {
   const start = Date.now();
-  let response: Response;
-  try {
-    response = await fetch(env.SUGOI_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ content: text, message: "translate sentences" }),
-      signal: until(env.SUGOI_TIMEOUT_MS, signal),
-    });
-  } catch (err) {
-    throw new Error(`Sugoi server unreachable at ${env.SUGOI_URL}: ${err instanceof Error ? err.message : String(err)}`);
+  const translations: string[] = [];
+  // A list at a time, as its own clients send: the waiting is what costs, not the translating
+  for (const batch of chunk(texts, 64)) {
+    let response: Response;
+    try {
+      response = await fetch(env.SUGOI_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        // One text goes as a string, as every Sugoi client has always sent it: a server that only understands that
+      // form keeps working, and the list form is used only when there is something to gain by it
+      body: JSON.stringify({ content: batch.length === 1 ? batch[0] : batch, message: "translate sentences" }),
+        signal: until(env.SUGOI_TIMEOUT_MS, signal),
+      });
+    } catch (err) {
+      throw new Error(`Sugoi server unreachable at ${env.SUGOI_URL}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!response.ok) throw new Error(`Sugoi server answered ${response.status}`);
+    const answer: unknown = await response.json();
+    // A list back for a list, but a server asked for one sentence may answer with the string itself
+    const got = typeof answer === "string" ? [answer] : Array.isArray(answer) && answer.every((t) => typeof t === "string") ? answer as string[] : null;
+    if (got === null) throw new Error("Sugoi server answered in a shape this doesn't understand");
+    if (got.length !== batch.length) throw new Error(`Sugoi server answered with ${got.length} translations for ${batch.length} texts`);
+    translations.push(...got);
   }
-  if (!response.ok) throw new Error(`Sugoi server answered ${response.status}`);
-  const answer: unknown = await response.json();
-  const translatedText = typeof answer === "string" ? answer : Array.isArray(answer) && typeof answer[0] === "string" ? answer[0] : null;
-  if (translatedText === null) throw new Error("Sugoi server answered in a shape this doesn't understand");
-  return { translatedText, engine: "sugoi", processingTimeMs: Date.now() - start };
+  return { translations, engine: "sugoi", processingTimeMs: Date.now() - start };
 }
 
-async function runDeepL(text: string, targetLang: string, signal?: AbortSignal): Promise<TranslateOutput> {
+/** Splits into pieces of at most `size`; one empty piece is never returned. */
+function chunk<T>(items: readonly T[], size: number): T[][] {
+  const pieces: T[][] = [];
+  for (let i = 0; i < items.length; i += size) pieces.push(items.slice(i, i + size));
+  return pieces;
+}
+
+async function runDeepL(texts: string[], targetLang: string, signal?: AbortSignal): Promise<TranslateManyOutput> {
   const start = Date.now();
   const key = env.DEEPL_API_KEY ?? "";
   // Free-tier keys end with :fx; paid keys use api.deepl.com
   const host = key.endsWith(":fx") ? "api-free.deepl.com" : "api.deepl.com";
-  const res = await fetch(`https://${host}/v2/translate`, {
-    method: "POST",
-    signal: until(15_000, signal),
-    headers: {
-      "Authorization": `DeepL-Auth-Key ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ text: [text], target_lang: targetLang.toUpperCase() }),
-  });
-  if (!res.ok) {
-    const status = res.status;
-    await res.body?.cancel();
-    throw new Error(`DeepL HTTP ${status}`);
+  const translations: string[] = [];
+  // Fifty at a time, which is the API's limit for one request
+  for (const batch of chunk(texts, 50)) {
+    const res = await fetch(`https://${host}/v2/translate`, {
+      method: "POST",
+      signal: until(15_000, signal),
+      headers: {
+        "Authorization": `DeepL-Auth-Key ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text: batch, target_lang: targetLang.toUpperCase() }),
+    });
+    if (!res.ok) {
+      const status = res.status;
+      await res.body?.cancel();
+      throw new Error(`DeepL HTTP ${status}`);
+    }
+    const json = await res.json() as { translations?: { text: string }[] };
+    const got = json.translations;
+    // Position is the only thing tying a translation to the text it came from, so a short answer is an error
+    if (!got || got.length !== batch.length) throw new Error(`DeepL answered with ${got?.length ?? 0} translations for ${batch.length} texts`);
+    translations.push(...got.map((t) => t.text));
   }
-  const json = await res.json() as { translations?: { text: string }[] };
-  const first = json.translations?.[0];
-  if (!first?.text) throw new Error("DeepL returned no translations");
-  return {
-    translatedText: first.text,
-    engine: "deepl",
-    processingTimeMs: Date.now() - start,
-  };
+  return { translations, engine: "deepl", processingTimeMs: Date.now() - start };
 }
 
 /**

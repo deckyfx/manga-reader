@@ -17,11 +17,14 @@ export async function ocrEngine(): Promise<PipelineEngines["ocr"]> {
   return async (image) => ((await inferenceHandlers.ocr({ imageBuffer: image }, signal)) as { text: string }).text;
 }
 
-export async function translateEngine(): Promise<PipelineEngines["translate"]> {
-  const { loadTranslateModel } = await import("@/services/translate-service");
+export async function translateEngine(): Promise<Pick<PipelineEngines, "translate" | "batchSize">> {
+  const { loadTranslateModel, translationBatchSize } = await import("@/services/translate-service");
   await loadTranslateModel();
-  return async (text) => {
-    const out = (await inferenceHandlers.translate({ text }, signal)) as { translatedText: string; engine: string };
-    return { text: out.translatedText, engine: out.engine };
+  return {
+    translate: async (texts) => {
+      const out = (await inferenceHandlers.translate({ texts }, signal)) as { translations: string[]; engine: string };
+      return { texts: out.translations, engine: out.engine };
+    },
+    batchSize: translationBatchSize,
   };
 }
