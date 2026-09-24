@@ -38,17 +38,33 @@ describe("measuring work", () => {
     expect(measured.cpuPeak).toBe(0);
   });
 
-  test("the peak is never taken from a window too short to measure", () => {
-    // Busy throughout, and stopped just after a tick — the closing sliver must not set the peak
+  test("the peak comes from a sampled window, with the sampler really ticking", async () => {
+    // The guard itself is pinned by the instant-probe test above, which reports no peak at all. This one covers
+    // the other half: that a probe left running still measures real windows. The sampler runs on a timer, so the
+    // work has to give the event loop a turn — a busy loop that never yields would leave the interval unfired,
+    // and the test would be measuring nothing but its own closing sample
+    const burn = (ms: number): number => {
+      const until = Date.now() + ms;
+      let n = 0;
+      while (Date.now() < until) n += Math.sqrt(n + 1);
+      return n;
+    };
+    const breathe = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 150));
+
     const probe = startProbe();
-    const until = Date.now() + 320;
-    let n = 0;
-    while (Date.now() < until) n += Math.sqrt(n + 1);
+    let n = burn(200);
+    await breathe();
+    n += burn(200);
+    await breathe();
+    // …and a short burst at the end, in the sliver between the last tick and the stop: the guard's whole purpose
+    n += burn(15);
     const measured = probe.stop();
+
     expect(n).toBeGreaterThan(0);
-    // One thread of work: a plausible share of one core, not a figure from dividing by a millisecond
+    // A tick landed, so a real window was measured
+    expect(measured.cpuPeak).toBeGreaterThan(0);
+    // One thread of work: a plausible share of one core, not what dividing by a sliver would give
     expect(measured.cpuPeak).toBeLessThan(200);
-    expect(measured.cpuPeak).toBeGreaterThan(50);
   });
 
   test("a machine that can't read its GPU says so, rather than saying idle", () => {
