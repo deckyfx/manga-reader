@@ -6,6 +6,7 @@ import { inferenceHandlers } from "@/queue/inference-queue";
 import { bootState } from "@/boot-state";
 import { resolveTranslationEngine } from "@/services/translation-engine";
 import { childLogger } from "@/lib/logger";
+import { retryAfterMs, Transient, withRetry } from "@/lib/retry";
 
 const log = childLogger("translate");
 
@@ -215,25 +216,39 @@ async function runSugoi(texts: string[], signal?: AbortSignal): Promise<Translat
   const translations: string[] = [];
   // A list at a time, as its own clients send: the waiting is what costs, not the translating
   for (const batch of chunk(texts, 64)) {
-    let response: Response;
-    try {
-      response = await fetch(env.SUGOI_URL, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        // One text goes as a string, as every Sugoi client has always sent it: a server that only understands that
-      // form keeps working, and the list form is used only when there is something to gain by it
-      body: JSON.stringify({ content: batch.length === 1 ? batch[0] : batch, message: "translate sentences" }),
-        signal: until(env.SUGOI_TIMEOUT_MS, signal),
-      });
-    } catch (err) {
-      throw new Error(`Sugoi server unreachable at ${env.SUGOI_URL}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    if (!response.ok) throw new Error(`Sugoi server answered ${response.status}`);
-    const answer: unknown = await response.json();
-    // A list back for a list, but a server asked for one sentence may answer with the string itself
-    const got = typeof answer === "string" ? [answer] : Array.isArray(answer) && answer.every((t) => typeof t === "string") ? answer as string[] : null;
-    if (got === null) throw new Error("Sugoi server answered in a shape this doesn't understand");
-    if (got.length !== batch.length) throw new Error(`Sugoi server answered with ${got.length} translations for ${batch.length} texts`);
+    const got = await withRetry(async () => {
+      let response: Response;
+      try {
+        response = await fetch(env.SUGOI_URL, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          // One text goes as a string, as every Sugoi client has always sent it: a server that only understands
+          // that form keeps working, and the list form is used only when there is something to gain by it
+          body: JSON.stringify({ content: batch.length === 1 ? batch[0] : batch, message: "translate sentences" }),
+          signal: until(env.SUGOI_TIMEOUT_MS, signal),
+        });
+      } catch (err) {
+        // The caller giving up is not the server's failure, and must not be tried again
+        if (signal?.aborted) throw err;
+        // A refused connection or a request that ran out of time: a container still loading its model looks
+        // exactly like this, and looks nothing like it a moment later
+        throw new Transient(`Sugoi server unreachable at ${env.SUGOI_URL}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (response.status === 429 || response.status >= 500) {
+        const status = response.status;
+        const after = retryAfterMs(response.headers.get("retry-after"));
+        await response.body?.cancel();
+        throw new Transient(`Sugoi server answered ${status}`, after);
+      }
+      if (!response.ok) throw new Error(`Sugoi server answered ${response.status}`);
+      const answer: unknown = await response.json();
+      // A list back for a list, but a server asked for one sentence may answer with the string itself
+      const texts = typeof answer === "string" ? [answer] : Array.isArray(answer) && answer.every((t) => typeof t === "string") ? answer as string[] : null;
+      // Not transient: the same request would be answered the same way, and the fault is worth seeing
+      if (texts === null) throw new Error("Sugoi server answered in a shape this doesn't understand");
+      if (texts.length !== batch.length) throw new Error(`Sugoi server answered with ${texts.length} translations for ${batch.length} texts`);
+      return texts;
+    }, { signal, onRetry: ({ attempt, waitMs, reason }) => log.warn({ attempt, waitMs }, `Sugoi: ${reason} — trying again`) });
     translations.push(...got);
   }
   return { translations, engine: "sugoi", processingTimeMs: Date.now() - start };
@@ -254,25 +269,42 @@ async function runDeepL(texts: string[], targetLang: string, signal?: AbortSigna
   const translations: string[] = [];
   // Fifty at a time, which is the API's limit for one request
   for (const batch of chunk(texts, 50)) {
-    const res = await fetch(`https://${host}/v2/translate`, {
-      method: "POST",
-      signal: until(15_000, signal),
-      headers: {
-        "Authorization": `DeepL-Auth-Key ${key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ text: batch, target_lang: targetLang.toUpperCase() }),
-    });
-    if (!res.ok) {
-      const status = res.status;
-      await res.body?.cancel();
-      throw new Error(`DeepL HTTP ${status}`);
-    }
-    const json = await res.json() as { translations?: { text: string }[] };
-    const got = json.translations;
-    // Position is the only thing tying a translation to the text it came from, so a short answer is an error
-    if (!got || got.length !== batch.length) throw new Error(`DeepL answered with ${got?.length ?? 0} translations for ${batch.length} texts`);
-    translations.push(...got.map((t) => t.text));
+    const got = await withRetry(async () => {
+      let res: Response;
+      try {
+        res = await fetch(`https://${host}/v2/translate`, {
+          method: "POST",
+          signal: until(15_000, signal),
+          headers: {
+            "Authorization": `DeepL-Auth-Key ${key}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ text: batch, target_lang: targetLang.toUpperCase() }),
+        });
+      } catch (err) {
+        if (signal?.aborted) throw err;
+        throw new Transient(`DeepL unreachable: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (res.status === 429 || res.status >= 500) {
+        const status = res.status;
+        const after = retryAfterMs(res.headers.get("retry-after"));
+        await res.body?.cancel();
+        // 429 is DeepL asking to be left alone for a moment, and it usually says for how long
+        throw new Transient(`DeepL HTTP ${status}`, after);
+      }
+      if (!res.ok) {
+        const status = res.status;
+        await res.body?.cancel();
+        // A bad key, a quota spent (456), a text too long: all answered the same way however often it is asked
+        throw new Error(`DeepL HTTP ${status}`);
+      }
+      const json = await res.json() as { translations?: { text: string }[] };
+      const answered = json.translations;
+      // Position is the only thing tying a translation to the text it came from, so a short answer is an error
+      if (!answered || answered.length !== batch.length) throw new Error(`DeepL answered with ${answered?.length ?? 0} translations for ${batch.length} texts`);
+      return answered.map((t) => t.text);
+    }, { signal, onRetry: ({ attempt, waitMs, reason }) => log.warn({ attempt, waitMs }, `DeepL: ${reason} — trying again`) });
+    translations.push(...got);
   }
   return { translations, engine: "deepl", processingTimeMs: Date.now() - start };
 }
