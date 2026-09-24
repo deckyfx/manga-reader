@@ -40,7 +40,7 @@ if (command.type === "doctor") {
 
 if (command.type === "setup") {
   const { runSetup } = await import("@/commands/setup");
-  await runSetup();
+  await runSetup(process.cwd(), false);
   process.exit(0);
 }
 

@@ -522,7 +522,8 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
             const included = (): string => JSON.stringify(job.blocks.map((b) => [b.id, b.include]));
             const includedBefore = included();
             await pipeline.ocr(job, pageEngines.ocr, ids);
-            if (included() !== includedBefore) await PageStore.markStale(params.id, ["clean_text", "clean_sfx"]);
+            // Cleaning covered the wrong blocks, and the burned image was made from them: both are out of date
+            if (included() !== includedBefore) await PageStore.markStale(params.id, ["clean_text", "clean_sfx", "render"]);
             return { wholeStage: covered, changed: texts("source_text") !== before };
           }
           if (stage === "translate") {

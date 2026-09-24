@@ -51,7 +51,10 @@ const LIB_SUFFIX: Record<string, string> = { linux: ".so", darwin: ".dylib", win
 const argument = (name: string): string | undefined =>
   Bun.argv.find((a) => a.startsWith(`--${name}=`))?.split("=").slice(1).join("=");
 
-const requested = (argument("target") ?? "ubuntu64") as TargetName;
+/** The target that matches the machine doing the building, when there is one: the default nobody has to think about. */
+const hostTarget = (Object.entries(TARGETS).find(([, t]) => t.platform === process.platform && t.arch === process.arch)?.[0] ?? "ubuntu64") as TargetName;
+
+const requested = (argument("target") ?? hostTarget) as TargetName;
 if (!(requested in TARGETS)) {
   console.error(`Unknown target "${requested}". Pick one of: ${Object.keys(TARGETS).join(", ")}`);
   process.exit(1);

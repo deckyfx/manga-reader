@@ -14,7 +14,13 @@
  */
 import type { Box } from "@/lib/mask";
 
-/** A block smaller than this share of the page is a speck, not lettering (≈ 25×25 on a 1200×1800 page). */
+/**
+ * A block smaller than this share of the page is a speck, not lettering (≈ 21×21 on a 1200×1800 page).
+ *
+ * The share is taken from the page's shorter side squared, not its true area. A webtoon strip is as wide as any
+ * page and twenty times as long, and its lettering is the same size as anywhere else — measured against the real
+ * area, the threshold would grow with the scroll until ordinary bubbles counted as specks.
+ */
 const MIN_AREA_SHARE = 0.0003;
 /** The same test for a text block, at a third of the size: one short word in a small bubble is still text. */
 const MIN_TEXT_AREA_SHARE = 0.0001;
@@ -46,7 +52,7 @@ export function sfxExclusion(block: Box, width: number, height: number): Exclusi
   const inMargin = centreY < scale * MARGIN_SHARE || centreY > height - scale * MARGIN_SHARE;
   if (inMargin && block.h < scale * PAGE_NUMBER_MAX_HEIGHT && block.w < scale * PAGE_NUMBER_MAX_WIDTH) return "page number";
   const area = block.w * block.h;
-  if (area < width * height * MIN_AREA_SHARE || Math.max(block.w, block.h) < Math.min(width, height) * MIN_SIDE_SHARE) return "speck";
+  if (area < scale * scale * MIN_AREA_SHARE || Math.max(block.w, block.h) < scale * MIN_SIDE_SHARE) return "speck";
   return null;
 }
 
@@ -58,8 +64,10 @@ export function sfxExclusion(block: Box, width: number, height: number): Exclusi
  * what cannot be a line of text at all is excluded here: a speck, or a sliver too thin to hold characters.
  */
 export function textExclusion(block: Box, width: number, height: number): Exclusion | null {
+  // The shorter side, for the same reason as above: length alone must not make a page's lettering look small
+  const scale = Math.min(width, height);
   const area = block.w * block.h;
-  if (area < width * height * MIN_TEXT_AREA_SHARE) return "speck";
+  if (area < scale * scale * MIN_TEXT_AREA_SHARE) return "speck";
   const [long, short] = block.w >= block.h ? [block.w, block.h] : [block.h, block.w];
   if (short < long * MIN_THICKNESS_RATIO) return "sliver";
   return null;

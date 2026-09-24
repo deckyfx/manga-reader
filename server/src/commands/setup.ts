@@ -73,7 +73,7 @@ function keep<T>(value: T | symbol): T {
  * Asks, writes, and hands back what was chosen. The caller applies it: this run should use the answers rather than
  * ask anyone to start the server twice.
  */
-export async function runSetup(dir = process.cwd()): Promise<Settings> {
+export async function runSetup(dir = process.cwd(), thenStarting = true): Promise<Settings> {
   p.intro("web-ocr — setting up");
   const file = envPath(dir);
   if (existsSync(file)) {
@@ -164,6 +164,6 @@ export async function runSetup(dir = process.cwd()): Promise<Settings> {
     ].join("\n"),
     "Ready",
   );
-  p.outro("Starting.");
+  p.outro(thenStarting ? "Starting." : "Run ./app to start.");
   return settings;
 }

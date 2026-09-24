@@ -306,7 +306,9 @@ export class PagePipeline {
    * as it was, progress included.
    */
   async translate(job: PageJob, engines: Pick<PipelineEngines, "translate" | "batchSize">, blockIds?: number[]): Promise<string | null> {
-    const targets = job.blocks.filter((b) => b.kind === "text" && b.source_text?.trim() && (!blockIds || blockIds.includes(b.id)));
+    // `include` is one decision, not three: a block left out of cleaning must not be translated or lettered
+    // either, or the page ends up with English printed over Japanese nobody removed
+    const targets = job.blocks.filter((b) => b.kind === "text" && b.include && b.source_text?.trim() && (!blockIds || blockIds.includes(b.id)));
     this.report({ stage: "translating", message: `Translating ${targets.length} text blocks…`, fraction: 0 });
     let engine: string | null = null;
     const size = Math.max(1, engines.batchSize());
@@ -547,7 +549,7 @@ export class PagePipeline {
   /** Typeset translations inside each bubble on the latest cleaned page → result.png. */
   async render(job: PageJob): Promise<RenderResult> {
     // Text blocks carry translations; sound-effect regions are re-lettered when given text in the Studio
-    const targets = job.blocks.filter((b) => (b.kind === "text" || b.kind === "sfx") && b.translated_text?.trim());
+    const targets = job.blocks.filter((b) => (b.kind === "text" || b.kind === "sfx") && b.include && b.translated_text?.trim());
     this.report({ stage: "typesetting", message: `Typesetting ${targets.length} translations…`, fraction: 0 });
 
     const { input, page, rgb, width, height, areas } = await this.findAreas(job);

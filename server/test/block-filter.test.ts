@@ -94,3 +94,29 @@ describe("a block someone put back", () => {
     expect(sameReading(null, "……")).toBe(true);
   });
 });
+
+describe("a page that is twenty pages long", () => {
+  const strip = { width: 1000, height: 20_000 };
+  const page = { width: 1200, height: 1800 };
+  const bubble = { x: 100, y: 5000, w: 120, h: 260 };
+
+  test("lettering on a webtoon strip is lettering, not a speck", () => {
+    // Measured against the true area, a strip's threshold grows with the scroll until ordinary bubbles fail it
+    expect(textExclusion(bubble, strip.width, strip.height)).toBeNull();
+    expect(sfxExclusion(bubble, strip.width, strip.height)).toBeNull();
+  });
+
+  test("and a real speck is still a speck, on either shape", () => {
+    // The threshold follows the page's shorter side, so a narrower strip has a slightly smaller one — a speck
+    // has to be a speck by both measures to be tested here
+    const speck = { x: 100, y: 5000, w: 8, h: 9 };
+    expect(textExclusion(speck, strip.width, strip.height)).toBe("speck");
+    expect(textExclusion(speck, page.width, page.height)).toBe("speck");
+  });
+
+  test("the margin a page number sits in is measured the same way", () => {
+    // A tenth of the shorter side, so a long strip doesn't get a margin thousands of pixels deep
+    const middleOfTheStrip = { x: 400, y: 9000, w: 80, h: 40 };
+    expect(sfxExclusion(middleOfTheStrip, strip.width, strip.height)).toBeNull();
+  });
+});
