@@ -25,9 +25,29 @@ const bumped = MINOR
   : `${major}.${minor}.${(patch ?? 0) + 1}`;
 const newVersion = GIVEN ?? (NO_BUMP ? (pkg.version ?? "1.0.0") : bumped);
 
-if (GIVEN !== undefined && !/^\d+\.\d+\.\d+$/.test(GIVEN)) {
-  console.error(`--version must look like 1.2.3, not "${GIVEN}"`);
-  process.exit(1);
+/**
+ * Chrome is particular about a manifest version, and finds out at install time rather than at build time: one to
+ * four numbers, each 0–65535, no leading zeros, and not every one of them zero. A tag that breaks those rules
+ * should stop the build here, not the upload later.
+ */
+function versionComplaint(version: string): string | null {
+  const parts = version.split(".");
+  if (parts.length < 1 || parts.length > 4) return "it takes one to four numbers separated by dots";
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return `"${part}" is not a number`;
+    if (part.length > 1 && part.startsWith("0")) return `"${part}" has a leading zero, which Chrome rejects`;
+    if (Number(part) > 65535) return `${part} is above 65535, which Chrome rejects`;
+  }
+  if (parts.every((part) => Number(part) === 0)) return "every number is zero, which Chrome rejects";
+  return null;
+}
+
+if (GIVEN !== undefined) {
+  const complaint = versionComplaint(GIVEN);
+  if (complaint !== null) {
+    console.error(`--version=${GIVEN} won't do: ${complaint}.`);
+    process.exit(1);
+  }
 }
 
 if (!NO_BUMP) {

@@ -38,7 +38,7 @@ class Program
             return;
 
         // Find the existing window by its title and show it.
-        nint hwnd = FindWindow(null, "Web OCR");
+        nint hwnd = FindWindow(null, "Manga Reader");
         if (hwnd != 0)
         {
             ShowWindow(hwnd, SW_RESTORE);

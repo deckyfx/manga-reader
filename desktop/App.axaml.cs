@@ -179,7 +179,7 @@ public partial class App : Application
 
         _trayIcon = new TrayIcon
         {
-            ToolTipText = "Web OCR",
+            ToolTipText = "Manga Reader",
             Menu        = menu,
             IsVisible   = true,
             Icon        = CreateTrayIcon(),

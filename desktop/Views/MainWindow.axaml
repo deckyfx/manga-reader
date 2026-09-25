@@ -4,7 +4,7 @@
         xmlns:c="using:MangaReaderDesktop.Controls"
         x:Class="MangaReaderDesktop.Views.MainWindow"
         x:DataType="vm:MainViewModel"
-        Title="Web OCR"
+        Title="Manga Reader"
         Width="460"
         MinWidth="360"
         MinHeight="140"

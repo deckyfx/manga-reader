@@ -49,18 +49,34 @@ the RP *ID*, which is the domain and did not change.
 
 ## The pipeline
 
-Not built yet; this is the shape agreed.
+Built, and not quite as planned — recorded here as it stands rather than as it was imagined.
 
-**`ci.yml`** on push and pull request: `bun install` with the install cache keyed on `bun.lock`, then the server's
-typecheck and tests and the extension's typecheck and build. The tests redirect `DATA_DIR` to a scratch folder, so
-nothing downloads a model and a run stays short.
+One workflow per part that can break on its own: `server.yml`, `extension.yml`, `desktop.yml`. The desktop's is
+separate on purpose. That companion is half-finished and expected to fail; kept apart, a red mark against it says
+the desktop is broken without also suggesting the server is, which is the only way a red mark stays worth reading.
 
-**`release.yml`** on a `v*` tag: `bun run build --archive`, then **unpack the artefact and run `./app --doctor`,
-requiring exit 0**, before attaching it to the release. That check exists because four separate failures in the
-first compiled binary — sharp's ESM binding, pino's transports, the shared libraries, a metadata polyfill — were
-invisible to every test and only appeared when somebody ran the thing. The doctor already exits non-zero when
-something would stop the server; this is what that was for. Missing models are warnings, so a clean runner passes.
+**Checks run on every change** to the part they belong to — typecheck and tests for the server, typecheck and a
+build for the extension (which also watches the server's routes, since its types are generated from them), a build
+for the desktop.
 
-**Linux only at first.** macOS and Windows artefacts need entries in `NATIVE_LIBS` and the matching `.dylib` /
-`.dll` names in `src/lib/native-libs.ts`, neither of which can be verified from here. The build already says
-plainly when a target's native parts are missing rather than shipping something that looks finished.
+**Artefacts are built on a tag**, one per part: `server-v1.2.3`, `extension-v1.2.3`, `desktop-v1.2.3`. A release is
+then something somebody named, rather than whatever main happened to hold that afternoon, and the three can move at
+their own speeds. Releases are created and uploaded with the GitHub CLI, already on the runner, rather than a
+third-party action.
+
+For the extension the tag *is* the version: `extension-v1.2.3` builds 1.2.3 and writes it into the manifest, so
+what the store receives says what the tag says. That needed two flags on a build which until then bumped the patch
+number every time it ran, even for a check.
+
+**The server's release refuses to publish anything** until an unpacked copy of the archive answers `--doctor` for
+itself, somewhere else on the disk. That check exists because four separate faults in the first compiled binary —
+sharp's ESM binding, pino's transports, the shared libraries, a metadata polyfill — were invisible to every test
+and appeared only when somebody ran the thing. The doctor already exits non-zero when something would stop the
+server; this is what that was for. Missing models are warnings, so a clean runner passes.
+
+**Linux only, still.** macOS and Windows artefacts need entries in `NATIVE_LIBS` and the matching `.dylib` / `.dll`
+names in `src/lib/native-libs.ts`, neither of which can be verified from here. The build says plainly when a
+target's native parts are missing rather than shipping something that looks finished.
+
+Actions are pinned to commit SHAs with their tags beside them, the workflows are read-only except where a release
+asks otherwise, and checkouts don't leave their credentials behind for later steps to find.
