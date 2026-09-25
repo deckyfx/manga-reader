@@ -232,7 +232,7 @@ public class MainViewModel : INotifyPropertyChanged, IDisposable
             else
             {
                 var base64 = Convert.ToBase64String(cropped);
-                var ocr    = await Server.OcrAsync(base64, Settings.TranslateEngine);
+                var ocr    = await Server.OcrAsync(base64, Settings.Translate);
                 OcrText     = ocr.Text;
                 Translation = ocr.Translation;
                 ElapsedMs   = ocr.ElapsedMs;
@@ -381,7 +381,7 @@ public class MainViewModel : INotifyPropertyChanged, IDisposable
         else
         {
             var base64 = Convert.ToBase64String(cropped);
-            var ocr    = await Server.OcrAsync(base64, Settings.TranslateEngine);
+            var ocr    = await Server.OcrAsync(base64, Settings.Translate);
             ct.ThrowIfCancellationRequested();
 
             await Dispatcher.UIThread.InvokeAsync(() =>

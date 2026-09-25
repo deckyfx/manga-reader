@@ -212,11 +212,15 @@
 
                             <TextBlock Text="TRANSLATION" Classes="section" Margin="0,0,0,12" />
                             <StackPanel Spacing="0" Margin="0,0,0,16">
-                                <TextBlock Text="Engine" Classes="label" />
-                                <ComboBox SelectedItem="{Binding TranslateEngine}"
-                                          ItemsSource="{x:Static views:SettingsWindow.TranslateEngines}" />
-                                <TextBlock Text="none = OCR only · local = Opus-MT · deepl = DeepL API"
-                                           Classes="hint" />
+                                <CheckBox IsChecked="{ReflectionBinding Translate}"
+                                          Foreground="{DynamicResource TextBrush}">
+                                    <TextBlock Text="Translate what is read"
+                                               FontSize="12"
+                                               Foreground="{DynamicResource TextBrush}" />
+                                </CheckBox>
+                                <TextBlock Text="The server chooses the translator — built-in, DeepL or Sugoi — in its own Settings → Translation, so every device gets the same answer."
+                                           Classes="hint"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
 
                             <Separator Background="{DynamicResource Surface0Brush}"

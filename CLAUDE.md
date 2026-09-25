@@ -95,7 +95,14 @@ Key files: `background.ts` (service worker), `content.ts` (overlay + selection),
 
 **State machine**: `MainViewModel` drives the app through `AppStatus` states: `Idle → Capturing → Selecting → Analyzing → Error`.
 
-**Services:** `HotkeyService` (SharpHook global hotkey `Super+Shift+O`), `ScreenCaptureService`, `LocalTesseractService` (on-device fallback), `ServerClient` (typed `HttpClient` for `/ocr`, `/analyze`, `/health`, with `X-Api-Key` when set). Settings (`ServerUrl`, default `http://localhost:3579`, and `ApiKey`) persist through `SettingsStore`.
+**Services:** `HotkeyService` (SharpHook global hotkey `Super+Shift+O`), `ScreenCaptureService`, `LocalTesseractService` (on-device fallback), `ServerClient` (typed `HttpClient` for `/ocr`, `/analyze`, `/health`, `/api/whoami`, with `X-Api-Key` when set). Settings (`ServerUrl`, default `http://localhost:3579`, and `ApiKey`) persist through `SettingsStore`.
+
+**Its half of the contract is C#, so nothing type-checks it against the server**: `desktop/Models/ServerModels.cs`
+is pinned from the other side by `server/test/desktop-contract.test.ts`. `/health`'s `version` is an object
+(`server`, `bun`, `started_at`) and readiness is per part, each `true`/`false`/`"disabled"`; `/ocr` and `/analyze`
+need a contributor's key, while `/health` answers anyone — so Test Connection asks `/api/whoami` too, or it passes
+while the hotkey fails. Like the server's routes, the desktop says *whether* to translate (`translate: true`), never
+which engine.
 
 ## Key invariants
 

@@ -10,10 +10,28 @@ namespace MangaReaderDesktop.Models;
 
 public static class SettingsStore
 {
-    private static readonly string FilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "web-ocr-desktop",
-        "settings.json");
+    private static readonly string AppData =
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+    private static readonly string Dir = Path.Combine(AppData, "manga-reader-desktop");
+
+    private static readonly string FilePath = Path.Combine(Dir, "settings.json");
+
+    /// <summary>
+    /// The folder was called web-ocr-desktop until 2026-09. Carry it across on first use — it holds the server
+    /// address and the API key, and asking for those again is a worse welcome than a moved folder deserves.
+    /// </summary>
+    static SettingsStore()
+    {
+        var legacy = Path.Combine(AppData, "web-ocr-desktop");
+        try
+        {
+            if (Directory.Exists(legacy) && !Directory.Exists(Dir))
+                Directory.Move(legacy, Dir);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
 
     // Stored separately so it never appears in settings.json
     private static string ApiKeyPath => Path.Combine(
@@ -32,7 +50,7 @@ public static class SettingsStore
                 ? new AppSettings()
                 : JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings();
 
-            return base_ with { ApiKey = LoadApiKey() };
+            return Migrate(base_) with { ApiKey = LoadApiKey() };
         }
         catch
         {
@@ -40,6 +58,19 @@ public static class SettingsStore
             return new AppSettings() with { ApiKey = LoadApiKey() };
         }
     }
+
+    /// <summary>
+    /// A file written before the engine choice moved to the server says which engine it wanted; anything but
+    /// "none" meant yes. The old field is dropped once read, so it is not carried along forever.
+    /// </summary>
+    private static AppSettings Migrate(AppSettings s) =>
+        s.LegacyTranslateEngine is { Length: > 0 } engine
+            ? s with
+            {
+                Translate = !engine.Equals("none", StringComparison.OrdinalIgnoreCase),
+                LegacyTranslateEngine = null,
+            }
+            : s;
 
     /// <returns>true on success; false on failure — check <see cref="LastSaveError"/>.</returns>
     public static bool Save(AppSettings settings)

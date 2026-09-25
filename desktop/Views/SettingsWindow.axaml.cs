@@ -11,7 +11,6 @@ namespace MangaReaderDesktop.Views;
 
 public partial class SettingsWindow : Window
 {
-    public static readonly string[] TranslateEngines  = ["none", "local", "deepl"];
     public static readonly string[] DictionaryModes   = ["local", "jisho"];
     public static readonly string[] TesseractLangs    = ["jpn", "jpn_vert", "eng", "chi_sim", "chi_tra", "kor"];
     public static readonly string[] TesseractQualities = ["fast", "best"];
@@ -79,13 +78,34 @@ public partial class SettingsWindow : Window
             }
 
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-            if (!string.IsNullOrWhiteSpace(vm.ApiKey))
-                http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", vm.ApiKey.Trim());
+            var key = vm.ApiKey?.Trim();
+            if (!string.IsNullOrWhiteSpace(key))
+                http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", key);
 
-            var resp = await http.GetFromJsonAsync<HealthResponse>(new Uri(baseUri, "/health"));
-            vm.ConnectionStatus = resp is not null
-                ? $"✓ Connected — server v{resp.Version}"
-                : "✓ OK";
+            // /health answers anyone, so on its own it cannot tell a good key from a bad one — and OCR and analyze
+            // both need a contributor's. Ask /api/whoami as well, or the test passes and the hotkey then fails.
+            var health = await http.GetFromJsonAsync<HealthResponse>(new Uri(baseUri, "/health"));
+            var version = health?.Version.Server is { Length: > 0 } v ? $" v{v}" : "";
+
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                vm.ConnectionStatus = $"⚠ Server{version} is up, but no API key is set — OCR will be refused";
+                return;
+            }
+
+            var who = await http.GetAsync(new Uri(baseUri, "/api/whoami"));
+            if (who.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            {
+                vm.ConnectionStatus = $"✗ Server{version} is up, but it did not accept this key";
+                return;
+            }
+            who.EnsureSuccessStatusCode();
+            var me = await who.Content.ReadFromJsonAsync<WhoAmIResponse>();
+
+            var waiting = health is { UsableHere: false } ? $" — {health.NotReadyReason}" : "";
+            vm.ConnectionStatus = me is not null
+                ? $"✓ Connected{version} as {me.Username} ({me.Role}){waiting}"
+                : $"✓ Connected{version}{waiting}";
         }
         catch (TaskCanceledException)
         {
