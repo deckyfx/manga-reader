@@ -73,6 +73,15 @@ export function withPageLock<T>(pageId: string, task: () => Promise<T>): Promise
 }
 
 /**
+ * Whether anything is still queued against this key. Exported for the tests: the chain is removed once a page has
+ * no pending work, and that removal is the only thing standing between a long-lived server and a map with an entry
+ * for every page it has ever touched — which nothing else can observe.
+ */
+export function hasPendingLock(key: string): boolean {
+  return pageLocks.has(key);
+}
+
+/**
  * `withPageLock` for a workspace: appends to one workspace run one after another, so a retried upload batch sees the
  * pages the first attempt stored. Page ids never contain a colon, so the keys can't collide.
  */

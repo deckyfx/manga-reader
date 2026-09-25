@@ -159,10 +159,16 @@ describe("upgrading a database that already holds a library", () => {
   });
 
   /**
-   * The same upgrade through the code that actually performs it, and specifically through `init()` — the path the
-   * server takes at startup, which turns foreign keys *on* before migrating. That is the only path where
-   * `applyMigrations` switching them off again is load-bearing: `runMigrations`, the CLI path, never turns them on,
-   * and SQLite has them off by default, so a test through that door passes whether the protection is there or not.
+   * The same upgrade through the code that actually performs it, and through `init()` rather than
+   * `runMigrations()`: the CLI path never enables foreign keys, and SQLite has them off by default, so a test
+   * through that door passes whether `applyMigrations` protects the run or not. Through `init()`, which does
+   * enable them, deleting that protection fails this test.
+   *
+   * What this does *not* pin is `init()`'s own `PRAGMA foreign_keys = ON`: removing it changes nothing observable,
+   * because `applyMigrations` turns enforcement off for the run and back on afterwards either way. The two are
+   * self-cancelling — enforcement during a migration is off whether both lines are there or neither. Keeping them
+   * is worth it as defence (a connection opened with enforcement on later would still be protected), but a test
+   * cannot see a line with no effect, and it is not honest to claim otherwise.
    *
    * It also uses the *embedded* copy of the migrations — the one a compiled binary carries — so a build that
    * forgot to re-embed them is caught here too.
@@ -197,12 +203,14 @@ describe("upgrading a database that already holds a library", () => {
     const fresh = new Database(join(scratch, "shape-fresh.db"));
     apply(fresh, migrations());
 
+    // Indexes as well as tables: 26 of them are created after the vintage this upgrade starts from, several of
+    // them unique, and an upgrade that skipped one would leave the tables identical while uniqueness quietly
+    // stopped being enforced. Drizzle's own bookkeeping table is not part of the schema under comparison.
     const shapeOf = (db: Database): string[] =>
-      db.query<{ name: string; sql: string }, []>(
-        // Drizzle's own bookkeeping table is not part of the schema under comparison.
-        "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' " +
-        "AND name <> '__drizzle_migrations' ORDER BY name",
-      ).all().map((row) => `${row.name}: ${(row.sql ?? "").replace(/\s+/g, " ")}`);
+      db.query<{ type: string; name: string; sql: string }, []>(
+        "SELECT type, name, sql FROM sqlite_master WHERE type IN ('table', 'index') " +
+        "AND name NOT LIKE 'sqlite_%' AND name <> '__drizzle_migrations' ORDER BY type, name",
+      ).all().map((row) => `${row.type} ${row.name}: ${(row.sql ?? "").replace(/\s+/g, " ")}`);
 
     expect(shapeOf(upgraded)).toEqual(shapeOf(fresh));
 

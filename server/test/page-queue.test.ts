@@ -9,6 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   currentWork,
+  hasPendingLock,
   runExclusive,
   runExclusiveResult,
   withChapterLock,
@@ -152,15 +153,31 @@ describe("the per-page lock", () => {
     expect(log).toEqual(["failing in", "after in", "after out"]);
   });
 
+  test("a page holds its place while it works, and gives it up afterwards", async () => {
+    const page = crypto.randomUUID();
+    expect(hasPendingLock(page)).toBe(false);
+
+    const working = withPageLock(page, async () => {
+      expect(hasPendingLock(page)).toBe(true);
+      await breathe();
+      return "first";
+    });
+    expect(hasPendingLock(page)).toBe(true);
+    await working;
+
+    // The entry goes in a callback on the settled chain, so it is gone a turn later rather than immediately. A
+    // server that never let go would keep one of these for every page it had ever touched.
+    await breathe(2);
+    expect(hasPendingLock(page)).toBe(false);
+  });
+
   test("a page that has finished its work holds nothing up next time", async () => {
     const page = crypto.randomUUID();
     await withPageLock(page, async () => "first");
+    await breathe(2);
 
-    // If the lock chain were kept for ever, this would still resolve — but a task queued behind a settled chain
-    // cannot start synchronously, so the check is that it starts before anything else is given a chance to.
     const order: string[] = [];
     const second = withPageLock(page, async () => { order.push("second"); });
-    await breathe(1);
     void Promise.resolve().then(() => order.push("bystander"));
     await second;
     expect(order[0]).toBe("second");
