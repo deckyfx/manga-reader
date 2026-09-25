@@ -18,16 +18,45 @@ public static class SettingsStore
     private static readonly string FilePath = Path.Combine(Dir, "settings.json");
 
     /// <summary>
-    /// The folder was called web-ocr-desktop until 2026-09. Carry it across on first use — it holds the server
-    /// address and the API key, and asking for those again is a worse welcome than a moved folder deserves.
+    /// The folder was called web-ocr-desktop until 2026-09. Carry its contents across on first use — they are the
+    /// server address and the API key, and asking for those again is a worse welcome than a moved folder deserves.
+    ///
+    /// File by file rather than folder by folder: the new folder may already exist and be short of one of them
+    /// (a settings file saved before the old one was restored from a backup, say), and moving the folder would
+    /// then do nothing at all. Whatever is already here wins; the old copy goes either way, so the key is not left
+    /// lying in two places.
     /// </summary>
     static SettingsStore()
     {
         var legacy = Path.Combine(AppData, "web-ocr-desktop");
         try
         {
-            if (Directory.Exists(legacy) && !Directory.Exists(Dir))
-                Directory.Move(legacy, Dir);
+            if (!Directory.Exists(legacy)) return;
+
+            foreach (var name in new[] { "settings.json", ".apikey" })
+            {
+                var from = Path.Combine(legacy, name);
+                var to   = Path.Combine(Dir, name);
+                if (!File.Exists(from)) continue;
+
+                if (!File.Exists(to))
+                {
+                    Directory.CreateDirectory(Dir);
+                    File.Copy(from, to);
+                    // A copy takes the umask's permissions, not the source's, and one of these is a secret.
+                    if (name == ".apikey" && !OperatingSystem.IsWindows())
+                    {
+                        try { File.SetUnixFileMode(to, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
+                        catch { /* chmod 600 best-effort, as in Save */ }
+                    }
+                }
+
+                File.Delete(from);
+            }
+
+            // Only if nothing else of theirs is in there.
+            if (!Directory.EnumerateFileSystemEntries(legacy).GetEnumerator().MoveNext())
+                Directory.Delete(legacy);
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
