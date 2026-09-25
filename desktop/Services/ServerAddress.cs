@@ -4,8 +4,9 @@ using MangaReaderDesktop.Models;
 namespace MangaReaderDesktop.Services;
 
 /// <summary>
-/// Where the server is, and whether the API key may travel there. The same rule as the extension's
-/// (see extension/src/settings-store.ts): a key belongs on the wire only over https, or to this machine.
+/// Where the server is, and whether the API key may travel there. The extension's rule
+/// (see extension/src/settings-store.ts), and a shade stricter where .NET differs from a browser: a key belongs
+/// on the wire only over https, or to an address that is genuinely this machine.
 /// </summary>
 public static class ServerAddress
 {
@@ -21,8 +22,12 @@ public static class ServerAddress
     {
         if (uri.Scheme != Uri.UriSchemeHttp) return false;
 
-        // IsLoopback covers localhost, 127.0.0.0/8 and ::1; *.localhost resolves here by convention.
-        return !uri.IsLoopback && !uri.Host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase);
+        // IsLoopback covers "localhost" itself, 127.0.0.0/8 and ::1 — and nothing else is taken on trust. A name
+        // under .localhost is *not* exempt, though RFC 6761 reserves it: Windows and Linux hand those to DNS
+        // rather than answering them locally (dotnet/runtime#118569, fixed for .NET 11, and this targets 10), so
+        // "anything.localhost" can be made to resolve wherever its DNS says. The extension's rule reads the same
+        // but can afford the exemption, because the browser maps *.localhost to loopback before it ever resolves.
+        return !uri.IsLoopback;
     }
 
     /// <summary>
