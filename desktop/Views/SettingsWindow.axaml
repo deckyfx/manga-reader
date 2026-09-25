@@ -170,9 +170,20 @@
                                 <TextBlock Text="API Key" Classes="label" />
                                 <TextBox Text="{Binding ApiKey}"
                                          PasswordChar="•"
-                                         PlaceholderText="Leave empty for self-hosted" />
-                                <TextBlock Text="Required only for the hosted service."
-                                           Classes="hint" />
+                                         PlaceholderText="Make one at /user → API keys" />
+                                <TextBlock Text="Needed for OCR and the dictionary on any server — make one in the server's UI at /user → API keys."
+                                           Classes="hint"
+                                           TextWrapping="Wrap" />
+                                <CheckBox IsChecked="{ReflectionBinding AllowInsecureServer}"
+                                          Margin="0,8,0,0"
+                                          Foreground="{DynamicResource TextBrush}">
+                                    <TextBlock Text="Send the key over plain http anyway"
+                                               FontSize="12"
+                                               Foreground="{DynamicResource TextBrush}" />
+                                </CheckBox>
+                                <TextBlock Text="Off, the key is withheld from a plain-http address that is not this machine, where anyone on the network could read it."
+                                           Classes="hint"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
 
                             <Separator Background="{DynamicResource Surface0Brush}"
@@ -212,11 +223,15 @@
 
                             <TextBlock Text="TRANSLATION" Classes="section" Margin="0,0,0,12" />
                             <StackPanel Spacing="0" Margin="0,0,0,16">
-                                <TextBlock Text="Engine" Classes="label" />
-                                <ComboBox SelectedItem="{Binding TranslateEngine}"
-                                          ItemsSource="{x:Static views:SettingsWindow.TranslateEngines}" />
-                                <TextBlock Text="none = OCR only · local = Opus-MT · deepl = DeepL API"
-                                           Classes="hint" />
+                                <CheckBox IsChecked="{ReflectionBinding Translate}"
+                                          Foreground="{DynamicResource TextBrush}">
+                                    <TextBlock Text="Translate what is read"
+                                               FontSize="12"
+                                               Foreground="{DynamicResource TextBrush}" />
+                                </CheckBox>
+                                <TextBlock Text="The server chooses the translator — built-in, DeepL or Sugoi — in its own Settings → Translation, so every device gets the same answer."
+                                           Classes="hint"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
 
                             <Separator Background="{DynamicResource Surface0Brush}"

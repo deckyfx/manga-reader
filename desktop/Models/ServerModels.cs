@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace MangaReaderDesktop.Models;
@@ -8,7 +9,12 @@ namespace MangaReaderDesktop.Models;
 public class OcrRequest
 {
     [JsonPropertyName("image")] public string Image { get; set; } = "";
-    [JsonPropertyName("translate_engine")] public string TranslateEngine { get; set; } = "none";
+
+    /// <summary>
+    /// Whether a translation is wanted. Which engine makes it is the server's business — it is chosen once in
+    /// Settings → Translation there, so every client gets the same answer.
+    /// </summary>
+    [JsonPropertyName("translate")] public bool Translate { get; set; }
 }
 
 public class OcrResponse
@@ -59,11 +65,111 @@ public class AnalyzeResponse
     [JsonPropertyName("elapsed_ms")] public long ElapsedMs { get; set; }
 }
 
+// ── /api/whoami ───────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Who the server thinks we are. /health answers "the server is up" to anyone, so it cannot tell a good key from a
+/// bad one; this route can, and answers 401 when the key is missing or refused.
+/// </summary>
+public class WhoAmIResponse
+{
+    [JsonPropertyName("username")] public string Username { get; set; } = "";
+    [JsonPropertyName("role")] public string Role { get; set; } = "";
+
+    /// <summary>How the request authenticated: "api-key" or "session".</summary>
+    [JsonPropertyName("via")] public string Via { get; set; } = "";
+}
+
+/// <summary>The server's error body. Every refusal carries one.</summary>
+public class ErrorBody
+{
+    [JsonPropertyName("error")] public string Error { get; set; } = "";
+}
+
 // ── /health ───────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// A part of the server that has to load before it can be used. The server reports each one as true, false, or the
+/// string "disabled" when it was switched off in its settings.
+/// </summary>
+[JsonConverter(typeof(ComponentStateConverter))]
+public enum ComponentState
+{
+    NotReady,
+    Ready,
+    Disabled,
+}
+
+/// <summary>Reads the server's true / false / "disabled" into <see cref="ComponentState"/>.</summary>
+public sealed class ComponentStateConverter : JsonConverter<ComponentState>
+{
+    public override ComponentState Read(ref Utf8JsonReader reader, System.Type _, JsonSerializerOptions __)
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.True:  return ComponentState.Ready;
+            case JsonTokenType.False: return ComponentState.NotReady;
+            case JsonTokenType.String when reader.GetString() == "disabled": return ComponentState.Disabled;
+            default:
+                // Anything else is a server newer than this app, and "not ready" is the safe reading — but a
+                // converter must consume exactly one whole value, and an object or an array is more than the one
+                // token the reader is sitting on. Leaving the rest would fail the whole payload, which is the very
+                // thing that broke Test Connection when `version` grew.
+                reader.Skip();
+                return ComponentState.NotReady;
+        }
+    }
+
+    public override void Write(Utf8JsonWriter writer, ComponentState value, JsonSerializerOptions _)
+    {
+        if (value == ComponentState.Disabled) writer.WriteStringValue("disabled");
+        else writer.WriteBooleanValue(value == ComponentState.Ready);
+    }
+}
+
+/// <summary>What is running over there: the server's own version, the Bun under it, and when it came up.</summary>
+public class VersionInfo
+{
+    [JsonPropertyName("server")] public string Server { get; set; } = "";
+    [JsonPropertyName("bun")] public string Bun { get; set; } = "";
+    [JsonPropertyName("started_at")] public string StartedAt { get; set; } = "";
+}
 
 public class HealthResponse
 {
+    /// <summary>"starting", "ready" or "degraded".</summary>
     [JsonPropertyName("status")] public string Status { get; set; } = "";
-    [JsonPropertyName("version")] public string Version { get; set; } = "";
-    [JsonPropertyName("deepl_available")] public bool DeeplAvailable { get; set; }
+
+    [JsonPropertyName("ocr")] public bool Ocr { get; set; }
+    [JsonPropertyName("translate")] public bool Translate { get; set; }
+    [JsonPropertyName("dictionary")] public bool Dictionary { get; set; }
+    [JsonPropertyName("inpaint")] public ComponentState Inpaint { get; set; }
+    [JsonPropertyName("bubble")] public ComponentState Bubble { get; set; }
+    [JsonPropertyName("text_seg")] public ComponentState TextSeg { get; set; }
+
+    /// <summary>What it is downloading right now: label → percent, or -1 when the size isn't known.</summary>
+    [JsonPropertyName("downloads")] public Dictionary<string, int> Downloads { get; set; } = [];
+
+    [JsonPropertyName("version")] public VersionInfo Version { get; set; } = new();
+
+    /// <summary>True once the parts this app uses — OCR and the dictionary — will answer.</summary>
+    [JsonIgnore]
+    public bool UsableHere => Ocr && Dictionary;
+
+    /// <summary>What to tell someone whose request the server is not ready for yet.</summary>
+    [JsonIgnore]
+    public string NotReadyReason
+    {
+        get
+        {
+            var waiting = new List<string>();
+            if (!Ocr) waiting.Add("OCR");
+            if (!Dictionary) waiting.Add("dictionary");
+            if (waiting.Count == 0) return "";
+            var what = string.Join(" and ", waiting);
+            return Downloads.Count > 0
+                ? $"the server is still fetching what it needs ({what})"
+                : $"the server is still loading its {what}";
+        }
+    }
 }

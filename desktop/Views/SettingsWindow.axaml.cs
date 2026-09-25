@@ -5,13 +5,13 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using MangaReaderDesktop.Models;
+using MangaReaderDesktop.Services;
 using MangaReaderDesktop.ViewModels;
 
 namespace MangaReaderDesktop.Views;
 
 public partial class SettingsWindow : Window
 {
-    public static readonly string[] TranslateEngines  = ["none", "local", "deepl"];
     public static readonly string[] DictionaryModes   = ["local", "jisho"];
     public static readonly string[] TesseractLangs    = ["jpn", "jpn_vert", "eng", "chi_sim", "chi_tra", "kor"];
     public static readonly string[] TesseractQualities = ["fast", "best"];
@@ -78,14 +78,43 @@ public partial class SettingsWindow : Window
                 return;
             }
 
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-            if (!string.IsNullOrWhiteSpace(vm.ApiKey))
-                http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", vm.ApiKey.Trim());
+            // Redirects are not followed here either: the key must not be walked to another origin.
+            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                Timeout = TimeSpan.FromSeconds(5),
+            };
 
-            var resp = await http.GetFromJsonAsync<HealthResponse>(new Uri(baseUri, "/health"));
-            vm.ConnectionStatus = resp is not null
-                ? $"✓ Connected — server v{resp.Version}"
-                : "✓ OK";
+            var held = vm.ApiKey?.Trim();
+            var key = ServerAddress.UsableApiKey(vm.ToSettings());
+            if (key is not null)
+                http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", key);
+
+            // /health answers anyone, so on its own it cannot tell a good key from a bad one — and OCR and analyze
+            // both need a contributor's. Ask /api/whoami as well, or the test passes and the hotkey then fails.
+            var health = await http.GetFromJsonAsync<HealthResponse>(new Uri(baseUri, "/health"));
+            var version = health?.Version.Server is { Length: > 0 } v ? $" v{v}" : "";
+
+            if (key is null)
+            {
+                vm.ConnectionStatus = string.IsNullOrWhiteSpace(held)
+                    ? $"⚠ Server{version} is up, but no API key is set — OCR will be refused"
+                    : $"⚠ Server{version} is up. {ServerAddress.WithheldMessage}";
+                return;
+            }
+
+            var who = await http.GetAsync(new Uri(baseUri, "/api/whoami"));
+            if (who.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            {
+                vm.ConnectionStatus = $"✗ Server{version} is up, but it did not accept this key";
+                return;
+            }
+            who.EnsureSuccessStatusCode();
+            var me = await who.Content.ReadFromJsonAsync<WhoAmIResponse>();
+
+            var waiting = health is { UsableHere: false } ? $" — {health.NotReadyReason}" : "";
+            vm.ConnectionStatus = me is not null
+                ? $"✓ Connected{version} as {me.Username} ({me.Role}){waiting}"
+                : $"✓ Connected{version}{waiting}";
         }
         catch (TaskCanceledException)
         {
