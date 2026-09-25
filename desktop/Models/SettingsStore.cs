@@ -71,7 +71,7 @@ public static class SettingsStore
         {
             // For the key this is ApiKeyPath, which LoadApiKey reads: null covers empty, malformed, and a blob
             // this machine cannot decrypt.
-            if (name == ".apikey") return LoadApiKey() is not null;
+            if (name == ".apikey") return LoadApiKey() is { Length: > 0 };
             return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path)) is not null;
         }
         catch
@@ -217,12 +217,16 @@ public static class SettingsStore
         {
             if (!File.Exists(ApiKeyPath)) return null;
             var stored = File.ReadAllText(ApiKeyPath);
-            if (string.IsNullOrEmpty(stored)) return null;
+            if (string.IsNullOrWhiteSpace(stored)) return null;
 
-            if (OperatingSystem.IsWindows())
-                return DecryptDpapi(stored);
+            var key = OperatingSystem.IsWindows()
+                ? DecryptDpapi(stored)
+                : Encoding.UTF8.GetString(Convert.FromBase64String(stored));
 
-            return Encoding.UTF8.GetString(Convert.FromBase64String(stored));
+            // An empty key is not a key. Base64 decoding ignores whitespace, so a file of nothing but spaces
+            // decodes to no bytes at all rather than failing — and something that decodes to "" must not be
+            // mistaken for a stored credential, least of all by the migration deciding what to keep.
+            return string.IsNullOrWhiteSpace(key) ? null : key;
         }
         catch { return null; }
     }
