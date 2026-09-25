@@ -103,15 +103,22 @@ public enum ComponentState
 /// <summary>Reads the server's true / false / "disabled" into <see cref="ComponentState"/>.</summary>
 public sealed class ComponentStateConverter : JsonConverter<ComponentState>
 {
-    public override ComponentState Read(ref Utf8JsonReader reader, System.Type _, JsonSerializerOptions __) =>
-        reader.TokenType switch
+    public override ComponentState Read(ref Utf8JsonReader reader, System.Type _, JsonSerializerOptions __)
+    {
+        switch (reader.TokenType)
         {
-            JsonTokenType.True  => ComponentState.Ready,
-            JsonTokenType.False => ComponentState.NotReady,
-            JsonTokenType.String when reader.GetString() == "disabled" => ComponentState.Disabled,
-            // Anything else is a server newer than this app; "not ready" is the safe reading.
-            _ => ComponentState.NotReady,
-        };
+            case JsonTokenType.True:  return ComponentState.Ready;
+            case JsonTokenType.False: return ComponentState.NotReady;
+            case JsonTokenType.String when reader.GetString() == "disabled": return ComponentState.Disabled;
+            default:
+                // Anything else is a server newer than this app, and "not ready" is the safe reading — but a
+                // converter must consume exactly one whole value, and an object or an array is more than the one
+                // token the reader is sitting on. Leaving the rest would fail the whole payload, which is the very
+                // thing that broke Test Connection when `version` grew.
+                reader.Skip();
+                return ComponentState.NotReady;
+        }
+    }
 
     public override void Write(Utf8JsonWriter writer, ComponentState value, JsonSerializerOptions _)
     {
