@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "bun run typecheck && bun run build.ts",
-    "build:dev": "bun run build.ts",
+    "build:dev": "bun run build.ts --dev --no-bump",
+    "test": "bun test",
     "typecheck": "bun run --cwd ../server types:api && tsc --noEmit"
   },
   "devDependencies": {
