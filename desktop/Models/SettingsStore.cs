@@ -23,8 +23,10 @@ public static class SettingsStore
     ///
     /// File by file rather than folder by folder: the new folder may already exist and be short of one of them
     /// (a settings file saved before the old one was restored from a backup, say), and moving the folder would
-    /// then do nothing at all. Whatever is already here wins; the old copy goes either way, so the key is not left
-    /// lying in two places.
+    /// then do nothing at all. Whatever is already here wins if it can be read; a file here that cannot be — an
+    /// empty or truncated one, or a key encrypted by a profile this machine cannot decrypt, since %APPDATA% roams
+    /// on Windows — is worse than the old copy it would displace, so the old one replaces it. Either way the old
+    /// copy goes, and the key is not left lying in two places.
     /// </summary>
     static SettingsStore()
     {
@@ -39,7 +41,7 @@ public static class SettingsStore
                 var to   = Path.Combine(Dir, name);
                 if (!File.Exists(from)) continue;
 
-                if (!File.Exists(to))
+                if (!Readable(to, name))
                 {
                     Directory.CreateDirectory(Dir);
                     CopyPrivately(from, to);
@@ -55,6 +57,27 @@ public static class SettingsStore
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+    }
+
+    /// <summary>
+    /// Whether the file already in the new folder is worth keeping — which means being able to read it, not merely
+    /// finding it there. Keeping an unreadable one would mean deleting a good copy behind it and then asking for
+    /// the API key again.
+    /// </summary>
+    private static bool Readable(string path, string name)
+    {
+        if (!File.Exists(path)) return false;
+        try
+        {
+            // For the key this is ApiKeyPath, which LoadApiKey reads: null covers empty, malformed, and a blob
+            // this machine cannot decrypt.
+            if (name == ".apikey") return LoadApiKey() is not null;
+            return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path)) is not null;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -87,7 +110,7 @@ public static class SettingsStore
                 destination.Flush(flushToDisk: true);
             }
 
-            File.Move(tmp, to);
+            File.Move(tmp, to, overwrite: true);
         }
         catch
         {
