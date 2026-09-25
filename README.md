@@ -150,7 +150,7 @@ The app sends captured regions to the running server at `http://localhost:3579` 
 The extension version lives in `extension/package.json` and `extension/static/manifest.json`, and `bun run build`
 bumps the patch number in both. A build that shouldn't touch it says so: `--no-bump` leaves the version alone (what
 the checks use) and `--version=1.2.3` sets it outright (what a tagged release uses, so the tag and the manifest
-agree).
+agree). They contradict each other, so passing both is refused rather than quietly favouring one.
 
 ## Support
 

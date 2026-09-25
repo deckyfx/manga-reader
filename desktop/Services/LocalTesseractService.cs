@@ -13,9 +13,26 @@ namespace MangaReaderDesktop.Services;
 /// </summary>
 public sealed class LocalTesseractService : IDisposable
 {
-    private static readonly string DataRoot = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "MangaReader");
+    private static readonly string AppData =
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+
+    private static readonly string DataRoot = Path.Combine(AppData, "MangaReader");
+
+    /// <summary>
+    /// The app was called Web OCR until 2026-09, and kept its traineddata under that name. Carry the old folder
+    /// across on first use rather than downloading the models again; if the move fails they are simply fetched.
+    /// </summary>
+    static LocalTesseractService()
+    {
+        var legacy = Path.Combine(AppData, "WebOcr");
+        try
+        {
+            if (Directory.Exists(legacy) && !Directory.Exists(DataRoot))
+                Directory.Move(legacy, DataRoot);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
 
     /// <summary>Returns the tessdata directory for a given quality level.</summary>
     public static string TessDataDir(string quality) =>

@@ -38,8 +38,9 @@ Deferred at first as churn on a parked component, then done in the same pass on 
 identity in the manifest, and the launch configuration. It builds with no warnings.
 
 One of those is not only a name: the desktop keeps downloaded Tesseract language data in an application-data
-folder that was called `WebOcr` and is now `MangaReader`. An existing install will not find its old copy and will
-fetch the data again — a few megabytes, once.
+folder that was called `WebOcr` and is now `MangaReader`. Rather than let an existing install fetch the data
+again, `LocalTesseractService` carries the old folder across on first use — only when the new one does not exist,
+and only if the move succeeds; otherwise the models are simply downloaded as they would have been.
 
 ### Harmless by inspection
 

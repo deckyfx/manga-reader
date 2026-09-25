@@ -8,6 +8,13 @@ const NO_BUMP = process.argv.includes("--no-bump");
 /** Use exactly this version, rather than working one out — for a release, where the tag is the version. */
 const GIVEN = process.argv.find((a) => a.startsWith("--version="))?.split("=")[1];
 
+// One of these sets the version and the other leaves it alone, so together they would build an archive whose
+// manifest disagrees with the version this prints. Say so rather than picking one.
+if (GIVEN !== undefined && NO_BUMP) {
+  console.error("--version= and --no-bump contradict each other: pass one or the other.");
+  process.exit(1);
+}
+
 // ── Version ────────────────────────────────────────────────────────────────────
 // Ordinarily this bumps the patch (or the minor with --minor) and writes it to package.json and
 // static/manifest.json so the two stay in sync. A build that is checking something, or building a version somebody
