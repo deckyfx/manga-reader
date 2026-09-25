@@ -14,6 +14,12 @@ public record AppSettings
     public string? ApiKey { get; init; }
 
     /// <summary>
+    /// Permission to send the API key to a plain-http address that is not this machine. Off by default: anyone on
+    /// that network could read it. The extension asks the same question.
+    /// </summary>
+    public bool AllowInsecureServer { get; init; }
+
+    /// <summary>
     /// Whether to ask for a translation. Which engine makes it is the server's to decide (Settings → Translation
     /// there), so this is a yes or no — it used to name an engine, and <see cref="LegacyTranslateEngine"/> keeps
     /// a file written by that version meaning what it meant.

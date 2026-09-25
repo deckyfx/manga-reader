@@ -42,15 +42,10 @@ public static class SettingsStore
                 if (!File.Exists(to))
                 {
                     Directory.CreateDirectory(Dir);
-                    File.Copy(from, to);
-                    // A copy takes the umask's permissions, not the source's, and one of these is a secret.
-                    if (name == ".apikey" && !OperatingSystem.IsWindows())
-                    {
-                        try { File.SetUnixFileMode(to, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
-                        catch { /* chmod 600 best-effort, as in Save */ }
-                    }
+                    CopyPrivately(from, to);
                 }
 
+                // Only once a whole copy is in place — CopyPrivately throws rather than return half of one.
                 File.Delete(from);
             }
 
@@ -60,6 +55,45 @@ public static class SettingsStore
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+    }
+
+    /// <summary>
+    /// Copies a file into place whole or not at all, and never readable by anyone else on the way.
+    ///
+    /// Both matter here, because the source is deleted afterwards: a copy interrupted half way would otherwise
+    /// leave a partial file that the next start mistakes for a finished one, and a plain copy is created with the
+    /// umask's permissions — so the key would sit readable for as long as it took to chmod it, and stay that way
+    /// if the chmod failed. The bytes go to a temporary file created 0600, which is renamed into place only once
+    /// it is complete; a rename within a directory is atomic.
+    /// </summary>
+    private static void CopyPrivately(string from, string to)
+    {
+        var tmp = to + ".migrating";
+        try
+        {
+            var options = new FileStreamOptions
+            {
+                Mode = FileMode.Create,
+                Access = FileAccess.Write,
+                Share = FileShare.None,
+            };
+            if (!OperatingSystem.IsWindows())
+                options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+
+            using (var source = File.OpenRead(from))
+            using (var destination = new FileStream(tmp, options))
+            {
+                source.CopyTo(destination);
+                destination.Flush(flushToDisk: true);
+            }
+
+            File.Move(tmp, to);
+        }
+        catch
+        {
+            TryDelete(tmp);
+            throw;
+        }
     }
 
     // Stored separately so it never appears in settings.json

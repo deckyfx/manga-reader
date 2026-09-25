@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using MangaReaderDesktop.Models;
+using MangaReaderDesktop.Services;
 using MangaReaderDesktop.ViewModels;
 
 namespace MangaReaderDesktop.Views;
@@ -77,9 +78,15 @@ public partial class SettingsWindow : Window
                 return;
             }
 
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-            var key = vm.ApiKey?.Trim();
-            if (!string.IsNullOrWhiteSpace(key))
+            // Redirects are not followed here either: the key must not be walked to another origin.
+            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                Timeout = TimeSpan.FromSeconds(5),
+            };
+
+            var held = vm.ApiKey?.Trim();
+            var key = ServerAddress.UsableApiKey(vm.ToSettings());
+            if (key is not null)
                 http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", key);
 
             // /health answers anyone, so on its own it cannot tell a good key from a bad one — and OCR and analyze
@@ -87,9 +94,11 @@ public partial class SettingsWindow : Window
             var health = await http.GetFromJsonAsync<HealthResponse>(new Uri(baseUri, "/health"));
             var version = health?.Version.Server is { Length: > 0 } v ? $" v{v}" : "";
 
-            if (string.IsNullOrWhiteSpace(key))
+            if (key is null)
             {
-                vm.ConnectionStatus = $"⚠ Server{version} is up, but no API key is set — OCR will be refused";
+                vm.ConnectionStatus = string.IsNullOrWhiteSpace(held)
+                    ? $"⚠ Server{version} is up, but no API key is set — OCR will be refused"
+                    : $"⚠ Server{version} is up. {ServerAddress.WithheldMessage}";
                 return;
             }
 

@@ -170,9 +170,20 @@
                                 <TextBlock Text="API Key" Classes="label" />
                                 <TextBox Text="{Binding ApiKey}"
                                          PasswordChar="•"
-                                         PlaceholderText="Leave empty for self-hosted" />
-                                <TextBlock Text="Required only for the hosted service."
-                                           Classes="hint" />
+                                         PlaceholderText="Make one at /user → API keys" />
+                                <TextBlock Text="Needed for OCR and the dictionary on any server — make one in the server's UI at /user → API keys."
+                                           Classes="hint"
+                                           TextWrapping="Wrap" />
+                                <CheckBox IsChecked="{ReflectionBinding AllowInsecureServer}"
+                                          Margin="0,8,0,0"
+                                          Foreground="{DynamicResource TextBrush}">
+                                    <TextBlock Text="Send the key over plain http anyway"
+                                               FontSize="12"
+                                               Foreground="{DynamicResource TextBrush}" />
+                                </CheckBox>
+                                <TextBlock Text="Off, the key is withheld from a plain-http address that is not this machine, where anyone on the network could read it."
+                                           Classes="hint"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
 
                             <Separator Background="{DynamicResource Surface0Brush}"

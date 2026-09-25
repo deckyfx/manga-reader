@@ -31,9 +31,20 @@ public sealed class ServerClient : IDisposable
     private readonly HttpClient _http;
     private Uri _baseUri = new("http://localhost:3579");
 
+    /// <summary>True when a key is held but the address is one it may not travel to.</summary>
+    private bool _keyWithheld;
+
+    /// <summary>Set when a refusal is best explained by the key having been held back.</summary>
+    private string? WithheldNote => _keyWithheld ? ServerAddress.WithheldMessage : null;
+
     public ServerClient(AppSettings settings)
     {
-        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
+        // Redirects are not followed: .NET strips Authorization when a redirect crosses origin, but keeps other
+        // headers — so a server that answered 302 could walk X-Api-Key to somewhere else entirely.
+        _http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+        {
+            Timeout = TimeSpan.FromSeconds(120),
+        };
         ApplySettings(settings);
     }
 
@@ -42,9 +53,12 @@ public sealed class ServerClient : IDisposable
         if (Uri.TryCreate(settings.ServerUrl?.Trim(), UriKind.Absolute, out var uri))
             _baseUri = uri;
 
+        var key = ServerAddress.UsableApiKey(settings);
+        _keyWithheld = key is null && !string.IsNullOrWhiteSpace(settings.ApiKey);
+
         _http.DefaultRequestHeaders.Remove("X-Api-Key");
-        if (!string.IsNullOrWhiteSpace(settings.ApiKey))
-            _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", settings.ApiKey);
+        if (key is not null)
+            _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", key);
     }
 
     public async Task<HealthResponse?> HealthAsync()
@@ -87,7 +101,7 @@ public sealed class ServerClient : IDisposable
     /// Turns a refused response into a <see cref="ServerException"/> carrying what the server said. OCR and analyze
     /// need a contributor's key, so a desktop without one gets 401 here rather than at some later, stranger point.
     /// </summary>
-    private static async Task ThrowIfRefused(HttpResponseMessage resp, CancellationToken ct = default)
+    private async Task ThrowIfRefused(HttpResponseMessage resp, CancellationToken ct = default)
     {
         if (resp.IsSuccessStatusCode) return;
 
@@ -95,8 +109,15 @@ public sealed class ServerClient : IDisposable
         try { said = (await resp.Content.ReadFromJsonAsync<ErrorBody>(ct))?.Error; }
         catch { /* not every refusal comes from the app — a proxy in the way, say */ }
 
+        // A redirect is not followed, so say so rather than reporting it as a refusal nobody can act on.
+        if ((int)resp.StatusCode is >= 300 and < 400)
+            throw new ServerException(resp.StatusCode,
+                $"The server redirected to {resp.Headers.Location?.ToString() ?? "somewhere else"}. "
+                + "That is not followed, because the API key would travel with it — point the app at the real address.");
+
         var message = resp.StatusCode switch
         {
+            HttpStatusCode.Unauthorized when WithheldNote is not null => WithheldNote,
             HttpStatusCode.Unauthorized => "The server did not accept this API key. Make one at /user → API keys.",
             HttpStatusCode.Forbidden    => said is { Length: > 0 } f ? f
                 : "This account may not do that — OCR needs the contributor role.",

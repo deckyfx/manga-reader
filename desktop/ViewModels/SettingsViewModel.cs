@@ -26,6 +26,7 @@ public class SettingsViewModel : INotifyPropertyChanged
     private string _serverUrl           = "http://localhost:3579";
     private string _apiKey              = "";
     private bool   _translate           = false;
+    private bool   _allowInsecureServer = false;
     private string _dictionaryMode      = "local";
     private double _scanIntervalSeconds = 3;
     private bool   _showOverlay         = false;
@@ -45,6 +46,13 @@ public class SettingsViewModel : INotifyPropertyChanged
     {
         get => _apiKey;
         set => SetProperty(ref _apiKey, value);
+    }
+
+    /// <summary>Permission to send the API key to a plain-http address that is not this machine.</summary>
+    public bool AllowInsecureServer
+    {
+        get => _allowInsecureServer;
+        set => SetProperty(ref _allowInsecureServer, value);
     }
 
     /// <summary>Whether to ask the server for a translation; the server decides which engine makes it.</summary>
@@ -143,6 +151,7 @@ public class SettingsViewModel : INotifyPropertyChanged
         _serverUrl           = s.ServerUrl;
         _apiKey              = s.ApiKey ?? "";
         _translate           = s.Translate;
+        _allowInsecureServer = s.AllowInsecureServer;
         _dictionaryMode      = s.DictionaryMode;
         _scanIntervalSeconds = s.ScanIntervalSeconds;
         _showOverlay         = s.ShowOverlay;
@@ -165,6 +174,7 @@ public class SettingsViewModel : INotifyPropertyChanged
             ServerUrl           = ServerUrl.Trim(),
             ApiKey              = string.IsNullOrWhiteSpace(ApiKey) ? null : ApiKey.Trim(),
             Translate           = Translate,
+            AllowInsecureServer = AllowInsecureServer,
             DictionaryMode      = DictionaryMode,
             ScanIntervalSeconds = Math.Max(1, (int)ScanIntervalSeconds),
             ShowOverlay         = ShowOverlay,

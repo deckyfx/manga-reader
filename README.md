@@ -102,7 +102,9 @@ Whichever is chosen, the extension and the desktop app use it: they ask whether 
 
 For a plain-`http` address that isn't on this machine (a LAN server, say), the extension withholds the key, and Test Connection refuses, until you tick **Send the key over plain http anyway**: anyone on that network could read the key.
 
-Without a key the server refuses OCR, translation and page jobs. The desktop app takes the same key in its settings.
+Without a key the server refuses OCR, translation and page jobs. The desktop app takes the same key in its settings,
+withholds it from a plain-http address that isn't this machine under the same tick-box, and follows no redirects —
+a server that answers 302 would otherwise carry the key to wherever it points.
 
 To build an executable: `bun run build`. It writes `server/dist/app` and copies the shared libraries its native
 parts need into `server/dist/lib/`, which the binary loads itself at startup — so `./dist/app` runs as it is, with
