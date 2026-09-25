@@ -1,7 +1,7 @@
 {
-  "name": "web-ocr-server",
+  "name": "manga-reader-server",
   "version": "0.1.0",
-  "description": "web-ocr server: OCR, translation, page pipeline and the Studio (Bun, Elysia, Drizzle, onnxruntime-node)",
+  "description": "manga-reader server: OCR, translation, page pipeline and the Studio (Bun, Elysia, Drizzle, onnxruntime-node)",
   "module": "src/index.ts",
   "type": "module",
   "private": true,

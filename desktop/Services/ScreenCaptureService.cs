@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using SkiaSharp;
 
-namespace WebOcrDesktop.Services;
+namespace MangaReaderDesktop.Services;
 
 /// <summary>
 /// Cross-platform screen capture. Captures the primary monitor as PNG bytes

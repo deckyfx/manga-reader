@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace WebOcrDesktop.Models;
+namespace MangaReaderDesktop.Models;
 
 public record AppSettings
 {

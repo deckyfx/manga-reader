@@ -10,7 +10,7 @@ extension/   Browser extension (MV3, TypeScript + Bun)
 desktop/     Avalonia desktop companion (C#, .NET 10); talks to the server's /health, /ocr, /analyze
 docs/        PLAN_dashboard_studio.md: the Studio / reader plan with per-phase design notes
 tools/       sugoi/: a containerised Sugoi translation server the Bun server can use (SUGOI_URL)
-WebOcr.slnx  .NET solution for the desktop app
+MangaReader.slnx  .NET solution for the desktop app
 ```
 
 The ASP.NET Core (C#) server was removed; its last version is tagged `csharp-server-final`.
@@ -25,7 +25,7 @@ bun install
 bun run dev              # bun --hot src/index.ts, listens on :3579 (the user runs the server; don't start it yourself)
 bun run typecheck        # tsc --noEmit (covers src/, client/, scripts/)
 bun run build            # embed migrations → typecheck → ./dist/app + dist/lib/*.so (built from src/boot.ts)
-bun run build --archive  # …and dist/web-ocr-<target>.tar.gz, for handing to CI or to a machine
+bun run build --archive  # …and dist/manga-reader-<target>.tar.gz, for handing to CI or to a machine
 bun run build --target=macos-arm64   # ubuntu64 (default), linux-arm64, macos-arm64, macos-x64, windows64
 bun run start            # runs the built binary; it loads dist/lib itself, so no LD_LIBRARY_PATH is needed
 ./dist/app --doctor      # what this machine can and cannot run: libraries, models, fonts, folders

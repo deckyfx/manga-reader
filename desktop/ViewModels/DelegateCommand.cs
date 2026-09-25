@@ -1,7 +1,7 @@
 using System;
 using System.Windows.Input;
 
-namespace WebOcrDesktop.ViewModels;
+namespace MangaReaderDesktop.ViewModels;
 
 /// <summary>Minimal synchronous ICommand — no external dependencies.</summary>
 public sealed class DelegateCommand : ICommand

@@ -1,5 +1,5 @@
 <Solution>
   <Folder Name="/desktop/">
-    <Project Path="desktop/WebOcrDesktop.csproj" />
+    <Project Path="desktop/MangaReaderDesktop.csproj" />
   </Folder>
 </Solution>

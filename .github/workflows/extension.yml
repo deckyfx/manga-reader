@@ -1,0 +1,84 @@
+name: Extension
+
+# Also watches the server's routes: the extension's types are generated from them, so a route that changes shape
+# breaks the extension's build and nothing else. Tag `extension-v1.2.3` to build one for the store.
+# Actions are pinned to commit SHAs with their tag beside them: a tag can be moved to point at other code, a commit
+# cannot. Raise one by replacing the SHA, not by trusting the tag.
+
+# Nothing here needs to write to the repository except the release jobs, which ask for it themselves.
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths: ["extension/**", "server/src/api.ts", "server/src/plugins/**", ".github/workflows/extension.yml"]
+    tags: ["extension-v*"]
+  pull_request:
+    paths: ["extension/**", "server/src/api.ts", "server/src/plugins/**", ".github/workflows/extension.yml"]
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Typecheck and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - name: Cache installed packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('server/bun.lock', 'extension/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      # The server's packages too: the extension's typecheck regenerates its API types from the server's sources
+      - run: bun install --frozen-lockfile
+        working-directory: server
+      - run: bun install --frozen-lockfile
+        working-directory: extension
+      - run: bun run typecheck
+        working-directory: extension
+      # --no-bump: a check has no business changing the version in the files it is checking
+      - run: bun run build.ts --dev --no-bump
+        working-directory: extension
+
+  release:
+    name: Build the store package and publish
+    if: startsWith(github.ref, 'refs/tags/extension-v')
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+        working-directory: server
+      - run: bun install --frozen-lockfile
+        working-directory: extension
+
+      # The tag is the version: extension-v1.2.3 builds 1.2.3, rather than bumping whatever main last held. The
+      # manifest is written to match, so what the store receives says the same thing the tag does.
+      - name: Build at the tagged version
+        working-directory: extension
+        run: |
+          version="${GITHUB_REF_NAME#extension-v}"
+          bun run typecheck
+          bun run build.ts --version="$version"
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # A tag name may contain $(…) or backticks, and a workflow expression is pasted into the script before the
+          # shell sees it — so the tag arrives as an environment variable, where the shell will not run it.
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: gh release create "$TAG" extension/manga-reader-chrome.zip --title "$TAG" --generate-notes --repo "$REPO" || gh release upload "$TAG" extension/manga-reader-chrome.zip --clobber --repo "$REPO"

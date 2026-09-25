@@ -127,7 +127,7 @@ if (nativeMatches) {
 if (archive) {
   // Staged in a folder of its own so the archive unpacks into one, rather than scattering into the current
   // directory — and so tar can take the files from disk with their permissions intact
-  const root = `web-ocr-${requested}`;
+  const root = `manga-reader-${requested}`;
   const stage = join(DIST, root);
   await rm(stage, { recursive: true, force: true });
   await mkdir(stage, { recursive: true });

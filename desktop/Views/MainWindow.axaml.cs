@@ -1,9 +1,9 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using WebOcrDesktop.ViewModels;
+using MangaReaderDesktop.ViewModels;
 
-namespace WebOcrDesktop.Views;
+namespace MangaReaderDesktop.Views;
 
 public partial class MainWindow : Window
 {

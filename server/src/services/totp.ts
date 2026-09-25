@@ -89,7 +89,7 @@ export const verifyTotp = (secret: string, code: string, at: Date = new Date()):
   matchTotpStep(secret, code, at) !== null;
 
 /** The `otpauth://` URI an authenticator app scans. */
-export function otpauthUri(secret: string, account: string, issuer = "web-ocr"): string {
+export function otpauthUri(secret: string, account: string, issuer = "Manga Reader"): string {
   const label = encodeURIComponent(`${issuer}:${account}`);
   const params = new URLSearchParams({ secret, issuer, algorithm: "SHA1", digits: String(DIGITS), period: String(PERIOD_SECONDS) });
   return `otpauth://totp/${label}?${params.toString()}`;

@@ -3,10 +3,22 @@ import path from "node:path";
 
 const DEV = process.argv.includes("--dev");
 const MINOR = process.argv.includes("--minor");
+/** Don't touch the version at all — for a check that must leave the working tree as it found it. */
+const NO_BUMP = process.argv.includes("--no-bump");
+/** Use exactly this version, rather than working one out — for a release, where the tag is the version. */
+const GIVEN = process.argv.find((a) => a.startsWith("--version="))?.split("=")[1];
 
-// ── Version bump ───────────────────────────────────────────────────────────────
-// Read current version from package.json, bump patch (or minor with --minor, resetting patch),
-// write back to both package.json and static/manifest.json so they stay in sync.
+// One of these sets the version and the other leaves it alone, so together they would build an archive whose
+// manifest disagrees with the version this prints. Say so rather than picking one.
+if (GIVEN !== undefined && NO_BUMP) {
+  console.error("--version= and --no-bump contradict each other: pass one or the other.");
+  process.exit(1);
+}
+
+// ── Version ────────────────────────────────────────────────────────────────────
+// Ordinarily this bumps the patch (or the minor with --minor) and writes it to package.json and
+// static/manifest.json so the two stay in sync. A build that is checking something, or building a version somebody
+// else decided, says so: --no-bump leaves both files alone, and --version=X.Y.Z writes that and nothing else.
 
 const pkgFile      = Bun.file("./package.json");
 const manifestFile = Bun.file("./static/manifest.json");
@@ -15,17 +27,44 @@ const pkg      = await pkgFile.json()      as { version: string; [k: string]: un
 const manifest = await manifestFile.json() as { version: string; [k: string]: unknown };
 
 const [major, minor, patch] = (pkg.version ?? "1.0.0").split(".").map(Number);
-const newVersion = MINOR
+const bumped = MINOR
   ? `${major}.${(minor ?? 0) + 1}.0`
   : `${major}.${minor}.${(patch ?? 0) + 1}`;
+const newVersion = GIVEN ?? (NO_BUMP ? (pkg.version ?? "1.0.0") : bumped);
 
-pkg.version      = newVersion;
-manifest.version = newVersion;
+/**
+ * Chrome is particular about a manifest version, and finds out at install time rather than at build time: one to
+ * four numbers, each 0–65535, no leading zeros, and not every one of them zero. A tag that breaks those rules
+ * should stop the build here, not the upload later.
+ */
+function versionComplaint(version: string): string | null {
+  const parts = version.split(".");
+  if (parts.length < 1 || parts.length > 4) return "it takes one to four numbers separated by dots";
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return `"${part}" is not a number`;
+    if (part.length > 1 && part.startsWith("0")) return `"${part}" has a leading zero, which Chrome rejects`;
+    if (Number(part) > 65535) return `${part} is above 65535, which Chrome rejects`;
+  }
+  if (parts.every((part) => Number(part) === 0)) return "every number is zero, which Chrome rejects";
+  return null;
+}
 
-await Bun.write(pkgFile,      JSON.stringify(pkg,      null, 2) + "\n");
-await Bun.write(manifestFile, JSON.stringify(manifest, null, 2) + "\n");
+if (GIVEN !== undefined) {
+  const complaint = versionComplaint(GIVEN);
+  if (complaint !== null) {
+    console.error(`--version=${GIVEN} won't do: ${complaint}.`);
+    process.exit(1);
+  }
+}
 
-console.log(`📦 Building Selfhost OCR extension v${newVersion}${DEV ? " (dev)" : ""}\n`);
+if (!NO_BUMP) {
+  pkg.version      = newVersion;
+  manifest.version = newVersion;
+  await Bun.write(pkgFile,      JSON.stringify(pkg,      null, 2) + "\n");
+  await Bun.write(manifestFile, JSON.stringify(manifest, null, 2) + "\n");
+}
+
+console.log(`📦 Building Manga Reader extension v${newVersion}${DEV ? " (dev)" : ""}\n`);
 
 console.log("  Cleaning dist...");
 await $`rm -rf ./dist && mkdir -p ./dist`;
@@ -120,11 +159,11 @@ console.log("   Load it in Chrome: chrome://extensions → Load unpacked → sel
 
 if (!DEV) {
   // ── Archive (zip — required by Chrome Web Store and manual sideloading) ─────
-  process.stdout.write("  Archiving dist → selfhost-ocr.zip...");
+  process.stdout.write("  Archiving dist → manga-reader-chrome.zip...");
 
-  await Bun.$`rm -f selfhost-ocr.zip && cd dist && zip -rq ../selfhost-ocr.zip .`;
+  await Bun.$`rm -f manga-reader-chrome.zip && cd dist && zip -rq ../manga-reader-chrome.zip .`;
 
-  const size = Bun.file("selfhost-ocr.zip").size;
+  const size = Bun.file("manga-reader-chrome.zip").size;
   console.log(` ✅  (${(size / 1024).toFixed(1)} KB)`);
-  console.log("   selfhost-ocr.zip ready for Chrome Web Store or manual install.");
+  console.log("   manga-reader-chrome.zip ready for Chrome Web Store or manual install.");
 }

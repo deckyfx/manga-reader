@@ -157,7 +157,7 @@ const MARK: Record<State, string> = { ok: "ok  ", warn: "warn", bad: "BAD " };
 export async function runDoctor(): Promise<never> {
   const pkg = await import("../../package.json");
   const version = (pkg as { version?: string }).version ?? "(no version)";
-  console.log(`web-ocr ${version} — checking this machine\n`);
+  console.log(`manga-reader ${version} — checking this machine\n`);
 
   const groups: [string, Check[]][] = [
     ["Machine", environment()],

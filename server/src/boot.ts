@@ -29,7 +29,7 @@ if (command.type === "help") {
 
 if (command.type === "version") {
   const pkg = await import("../package.json");
-  console.log(`web-ocr ${(pkg as { version?: string }).version ?? "(no version)"}`);
+  console.log(`manga-reader ${(pkg as { version?: string }).version ?? "(no version)"}`);
   process.exit(0);
 }
 

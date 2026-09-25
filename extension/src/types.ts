@@ -116,7 +116,7 @@ export interface SelectionCompleteMsg  { type: "selection-complete"; rect: Selec
 /** Tesseract finished; background should do translation and send ocr-result back */
 export interface OcrLocalDoneMsg       { type: "ocr-local-done"; requestId: string; text: string; elapsed_ms: number }
 export interface ExplainRequestMsg     { type: "explain-request"; text: string }
-/** Relays a web-ocr:image-updated postMessage from the Studio page to background. */
+/** Relays a manga-reader:image-updated postMessage from the Studio page to background. */
 export interface ImageUpdatedRelayMsg  { type: "image-updated-relay"; jobId: string; resultUrl: string }
 
 // ── Messages: popup → background ─────────────────────────────────────────────

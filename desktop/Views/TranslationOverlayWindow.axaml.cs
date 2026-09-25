@@ -4,7 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 
-namespace WebOcrDesktop.Views;
+namespace MangaReaderDesktop.Views;
 
 public partial class TranslationOverlayWindow : Window
 {

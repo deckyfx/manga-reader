@@ -10,5 +10,5 @@
     "outDir": "./types"
   },
   "include": [],
-  "files": ["src/api.ts", "src/types/sql.d.ts", "src/types/font.d.ts"]
+  "files": ["src/api.ts", "src/types/sql.d.ts", "src/types/font.d.ts", "src/types/sharp-cjs.d.ts"]
 }

@@ -2,9 +2,9 @@ using System;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
-using WebOcrDesktop.Models;
+using MangaReaderDesktop.Models;
 
-namespace WebOcrDesktop.Services;
+namespace MangaReaderDesktop.Services;
 
 /// <summary>Typed HTTP client for the Web-OCR server API.</summary>
 public sealed class ServerClient : IDisposable

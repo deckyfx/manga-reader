@@ -21,7 +21,7 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "desktop: dotnet build",
-      "program": "${workspaceFolder}/desktop/bin/Debug/net10.0/WebOcrDesktop.dll",
+      "program": "${workspaceFolder}/desktop/bin/Debug/net10.0/MangaReaderDesktop.dll",
       "args": [],
       "cwd": "${workspaceFolder}/desktop",
       "stopAtEntry": false,

@@ -76,7 +76,7 @@ class EnvConfig {
   }
 
   get WEBAUTHN_RP_NAME(): string {
-    return Bun.env.WEBAUTHN_RP_NAME ?? "web-ocr";
+    return Bun.env.WEBAUTHN_RP_NAME ?? "Manga Reader";
   }
 
   /** Where the browser thinks it is; must match exactly, scheme and port included. */

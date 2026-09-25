@@ -21,7 +21,7 @@ dist/
 .env.*.local
 
 # ── Project-specific ──────────────────────────────────────────────────────────
-extension/selfhost-ocr.tar.gz
+extension/manga-reader-chrome.tar.gz
 
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
@@ -36,7 +36,7 @@ TODO.txt
 # ── etc ────────────────────────────────────────────────────────────────────────
 mighty-wiggling-cascade.md
 server/data/
-extension/selfhost-ocr.zip
+extension/manga-reader-chrome.zip
 
 # ── Claude Code worktrees (isolated checkouts, never committed) ───────────────
 .claude/worktrees/

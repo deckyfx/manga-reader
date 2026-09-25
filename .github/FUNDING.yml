@@ -1,15 +1,8 @@
-# These are supported funding model platforms
+# Where to support this project. GitHub turns these into the Sponsor button on the repository.
+# Only the keys with a value are shown; the rest of the list GitHub supports is left out rather than left blank.
 
-github: # Replace with up to 4 GitHub Sponsors-enabled usernames e.g., [user1, user2]
-patreon: # Replace with a single Patreon username
-open_collective: # Replace with a single Open Collective username
-ko_fi: webextension?product=image-reader
-tidelift: # Replace with a single Tidelift platform-name/package-name e.g., npm/babel
-community_bridge: # Replace with a single Community Bridge project-name e.g., cloud-foundry
-liberapay: # Replace with a single Liberapay username
-issuehunt: # Replace with a single IssueHunt username
-lfx_crowdfunding: # Replace with a single LFX Crowdfunding project-name e.g., cloud-foundry
-polar: # Replace with a single Polar username
-buy_me_a_coffee: # Replace with a single Buy Me a Coffee username
-thanks_dev: # Replace with a single thanks.dev username
-custom: # Replace with up to 4 custom sponsorship URLs e.g., ['link1', 'link2']
+patreon: u25753383
+
+# Trakteer isn't one of GitHub's known platforms, so it goes here as a link. It is the one that takes QRIS and
+# the Indonesian e-wallets, which is what most people reading this will actually have.
+custom: ["https://trakteer.id/decky_fiyemonda"]

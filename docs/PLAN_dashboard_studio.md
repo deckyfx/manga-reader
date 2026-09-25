@@ -183,7 +183,11 @@ Layout: left page list (chapter thumbnails / Inbox) · centre canvas with viewpo
    - Catch-up on connect: the server keeps no event history, so a publish between the swap and the stream connecting would be missed. To prevent that, the live route subscribes first, then sends the page's current revision as a `page-updated` event (when it's above 0). The tab records the revision it shows (from `?rev=` in the result URL, 0 for a first translation) and only swaps for a newer one, so the catch-up event and any duplicate delivery are harmless.
 3. Studio publish → server emits `page-updated` to that page's live listeners → the content script sets `img.src = <server>/<result_url>?rev=N`.
 4. The extension's result panel gets an **Open in Studio** link (`<server>/studio/pages/:id`).
-5. Remove the dead `postMessage` relay (`web-ocr:image-updated`, `ImageUpdatedMsg`, `ImageUpdatedRelayMsg`, `replacePageImages`).
+5. Remove the `postMessage` relay (`manga-reader:image-updated`, `ImageUpdatedMsg`, `ImageUpdatedRelayMsg`,
+   `replacePageImages`). It is still wired from the content script through to the background worker, but nothing
+   posts the event any more — the live stream in 2–3 replaced it — so removing it takes nothing with it. Check
+   that again before deleting: the listener is the only thing standing between a page and its update if the
+   stream is ever taken out.
 
 ---
 

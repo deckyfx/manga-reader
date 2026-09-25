@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace WebOcrDesktop.Models;
+namespace MangaReaderDesktop.Models;
 
 /// <summary>Pairs a TokenInfo with its optional Definition for display in a TokenCard.</summary>
 public sealed class TokenCardModel

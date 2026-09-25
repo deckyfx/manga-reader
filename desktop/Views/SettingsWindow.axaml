@@ -1,10 +1,10 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="using:WebOcrDesktop.ViewModels"
-        xmlns:views="using:WebOcrDesktop.Views"
-        x:Class="WebOcrDesktop.Views.SettingsWindow"
+        xmlns:vm="using:MangaReaderDesktop.ViewModels"
+        xmlns:views="using:MangaReaderDesktop.Views"
+        x:Class="MangaReaderDesktop.Views.SettingsWindow"
         x:DataType="vm:SettingsViewModel"
-        Title="Settings — Web OCR"
+        Title="Settings — Manga Reader"
         Width="660"
         MinWidth="480"
         SizeToContent="Height"
@@ -89,7 +89,7 @@
                                FontSize="15"
                                FontWeight="SemiBold"
                                Foreground="{DynamicResource TextBrush}" />
-                    <TextBlock Text="Web OCR Desktop"
+                    <TextBlock Text="Manga Reader Desktop"
                                FontSize="11"
                                Foreground="{DynamicResource Overlay0Brush}" />
                 </StackPanel>

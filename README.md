@@ -1,4 +1,4 @@
-# Selfhost OCR
+# Manga Reader
 
 ![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/deckyfx/manga-reader?utm_source=oss&utm_medium=github&utm_campaign=deckyfx%2Fmanga-reader&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 
@@ -32,7 +32,7 @@ extension/     Browser extension (TypeScript + Bun)
 desktop/       Desktop companion app (Avalonia / C#)
 docs/          Studio, library and reader plan
 tools/         sugoi/: a Sugoi translation server in a container, for the server to use
-WebOcr.slnx    .NET solution for the desktop app
+MangaReader.slnx    .NET solution for the desktop app
 ```
 
 ## Extension Setup
@@ -115,7 +115,7 @@ skips the questions and takes the defaults, so it can be started by a service ma
 `--doctor` reports what this machine can and cannot run (libraries, models, fonts, folders) and exits non-zero if
 something would stop the server.
 
-`bun run build --archive` also writes `dist/web-ocr-<target>.tar.gz` — the binary and its libraries, ready to hand
+`bun run build --archive` also writes `dist/manga-reader-<target>.tar.gz` — the binary and its libraries, ready to hand
 to CI or to a machine. `--target=` picks one of `ubuntu64` (the default), `linux-arm64`, `macos-arm64`,
 `macos-x64` or `windows64`; the JavaScript cross-compiles, but the native libraries come from the machine doing the
 building, so a build for another platform lands in its own folder and says what is missing.
@@ -147,4 +147,17 @@ The app sends captured regions to the running server at `http://localhost:3579` 
 
 ## Version
 
-The extension version lives in `extension/package.json` and `extension/static/manifest.json`. Every `bun run build` automatically bumps the patch number and keeps both files in sync.
+The extension version lives in `extension/package.json` and `extension/static/manifest.json`, and `bun run build`
+bumps the patch number in both. A build that shouldn't touch it says so: `--no-bump` leaves the version alone (what
+the checks use) and `--version=1.2.3` sets it outright (what a tagged release uses, so the tag and the manifest
+agree). They contradict each other, so passing both is refused rather than quietly favouring one.
+
+## Support
+
+This is free, and staying that way. If it saved you an afternoon and you'd like to put something in the hat:
+
+- [Trakteer](https://trakteer.id/decky_fiyemonda) — QRIS and the usual Indonesian e-wallets, one-off
+- [Patreon](https://www.patreon.com/u25753383) — if you'd rather make it monthly
+
+Neither buys priority, a support contract, or a say in what gets built — it buys coffee, and the occasional model
+download. Bug reports and pages that translate badly are worth more than either.

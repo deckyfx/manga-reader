@@ -14,7 +14,7 @@ import { rollingFileOptions, scheduleLogSweep, sweepOldLogs } from "@/lib/logger
 
 const dirs: string[] = [];
 const scratch = (): string => {
-  const dir = mkdtempSync(join(tmpdir(), "web-ocr-logs-"));
+  const dir = mkdtempSync(join(tmpdir(), "manga-reader-logs-"));
   dirs.push(dir);
   return dir;
 };
