@@ -115,5 +115,8 @@ which engine.
   by bundling, but the shared libraries they dlopen are not, so `bun run build` copies those into `dist/lib/` and
   `src/boot.ts` — the binary's entry — loads them before the server's imports run (`src/lib/native-libs.ts`).
 - **Don't run the server**: the user runs it. Test in-process with `app.handle()` and a scratch `DATABASE_URL`; never delete anything under `data/` that a test didn't create.
-- **A test that pins behaviour should be checked by breaking the behaviour**: remove the fix, watch the test fail, put it back. Twice in one session a test passed for the wrong reason and only this caught it.
+- **A test that pins behaviour should be checked by breaking the behaviour**: remove the fix, watch the test fail,
+  put it back. Several times now a test has passed for the wrong reason and only this caught it — including one
+  that exercised `MigrationManager.runMigrations` and so proved nothing about the foreign-key pragma, because
+  SQLite defaults foreign keys *off* and only `init()` turns them on.
 - **`desktop/bin/`, `desktop/obj/`, `*/publish/`** are gitignored build output.
