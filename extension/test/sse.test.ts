@@ -67,7 +67,29 @@ describe("reading frames out of a stream", () => {
 
   test("carriage returns are tolerated, however the line ends", () => {
     expect(new SseParser().push("data: windows\r\n\r\n")).toEqual(["windows"]);
-    expect(new SseParser().push("data: old mac\r\r")).toEqual(["old mac"]);
+    // Lone carriage returns, the old Mac ending. The last one is held while it could still be half of a CRLF, and
+    // the frame comes out as soon as the next chunk settles the question.
+    const parser = new SseParser();
+    expect(parser.push("data: old mac\r\r")).toEqual([]);
+    expect(parser.push("data: next\r\r")).toEqual(["old mac"]);
+  });
+
+  /**
+   * A CRLF cut between its two characters. Turning that trailing CR into a line ending straight away would end the
+   * data line *and* the frame one chunk early — and for an event whose data spans several lines, deliver the first
+   * line on its own as a payload that JSON.parse then chokes on.
+   */
+  test("a CRLF split across chunks does not end the frame early", () => {
+    const parser = new SseParser();
+    expect(parser.push("data: payload\r")).toEqual([]);
+    expect(parser.push("\n")).toEqual([]);
+    expect(parser.push("\r\n")).toEqual(["payload"]);
+  });
+
+  test("…and a multi-line event cut the same way stays one event", () => {
+    const parser = new SseParser();
+    expect(parser.push("data: first\r")).toEqual([]);
+    expect(parser.push("\ndata: second\r\n\r\n")).toEqual(["first\nsecond"]);
   });
 
   test("a chunk boundary between the two newlines does not lose the frame", () => {
@@ -105,15 +127,15 @@ function streamOf(chunks: string[], init: ResponseInit = {}): Response {
 
 /** Replaces fetch for one test and says what it was asked for. */
 function withFetch(reply: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): {
-  calls: { url: string; headers: Record<string, string> }[];
+  calls: { url: string; headers: Record<string, string>; redirect?: RequestRedirect }[];
   restore: () => void;
 } {
-  const calls: { url: string; headers: Record<string, string> }[] = [];
+  const calls: { url: string; headers: Record<string, string>; redirect?: RequestRedirect }[] = [];
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const headers: Record<string, string> = {};
     new Headers(init?.headers).forEach((value, key) => { headers[key] = value; });
-    calls.push({ url: String(input), headers });
+    calls.push({ url: String(input), headers, redirect: init?.redirect });
     return reply(input, init);
   }) as typeof fetch;
   return { calls, restore: () => { globalThis.fetch = original; } };
@@ -243,6 +265,35 @@ describe("opening a stream", () => {
     try {
       const ends: string[] = [];
       openEventStream("https://reader.example/live", "k", { onMessage: () => {}, onEnd: (r) => ends.push(r) });
+      await settle();
+      expect(ends).toEqual(["Failed to fetch"]);
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  /**
+   * The key goes in a header, and fetch keeps a custom header across a redirect — even a cross-origin one — so
+   * following one would hand it to wherever the redirect pointed. Every other call the extension makes already
+   * refuses redirects (api.ts); this one has to as well.
+   */
+  test("a redirect is refused rather than followed with the key attached", async () => {
+    const fetcher = withFetch(async () => streamOf(["data: hello\n\n"]));
+    try {
+      openEventStream("https://reader.example/live", "wo_secret", { onMessage: () => {}, onEnd: () => {} });
+      await settle();
+      expect(fetcher.calls[0]!.redirect).toBe("error");
+    } finally {
+      fetcher.restore();
+    }
+  });
+
+  test("and when the browser refuses one, the stream ends in words", async () => {
+    // What fetch does with redirect: "error" — it rejects rather than returning a response.
+    const fetcher = withFetch(async () => { throw new TypeError("Failed to fetch"); });
+    try {
+      const ends: string[] = [];
+      openEventStream("https://reader.example/live", "wo_secret", { onMessage: () => {}, onEnd: (r) => ends.push(r) });
       await settle();
       expect(ends).toEqual(["Failed to fetch"]);
     } finally {

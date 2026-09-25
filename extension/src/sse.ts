@@ -27,8 +27,10 @@ export class SseParser {
     this.buffer += chunk;
     const events: SseData[] = [];
 
-    // Normalise the three line endings the specification allows, so the split below need only look for one.
-    this.buffer = this.buffer.replace(/\r\n|\r/g, "\n");
+    // Normalise the three line endings the specification allows, so the split below need only look for one. A CR
+    // at the very end is left alone: the LF that pairs with it may be in the next chunk, and turning it into a
+    // line ending now would end the frame an instant early — splitting a multi-line event into two half events.
+    this.buffer = this.buffer.replace(/\r\n|\r(?!$)/g, "\n");
 
     let boundary = this.buffer.indexOf("\n\n");
     while (boundary !== -1) {
@@ -106,7 +108,15 @@ export function openEventStream(url: string, apiKey: string, handlers: StreamHan
       const headers: Record<string, string> = { Accept: "text/event-stream" };
       if (apiKey) headers["X-Api-Key"] = apiKey;
 
-      const response = await fetch(url, { headers, signal: controller.signal, cache: "no-store" });
+      // A redirect is an error rather than something to follow: fetch keeps a custom header across one, even
+      // cross-origin, so following it would hand X-Api-Key to wherever it pointed. Every other call the extension
+      // makes refuses redirects for the same reason (see api.ts).
+      const response = await fetch(url, {
+        headers,
+        signal: controller.signal,
+        cache: "no-store",
+        redirect: "error",
+      });
       if (!response.ok) {
         end(`the server refused the stream (${response.status})`);
         return;
