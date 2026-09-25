@@ -32,9 +32,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
-          # The project targets net10.0; quality: preview lets this resolve before the release channel carries it
+          # The project targets net10.0, which has been generally available since November 2025
           dotnet-version: "10.0.x"
-          dotnet-quality: preview
       - name: Cache NuGet packages
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -61,7 +60,6 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: "10.0.x"
-          dotnet-quality: preview
       - name: Cache NuGet packages
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -80,4 +78,8 @@ jobs:
       - name: Attach it to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" manga-reader-desktop-linux-x64.tar.gz --title "${{ github.ref_name }}" --generate-notes --repo "${{ github.repository }}" || gh release upload "${{ github.ref_name }}" manga-reader-desktop-linux-x64.tar.gz --clobber --repo "${{ github.repository }}"
+          # A tag name may contain $(…) or backticks, and a workflow expression is pasted into the script before the
+          # shell sees it — so the tag arrives as an environment variable, where the shell will not run it.
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: gh release create "$TAG" manga-reader-desktop-linux-x64.tar.gz --title "$TAG" --generate-notes --repo "$REPO" || gh release upload "$TAG" manga-reader-desktop-linux-x64.tar.gz --clobber --repo "$REPO"
