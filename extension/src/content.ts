@@ -14,7 +14,8 @@ import type {
 } from "./types";
 import { extractChapterHere, extractSeriesHere, resolvePageHere } from "./chapter-extract";
 import { loadServerAccess } from "./settings-store";
-import { errorMessage, serverApi, streamUrl, type PageJobEvent, type PageLiveEvent } from "./api";
+import { errorMessage, serverApi, type PageJobEvent, type PageLiveEvent } from "./api";
+import { openEventStream, type StreamHandle } from "./sse";
 
 // ── Guard ─────────────────────────────────────────────────────────────────────
 
@@ -658,7 +659,7 @@ let imagePickerHint: HTMLElement | null = null;
 let imageTranslateOverlay: HTMLElement | null = null;
 let imageTranslateLogList: HTMLElement | null = null;
 let imageTranslateTitle: HTMLElement | null = null;
-let activeEventSource: EventSource | null = null;
+let activeStream: StreamHandle | null = null;
 
 function startImageMode(): void {
   cleanup();
@@ -678,8 +679,8 @@ function startImageMode(): void {
 
 function exitImageMode(): void {
   // Always close the stream — it may be opened after imagePickerActive was cleared
-  activeEventSource?.close();
-  activeEventSource = null;
+  activeStream?.close();
+  activeStream = null;
 
   if (!imagePickerActive) return;
   imagePickerActive = false;
@@ -777,15 +778,15 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
     // reopened stream replays it again, which is why what has already been shown is counted and skipped
     // Overtaken during the upload: the newer translation owns the panel and the stream
     if (!isCurrent()) return;
-    activeEventSource?.close();
+    activeStream?.close();
     let seen = 0;
 
-    const onJobEvent = (es: EventSource, event: MessageEvent<string>, skip: { remaining: number }): void => {
+    const onJobEvent = (stream: StreamHandle, payload: string, skip: { remaining: number }): void => {
       // A newer translation owns the panel from the moment it claims its number — even while it is still uploading.
       // This stream's news is no longer anybody's, so it closes itself rather than writing into the other's overlay.
       if (!isCurrent()) {
-        es.close();
-        if (activeEventSource === es) activeEventSource = null;
+        stream.close();
+        if (activeStream === stream) activeStream = null;
         return;
       }
       if (skip.remaining > 0) {
@@ -793,7 +794,7 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
         return;
       }
       seen++;
-      const update = JSON.parse(event.data) as PageJobEvent;
+      const update = JSON.parse(payload) as PageJobEvent;
       switch (update.type) {
         case "log":
           appendLogEntry(update.message, update.stage);
@@ -803,16 +804,13 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
           setImageTranslateProgress(update.progress, update.message);
           break;
         case "done":
-          es.close();
-          activeEventSource = null;
+          stream.close();
+          activeStream = null;
           img.src = `data:image/png;base64,${update.result}`;
           img.srcset = "";
           img.dataset.socrJobId = data.job_id;
           img.dataset.socrRevision = String(revisionOf(update.result_url));
-          watchPageUpdates(serverUrl, data.job_id, apiKey).catch((err: unknown) => {
-            // Live updates need their own token; without it the page still translated, it just won't refresh itself
-            appendLogEntry(`Live updates unavailable: ${err instanceof Error ? err.message : String(err)}`, "warn");
-          });
+          watchPageUpdates(serverUrl, data.job_id, apiKey);
           setImageTranslateProgress(1);
           appendLogEntry(`Image replaced ✓ (${(update.elapsed_ms / 1000).toFixed(1)} s)`, "done");
           appendStudioLink(`${serverUrl}/studio/pages/${data.job_id}`);
@@ -822,56 +820,52 @@ async function uploadImageForTranslation(img: HTMLImageElement): Promise<void> {
           }, 4000);
           break;
         case "error":
-          es.close();
-          activeEventSource = null;
+          stream.close();
+          activeStream = null;
           hideImageTranslateLoading(false, update.error);
           break;
       }
     };
 
     /**
-     * Opens (or reopens) the job's stream with a fresh token. A dropped connection or an expired token closes an
-     * EventSource for good, so it is replaced rather than left to retry a URL the server will keep refusing.
+     * Opens (or reopens) the job's stream. Nothing here retries by itself — a dropped connection ends the stream
+     * and the reopen below decides whether to try again — which is what the failure budget counts.
      */
-    const openJobStream = async (failures: number): Promise<void> => {
-      const url = await streamUrl(serverUrl, `api/translate-page/${data.job_id}/events`, apiKey);
-      // Overtaken while the token was being fetched: leave the newer translation's stream alone
+    const openJobStream = (failures: number): void => {
       if (!isCurrent()) return;
-      const es = new EventSource(url);
-      activeEventSource = es;
       const skip = { remaining: seen };
       let opened = false;
-      es.onopen = () => {
-        opened = true;
-      };
-      es.onmessage = (event: MessageEvent<string>) => onJobEvent(es, event, skip);
-      es.onerror = () => {
-        if (activeEventSource !== es) return;
-        es.close();
-        reopenJob(opened ? 1 : failures + 1);
-      };
+      const stream: StreamHandle = openEventStream(
+        `${serverUrl}/api/translate-page/${data.job_id}/events`,
+        apiKey,
+        {
+          onOpen: () => { opened = true; },
+          onMessage: (payload) => onJobEvent(stream, payload, skip),
+          onEnd: () => {
+            if (activeStream !== stream) return;
+            reopenJob(opened ? 1 : failures + 1);
+          },
+        },
+      );
+      activeStream = stream;
     };
 
-    /**
-     * Tries again after a dropped stream. Fetching the fresh token can fail too — the server restarting, the network
-     * blinking — and that counts as one more failure against the same budget rather than ending the translation.
-     */
+    /** Tries again after a dropped stream, within the same budget, rather than ending the translation. */
     const reopenJob = (failures: number): void => {
       if (failures > MAX_STREAM_FAILURES) {
         // A stale translation giving up must not tear down a newer one's panel
         if (!isCurrent()) return;
-        activeEventSource = null;
+        activeStream = null;
         hideImageTranslateLoading(false, "Connection to server lost");
         return;
       }
       setTimeout(() => {
         if (!isCurrent()) return;
-        openJobStream(failures).catch(() => reopenJob(failures + 1));
+        openJobStream(failures);
       }, reopenDelay(failures));
     };
 
-    // A token that can't be fetched the first time goes through the same bounded retries as a dropped stream
-    await openJobStream(0).catch(() => reopenJob(1));
+    openJobStream(0);
 
   } catch (e) {
     // Only the translation still on screen reports; an older one failing late would hide the newer one's panel
@@ -886,7 +880,7 @@ function revisionOf(resultUrl: string): number {
 }
 
 /** Live streams per translated page; they stay open while this tab shows the page. */
-const pageWatchers = new Map<string, EventSource>();
+const pageWatchers = new Map<string, StreamHandle>();
 /**
  * Which start of a page's watcher is the current one. It is taken before the token is fetched, so two starts racing
  * for the same page can't both open a stream — and a stop that lands during the fetch is noticed afterwards.
@@ -941,65 +935,56 @@ const reopenDelay = (failures: number): number => Math.min(30_000, 1000 * 2 ** M
 /**
  * Swap in the new result whenever the page is published from the Studio.
  *
- * The stream's token lasts fifteen minutes, and EventSource reconnects with the URL it was given — so once the token
- * has run out, the server refuses the reconnect and the stream closes for good. When that happens and the page is
- * still being watched, a new token is fetched and the stream reopened.
+ * The stream is read with fetch so the API key can travel in a header (see sse.ts). Nothing reconnects on its own,
+ * so every ending comes back here and is reopened within a failure budget for as long as the image is on the page.
  */
-async function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string, failures = 0): Promise<void> {
-  // A first start is refused while one is already running *or still fetching its token*
+function watchPageUpdates(serverUrl: string, jobId: string, apiKey: string, failures = 0): void {
+  // A first start is refused while one is already running
   if (failures === 0 && watcherGenerations.has(jobId)) return;
   const generation = (watcherGenerations.get(jobId) ?? 0) + 1;
   watcherGenerations.set(jobId, generation);
 
-  let url: string;
-  try {
-    url = await streamUrl(serverUrl, `api/translate-page/${jobId}/live`, apiKey);
-  } catch (err) {
-    // A first start that fails leaves nothing behind; a reopen keeps its claim so it can be tried again
-    if (failures === 0 && watcherGenerations.get(jobId) === generation) watcherGenerations.delete(jobId);
-    throw err;
-  }
-  // Stopped, or started again, while the token was being fetched: this attempt is no longer wanted
-  if (watcherGenerations.get(jobId) !== generation) return;
-
-  const es = new EventSource(url);
-  pageWatchers.set(jobId, es);
-  observeWatchedImages();
-
   let opened = false;
-  es.onopen = () => {
-    opened = true;
-  };
+  const stream: StreamHandle = openEventStream(`${serverUrl}/api/translate-page/${jobId}/live`, apiKey, {
+    onOpen: () => { opened = true; },
 
-  es.onmessage = (event: MessageEvent<string>) => {
-    const update = JSON.parse(event.data) as PageLiveEvent;
-    if (update.type !== "page-updated") return;
-    const shown = document.querySelectorAll<HTMLImageElement>(`img[data-socr-job-id="${CSS.escape(jobId)}"]`);
-    if (shown.length === 0) {
-      // The image left the page (e.g. the reader moved on): stop listening
-      stopWatching(jobId);
-      return;
-    }
-    // The server repeats the current revision on connect (catch-up), so only swap for a newer one
-    const newest = Math.max(...Array.from(shown, (img) => Number(img.dataset.socrRevision ?? 0)));
-    if (update.revision <= newest) return;
-    showRevision(jobId, `${serverUrl}${update.result_url}`);
-  };
+    onMessage: (payload) => {
+      const update = JSON.parse(payload) as PageLiveEvent;
+      if (update.type !== "page-updated") return;
+      const shown = document.querySelectorAll<HTMLImageElement>(`img[data-socr-job-id="${CSS.escape(jobId)}"]`);
+      if (shown.length === 0) {
+        // The image left the page (e.g. the reader moved on): stop listening
+        stopWatching(jobId);
+        return;
+      }
+      // The server repeats the current revision on connect (catch-up), so only swap for a newer one
+      const newest = Math.max(...Array.from(shown, (img) => Number(img.dataset.socrRevision ?? 0)));
+      if (update.revision <= newest) return;
+      showRevision(jobId, `${serverUrl}${update.result_url}`);
+    },
 
-  // EventSource reconnects on its own after network errors; it only closes for good when the server refuses the
-  // stream — most often because its token has expired, which a new token fixes
-  es.onerror = () => {
-    if (es.readyState !== EventSource.CLOSED || pageWatchers.get(jobId) !== es) return;
-    // Out of the map while it waits, so the reopen can take its place; the claim stays, so a stop still cancels it
-    pageWatchers.delete(jobId);
-    reopenWatcher(serverUrl, jobId, apiKey, opened ? 1 : failures + 1);
-  };
+    // Nothing reconnects by itself now: a dropped stream, a refusal, or a server that went away all end here, and
+    // the reopen below decides whether to try again. A stream opened long enough to say something starts the
+    // budget afresh, so an afternoon of publishes doesn't exhaust it.
+    onEnd: () => {
+      if (pageWatchers.get(jobId) !== stream) return;
+      // Out of the map while it waits, so the reopen can take its place; the claim stays, so a stop still cancels it
+      pageWatchers.delete(jobId);
+      reopenWatcher(serverUrl, jobId, apiKey, opened ? 1 : failures + 1);
+    },
+  });
+
+  // Started again, or stopped, while this one was being opened: this attempt is no longer wanted
+  if (watcherGenerations.get(jobId) !== generation) {
+    stream.close();
+    return;
+  }
+
+  pageWatchers.set(jobId, stream);
+  observeWatchedImages();
 }
 
-/**
- * Tries a watcher again after its stream closed. As with the job stream, a fresh token that can't be fetched is one
- * more failure within the budget, not a reason to stop listening for publishes.
- */
+/** Tries a watcher again after its stream closed, within the same budget. */
 function reopenWatcher(serverUrl: string, jobId: string, apiKey: string, failures: number): void {
   if (failures > MAX_STREAM_FAILURES) {
     stopWatching(jobId);
@@ -1013,7 +998,7 @@ function reopenWatcher(serverUrl: string, jobId: string, apiKey: string, failure
       stopWatching(jobId);
       return;
     }
-    watchPageUpdates(serverUrl, jobId, apiKey, failures).catch(() => reopenWatcher(serverUrl, jobId, apiKey, failures + 1));
+    watchPageUpdates(serverUrl, jobId, apiKey, failures);
   }, reopenDelay(failures));
 }
 

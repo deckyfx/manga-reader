@@ -33,7 +33,7 @@ const KEY_PREFIX = "wo_";
 /** Who is making a request, and how they proved it. */
 export interface Principal {
   user: User;
-  via: "session" | "api-key" | "stream-token";
+  via: "session" | "api-key";
   /** The key's id, so its last-used stamp can be updated. */
   apiKeyId?: number;
 }
@@ -296,69 +296,3 @@ export function withAccountLock<T>(userId: number, task: () => Promise<T>): Prom
 }
 
 export { sha256 as hashSecret };
-
-// ── Stream tokens ────────────────────────────────────────────────────────────
-
-/**
- * EventSource cannot set headers, so a stream has to carry its credential in the URL. A URL ends up in logs, history
- * and referrers, so what goes there is never the API key: it is a token that lasts minutes, only opens the progress
- * streams, and is handed out in exchange for a real credential.
- */
-const STREAM_TOKEN_MINUTES = 15;
-
-interface StreamToken {
-  userId: number;
-  expiresAt: number;
-}
-
-/** Insertion-ordered, which is what lets the oldest be dropped when the cap is reached. */
-const streamTokens = new Map<string, StreamToken>();
-
-/** A page translation needs one token; these are per account, so the ceiling is generous and still bounded. */
-const MAX_TOKENS_PER_USER = 10;
-const MAX_TOKENS = 500;
-
-/** Issues a token for the account making the request. */
-export function issueStreamToken(userId: number): { token: string; expires_in: number } {
-  const now = Date.now();
-
-  // Expired entries would otherwise sit there until the server restarts
-  let mine = 0;
-  for (const [key, value] of streamTokens) {
-    if (value.expiresAt <= now) streamTokens.delete(key);
-    else if (value.userId === userId) mine++;
-  }
-
-  // One account asking over and over drops its own oldest tokens, not everybody else's
-  if (mine >= MAX_TOKENS_PER_USER) {
-    for (const [key, value] of streamTokens) {
-      if (value.userId !== userId) continue;
-      streamTokens.delete(key);
-      if (--mine < MAX_TOKENS_PER_USER) break;
-    }
-  }
-  // A ceiling for the whole server, however many accounts are at it
-  while (streamTokens.size >= MAX_TOKENS) {
-    const oldest = streamTokens.keys().next();
-    if (oldest.done) break;
-    streamTokens.delete(oldest.value);
-  }
-
-  const token = randomToken();
-  streamTokens.set(sha256(token), { userId, expiresAt: now + STREAM_TOKEN_MINUTES * 60 * 1000 });
-  return { token, expires_in: STREAM_TOKEN_MINUTES * 60 };
-}
-
-/** The account behind a stream token, or null when it is unknown, spent or out of date. */
-export async function userForStreamToken(token: string): Promise<User | null> {
-  const digest = sha256(token);
-  const entry = streamTokens.get(digest);
-  if (!entry) return null;
-  if (entry.expiresAt <= Date.now()) {
-    streamTokens.delete(digest);
-    return null;
-  }
-  const user = await UserStore.findById(entry.userId);
-  if (!user || user.disabledAt) return null;
-  return user;
-}

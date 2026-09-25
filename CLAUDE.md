@@ -40,8 +40,9 @@ bun run types:api        # emit API types for the extension's Eden client (serve
 ```bash
 cd extension
 bun install
-bun run build        # production (type-check + build, bumps version)
-bun run build:dev    # dev build only
+bun run build        # production (type-check + build, bumps version, writes manga-reader-chrome.zip)
+bun run build:dev    # dev build: no version bump, no archive
+bun run test         # bun test (the SSE reader in src/sse.ts)
 bun run typecheck    # regenerates ../server types:api, then tsc --noEmit
 ```
 
