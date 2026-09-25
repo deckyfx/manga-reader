@@ -61,7 +61,6 @@ const POLICY: { prefix: string; needs: UserRole | "public"; sessionOnly?: boolea
   { prefix: "/analyze", needs: "contributor" },
   { prefix: "/api/translate-page", needs: "contributor" },
   { prefix: "/api/whoami", needs: "contributor" },
-  { prefix: "/api/stream-token", needs: "contributor" },
   // Which engine this server uses is everyone's setting and it outlives the restart: an admin changes it, in a
   // browser. Listed before the general rule below, which would be too weak. Reading the settings stays open to a
   // contributor — the extension asks what this server can do before it imports.

@@ -44,7 +44,6 @@ import {
   secondFactors,
   startMfaChallenge,
   hashSecret,
-  userForStreamToken,
   useRecoveryCode,
   createApiKey,
   endSession,
@@ -142,19 +141,7 @@ const ApiKeySchema = t.Object({
  * null for anyone signed out, which is fine for the reader and refused everywhere else.
  */
 export const authContext = new Elysia({ name: "auth-context" })
-  .derive({ as: "global" }, async ({ cookie, headers, request }): Promise<{ principal: Principal | null }> => {
-    // EventSource cannot set headers, so the two SSE streams take a short-lived stream token in the query instead —
-    // never the API key itself, which would then live in logs, history and referrers.
-    const url = new URL(request.url);
-    const streaming = url.pathname.endsWith("/events") || url.pathname.endsWith("/live");
-    if (streaming) {
-      const streamToken = url.searchParams.get("stream_token");
-      if (streamToken) {
-        const user = await userForStreamToken(streamToken);
-        if (user) return { principal: { user, via: "stream-token" } };
-        return { principal: null };
-      }
-    }
+  .derive({ as: "global" }, async ({ cookie, headers }): Promise<{ principal: Principal | null }> => {
     const key = headers["x-api-key"];
     if (key) {
       const match = await userForApiKey(key);
