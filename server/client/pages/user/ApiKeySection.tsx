@@ -50,7 +50,13 @@ export function ApiKeySection({ canUse }: { canUse: boolean }) {
     });
     if (!ok) return;
 
-    await revokeM.mutateAsync(id);
+    try {
+      await revokeM.mutateAsync(id);
+    } catch {
+      // Why is on the banner. Nothing was revoked, so there is nothing to offer removing — and without this the
+      // failure would be an unhandled rejection, since mutateAsync rejects where mutate only records.
+      return;
+    }
 
     // Revoking is the part that matters; keeping the record is the usual choice, so it is offered rather than done.
     const alsoRemove = await confirm({
@@ -64,6 +70,8 @@ export function ApiKeySection({ canUse }: { canUse: boolean }) {
   };
 
   const keys = listQ.data ?? [];
+  /** Whichever of the three went wrong — a removal that fails must say so, or the row just stays with no reason. */
+  const failure = createM.error ?? revokeM.error ?? deleteM.error;
 
   return (
     <div className="max-w-3xl">
@@ -146,7 +154,7 @@ export function ApiKeySection({ canUse }: { canUse: boolean }) {
         </button>
       </form>
       {!canUse && <p className="mt-2 text-xs text-gray-500">Reader accounts don't use API keys.</p>}
-      {(createM.error ?? revokeM.error) && <p className="mt-2 text-sm text-red-400">{(createM.error ?? revokeM.error)?.message}</p>}
+      {failure && <p className="mt-2 text-sm text-red-400">{failure.message}</p>}
     </div>
   );
 }
