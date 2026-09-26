@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, Loader2, Plus, Trash2 } from "lucide-react";
-import { createApiKey, listApiKeys, revokeApiKey } from "../../api";
+import { Check, Copy, Loader2, Plus, Trash2, X } from "lucide-react";
+import { createApiKey, deleteApiKey, listApiKeys, revokeApiKey } from "../../api";
 import { useConfirm } from "../../components/ConfirmDialog";
+import { latestFailure } from "../../lib/latest-failure";
 import { ListError } from "../../components/ListError";
 import { when } from "../../lib/format";
 import { fieldClass } from "../../lib/styles";
@@ -28,6 +29,18 @@ export function ApiKeySection({ canUse }: { canUse: boolean }) {
     },
   });
   const revokeM = useMutation({ mutationFn: (id: number) => revokeApiKey(id), onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }) });
+  const deleteM = useMutation({ mutationFn: (id: number) => deleteApiKey(id), onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }) });
+
+  /** Removes the record of a key that has already been stopped. */
+  const remove = async (id: number, label: string) => {
+    const ok = await confirm({
+      title: `Remove ${label} from the list?`,
+      message: "It already stops nothing from working. What goes is the record of it: when it was made, when it was last used, when it was revoked.",
+      confirmLabel: "Remove",
+      danger: true,
+    });
+    if (ok) deleteM.mutate(id);
+  };
 
   const revoke = async (id: number, label: string) => {
     const ok = await confirm({
@@ -36,10 +49,31 @@ export function ApiKeySection({ canUse }: { canUse: boolean }) {
       confirmLabel: "Revoke",
       danger: true,
     });
-    if (ok) revokeM.mutate(id);
+    if (!ok) return;
+
+    try {
+      await revokeM.mutateAsync(id);
+    } catch {
+      // Why is on the banner. Nothing was revoked, so there is nothing to offer removing — and without this the
+      // failure would be an unhandled rejection, since mutateAsync rejects where mutate only records.
+      return;
+    }
+
+    // Revoking is the part that matters; keeping the record is the usual choice, so it is offered rather than done.
+    const alsoRemove = await confirm({
+      title: `${label} is revoked`,
+      message: "Its record stays in the list, which is where you would look if you ever wondered what that key had been used for. Remove it as well?",
+      confirmLabel: "Remove it too",
+      cancelLabel: "Keep the record",
+      danger: true,
+    });
+    if (alsoRemove) deleteM.mutate(id);
   };
 
   const keys = listQ.data ?? [];
+  // What happened to the last thing you did, if it went wrong. Taking them in a fixed order would let a creation
+  // that failed earlier explain a removal that failed just now — see lib/latest-failure.ts.
+  const failure = latestFailure([createM, revokeM, deleteM].map((m) => ({ at: m.submittedAt, error: m.error })));
 
   return (
     <div className="max-w-3xl">
@@ -57,11 +91,22 @@ export function ApiKeySection({ canUse }: { canUse: boolean }) {
               <code className="rounded bg-gray-900 px-1.5 py-0.5 text-xs text-gray-400">{key.prefix}…</code>
               {key.revoked && <span className="rounded bg-red-900/60 px-1.5 py-0.5 text-[11px] text-red-300">revoked</span>}
               <span className="ml-auto text-xs text-gray-500">last used {when(key.last_used_at)}</span>
-              {!key.revoked && (
+              {key.revoked ? (
+                <button
+                  onClick={() => void remove(key.id, key.name)}
+                  disabled={deleteM.isPending}
+                  aria-label={`Remove ${key.name} from the list`}
+                  title="Remove from the list"
+                  className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-red-300 disabled:opacity-40"
+                >
+                  <X size={13} />
+                </button>
+              ) : (
                 <button
                   onClick={() => void revoke(key.id, key.name)}
                   disabled={revokeM.isPending}
                   aria-label={`Revoke ${key.name}`}
+                  title="Revoke"
                   className="rounded p-1 text-gray-500 hover:bg-gray-800 hover:text-red-300 disabled:opacity-40"
                 >
                   <Trash2 size={13} />
@@ -111,7 +156,7 @@ export function ApiKeySection({ canUse }: { canUse: boolean }) {
         </button>
       </form>
       {!canUse && <p className="mt-2 text-xs text-gray-500">Reader accounts don't use API keys.</p>}
-      {(createM.error ?? revokeM.error) && <p className="mt-2 text-sm text-red-400">{(createM.error ?? revokeM.error)?.message}</p>}
+      {failure && <p className="mt-2 text-sm text-red-400">{failure.message}</p>}
     </div>
   );
 }

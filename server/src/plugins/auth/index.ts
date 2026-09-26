@@ -733,8 +733,12 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     },
   )
 
-  .delete(
-    "/keys/:id",
+  /**
+   * Stops the key working. The row stays, because what it says — the name, the last time anything used it, when it
+   * was stopped — is the only record of a key that may have leaked. Removing it is a separate decision below.
+   */
+  .post(
+    "/keys/:id/revoke",
     async ({ principal, params, status }) => {
       if (!principal) return status(401, { error: AUTH_FAILED });
       // A tool's key runs OCR; it must not be able to add a passkey, mint another key or list sessions
@@ -747,5 +751,27 @@ export const authPlugin = new Elysia({ prefix: "/auth/api" })
     {
       params: t.Object({ id: t.Integer({ minimum: 1 }) }),
       response: { 200: t.Object({ revoked: t.Boolean() }), 401: ErrBody, 403: ErrBody, 404: ErrBody },
+    },
+  )
+
+  /**
+   * Forgets a key that has already been stopped. A key still in use cannot be deleted: revoking is what makes
+   * something stop working, and if deleting did it too, a row could vanish from the list while the extension it
+   * belonged to carried on — then quietly stop, with nothing left to explain why.
+   */
+  .delete(
+    "/keys/:id",
+    async ({ principal, params, status }) => {
+      if (!principal) return status(401, { error: AUTH_FAILED });
+      if (principal.via !== "session") return status(403, { error: "this needs a signed-in browser, not an API key" });
+      const key = await ApiKeyStore.findById(params.id);
+      if (!key || key.userId !== principal.user.id) return status(404, { error: "key not found" });
+      if (!key.revokedAt) return status(409, { error: "revoke this key before removing it" });
+      await ApiKeyStore.delete(params.id);
+      return { deleted: true };
+    },
+    {
+      params: t.Object({ id: t.Integer({ minimum: 1 }) }),
+      response: { 200: t.Object({ deleted: t.Boolean() }), 401: ErrBody, 403: ErrBody, 404: ErrBody, 409: ErrBody },
     },
   );
