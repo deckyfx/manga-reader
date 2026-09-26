@@ -128,7 +128,11 @@ export const listApiKeys = () => unwrap(api.auth.api.keys.get());
 /** The only time the key itself is readable. */
 export const createApiKey = (name: string) => unwrap(api.auth.api.keys.post({ name }));
 
-export const revokeApiKey = (id: number) => unwrap(api.auth.api.keys({ id }).delete());
+/** Stops the key working; the record of it stays until it is removed. */
+export const revokeApiKey = (id: number) => unwrap(api.auth.api.keys({ id }).revoke.post());
+
+/** Forgets a key that has already been revoked. The server refuses one still in use. */
+export const deleteApiKey = (id: number) => unwrap(api.auth.api.keys({ id }).delete());
 
 // ── Server policy and accounts (admin) ───────────────────────────────────────
 
