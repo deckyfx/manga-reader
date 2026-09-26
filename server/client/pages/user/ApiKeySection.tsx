@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Loader2, Plus, Trash2, X } from "lucide-react";
 import { createApiKey, deleteApiKey, listApiKeys, revokeApiKey } from "../../api";
 import { useConfirm } from "../../components/ConfirmDialog";
+import { latestFailure } from "../../lib/latest-failure";
 import { ListError } from "../../components/ListError";
 import { when } from "../../lib/format";
 import { fieldClass } from "../../lib/styles";
@@ -70,8 +71,9 @@ export function ApiKeySection({ canUse }: { canUse: boolean }) {
   };
 
   const keys = listQ.data ?? [];
-  /** Whichever of the three went wrong — a removal that fails must say so, or the row just stays with no reason. */
-  const failure = createM.error ?? revokeM.error ?? deleteM.error;
+  // What happened to the last thing you did, if it went wrong. Taking them in a fixed order would let a creation
+  // that failed earlier explain a removal that failed just now — see lib/latest-failure.ts.
+  const failure = latestFailure([createM, revokeM, deleteM].map((m) => ({ at: m.submittedAt, error: m.error })));
 
   return (
     <div className="max-w-3xl">
