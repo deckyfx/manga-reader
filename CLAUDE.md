@@ -23,7 +23,7 @@ The ASP.NET Core (C#) server was removed; its last version is tagged `csharp-ser
 cd server
 bun install
 bun run dev              # bun --hot src/index.ts, listens on :3579 (the user runs the server; don't start it yourself)
-bun run typecheck        # tsc --noEmit (covers src/, client/, scripts/)
+bun run typecheck        # bun check (covers src/, client/, scripts/); tsc stays for the types:api emit
 bun run build            # embed migrations → typecheck → ./dist/app + dist/lib/*.so (built from src/boot.ts)
 bun run build --archive  # …and dist/manga-reader-<target>.tar.gz, for handing to CI or to a machine
 bun run build --target=macos-arm64   # ubuntu64 (default), linux-arm64, macos-arm64, macos-x64, windows64
@@ -43,7 +43,7 @@ bun install
 bun run build        # production (type-check + build, bumps version, writes manga-reader-chrome.zip)
 bun run build:dev    # dev build: no version bump, no archive
 bun run test         # bun test (the SSE reader in src/sse.ts)
-bun run typecheck    # regenerates ../server types:api, then tsc --noEmit
+bun run typecheck    # regenerates ../server types:api (tsc, which emits), then bun check
 ```
 
 ### Desktop

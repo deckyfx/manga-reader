@@ -7,13 +7,13 @@
     "build": "bun run typecheck && bun run build.ts",
     "build:dev": "bun run build.ts --dev --no-bump",
     "test": "bun test",
-    "typecheck": "bun run --cwd ../server types:api && tsc --noEmit"
+    "typecheck": "bun run --cwd ../server types:api && bun check"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.14",
+    "@types/bun": "^1.4.3",
     "@types/chrome": "^0.0.323",
     "elysia": "1.4.30",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@elysiajs/eden": "1.4.9",
