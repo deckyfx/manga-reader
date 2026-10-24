@@ -54,7 +54,7 @@ jobs:
       - run: docker compose config --quiet
       # Built, never pushed. The image is the executable on another system's libraries, so it is asked the same
       # question the release asks of the archive: could the server run here?
-      - run: docker build -t manga-reader-server server
+      - run: docker build --platform linux/amd64 -t manga-reader-server server
       - run: docker run --rm manga-reader-server --doctor
 
   release:

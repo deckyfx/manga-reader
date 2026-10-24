@@ -1,12 +1,12 @@
 # The server as a container: the same single executable `bun run build` makes, on a slim Debian with nothing else.
 #
-#   docker compose up -d --build        from the repository root (compose.yaml), which is the intended way in
-#   docker build -t manga-reader server  just the image
+#   docker compose up -d --build                                from the repository root (compose.yaml)
+#   docker build --platform linux/amd64 -t manga-reader server  just the image
 #
 # The executable carries its code, client and fonts; its lib/ carries the shared libraries onnxruntime and sharp
 # open. Models are downloaded on first start into /app/data, which is a volume — so they are fetched once, not on
-# every rebuild. Built for linux/amd64: the build only knows where those libraries live on x64 (see NATIVE_LIBS in
-# build.ts).
+# every rebuild. linux/amd64 only, hence the --platform: the build only knows where those libraries live on x64
+# (see NATIVE_LIBS in build.ts), and on another architecture it would make a binary without them.
 
 ARG BUN_VERSION=1.4.4
 
@@ -21,9 +21,10 @@ RUN bun run build
 
 # Trixie, like the Bun image the executable was built on, so the two agree about glibc
 FROM debian:trixie-slim
+# libstdc++6 because libonnxruntime and libvips-cpp link against it (the slim image has it only for apt's sake);
 # ca-certificates for the model downloads (Hugging Face) and the remote translators; curl for the health check
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl \
+  && apt-get install -y --no-install-recommends libstdc++6 ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*
 
 # Not root. 1000 is the usual first user on a Linux desktop, so a bind-mounted data folder stays theirs
