@@ -12,10 +12,10 @@ permissions:
 on:
   push:
     branches: [main]
-    paths: ["server/**", "compose.yaml", ".github/workflows/server.yml"]
+    paths: ["server/**", "tools/sugoi/**", "compose.yaml", ".github/workflows/server.yml"]
     tags: ["server-v*"]
   pull_request:
-    paths: ["server/**", "compose.yaml", ".github/workflows/server.yml"]
+    paths: ["server/**", "tools/sugoi/**", "compose.yaml", ".github/workflows/server.yml"]
   workflow_dispatch:
 
 jobs:
@@ -51,7 +51,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - run: docker compose config --quiet
+      # With the profile, so the Sugoi service it would start is checked too, not only the server
+      - run: docker compose --profile sugoi config --quiet
       # Built, never pushed. The image is the executable on another system's libraries, so it is asked the same
       # question the release asks of the archive: could the server run here?
       - run: docker build --platform linux/amd64 -t manga-reader-server server
