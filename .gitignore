@@ -19,6 +19,8 @@ dist/
 .env
 .env.local
 .env.*.local
+# Container-only overrides read by compose.yaml after server/.env
+.env.docker
 
 # ── Project-specific ──────────────────────────────────────────────────────────
 extension/manga-reader-chrome.tar.gz

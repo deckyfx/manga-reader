@@ -10,6 +10,7 @@ extension/   Browser extension (MV3, TypeScript + Bun)
 desktop/     Avalonia desktop companion (C#, .NET 10); talks to the server's /health, /ocr, /analyze
 docs/        PLAN_dashboard_studio.md: the Studio / reader plan with per-phase design notes
 tools/       sugoi/: a containerised Sugoi translation server the Bun server can use (SUGOI_URL)
+compose.yaml the server as a Docker service (server/Dockerfile), Sugoi beside it under the `sugoi` profile
 MangaReader.slnx  .NET solution for the desktop app
 ```
 
@@ -30,6 +31,7 @@ bun run build --target=macos-arm64   # ubuntu64 (default), linux-arm64, macos-ar
 bun run start            # runs the built binary; it loads dist/lib itself, so no LD_LIBRARY_PATH is needed
 ./dist/app --doctor      # what this machine can and cannot run: libraries, models, fonts, folders
 ./dist/app --setup       # ask the settings questions again and write .env
+docker compose up -d --build   # from the repo root: the built executable in a container, reading server/.env
 bun run db:generate      # after changing src/db/schema.ts: drizzle-kit generate + re-embed migrations
 bun run page <image>     # run the page pipeline from the CLI (scripts/page.ts)
 bun run types:api        # emit API types for the extension's Eden client (server/types/)
@@ -115,6 +117,10 @@ which engine.
   shim) and pino's transports (hence the compiled branch in `src/lib/logger.ts`). Native `.node` addons are embedded
   by bundling, but the shared libraries they dlopen are not, so `bun run build` copies those into `dist/lib/` and
   `src/boot.ts` — the binary's entry — loads them before the server's imports run (`src/lib/native-libs.ts`).
+- **The server's Bun is pinned in three places, and they move together**: `bun-version` in the workflows runs
+  `bun test`, while the exact `bun` devDependency in `server/package.json` is what `bun run` puts first on PATH — so it
+  is the Bun that type-checks, runs `bun run dev`, and is embedded in the compiled binary. CI fails when those two
+  differ. The third, `BUN_VERSION` in `server/Dockerfile`, only runs the image's `bun install`; keep it level anyway.
 - **Don't run the server**: the user runs it. Test in-process with `app.handle()` and a scratch `DATABASE_URL`; never delete anything under `data/` that a test didn't create.
 - **A test that pins behaviour should be checked by breaking the behaviour**: remove the fix, watch the test fail,
   put it back. Several times now a test has passed for the wrong reason and only this caught it — including one
