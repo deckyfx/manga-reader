@@ -82,8 +82,9 @@ export function buildLettering(detail: StudioPageDetail, typesetter: Typesetter)
     text: p.block.translated_text ?? "",
     area: p.area,
     style: p.style,
-    // As the burn measures it: the original lettering of text blocks, for emphasis
-    source: p.kind === "text" && p.block.source_text ? { box: { x: p.block.x, y: p.block.y, w: p.block.w, h: p.block.h }, text: p.block.source_text } : undefined,
+    // As the burn measures it: the original lettering of text blocks it letters, for emphasis. The burn skips blocks
+    // left out of cleaning, so they mustn't move the page's typical size here either
+    source: p.kind === "text" && p.block.include && p.block.source_text ? { box: { x: p.block.x, y: p.block.y, w: p.block.w, h: p.block.h }, text: p.block.source_text } : undefined,
   }));
   const result = typesetPage(typesetter, entries, page);
   const items = prepared.map((p): LetteringItem => {

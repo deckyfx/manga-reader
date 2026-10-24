@@ -7,6 +7,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { emphasisScales, pageMaxFontSize, rectArea, sourceGlyphSize, Typesetter, typesetPage, type TypesetEntry } from "@/shared/typeset";
 import { FONT_FILES } from "@/services/typeset-service";
+import type { StudioPageDetail } from "../client/api";
+import { buildLettering } from "../client/studio/text/typesetter";
 
 let typesetter: Typesetter;
 
@@ -107,6 +109,23 @@ describe("lettering an emphasised block", () => {
     expect(after.blocks.find((b) => b.id === 3)!.layout.fontSize).toBeGreaterThan(before.blocks.find((b) => b.id === 3)!.layout.fontSize);
   });
 
+  test("the shared size counts the shout as it fits at the cap, not as its emphasised fit clamped to it", () => {
+    // At the cap "Unbelievable!" fits at 56 unhyphenated; with the raised cap, hyphenation wins at a size that clamps
+    // to 75. Counted as 75, the median of 53, 70 and the shout would move from 56 to 70, re-lettering both others
+    const entries = [
+      entry(1, "Is that so", { w: 300, h: 120 }, 50),
+      entry(2, "Is that so", { w: 400, h: 160 }, 50),
+      entry(3, "Unbelievable!", { w: 600, h: 180 }, 90),
+    ];
+    const before = typesetPage(typesetter, entries.map((e) => ({ ...e, source: undefined })), PAGE);
+    const after = typesetPage(typesetter, entries, PAGE);
+    expect(after.blocks.find((b) => b.id === 3)!.emphasis).not.toBeNull();
+    expect(after.pageFontSize).toBe(before.pageFontSize);
+    for (const id of [1, 2]) {
+      expect(after.blocks.find((b) => b.id === id)!.layout.fontSize).toBe(before.blocks.find((b) => b.id === id)!.layout.fontSize);
+    }
+  });
+
   test("it may pass the page cap, up to twice it", () => {
     // Ordinary bubbles roomy enough to reach the cap, and a shout drawn three times their size
     const roomy = [1, 2, 3].map((id) => entry(id, "Hi", { w: 400, h: 300 }, 50));
@@ -129,5 +148,30 @@ describe("lettering an emphasised block", () => {
     const shout = page.blocks.find((b) => b.id === 4)!;
     expect(shout.emphasis).toBeNull();
     expect(shout.layout.fontSize).toBe(page.pageFontSize);
+  });
+});
+
+describe("the Studio's preview", () => {
+  /** A Studio page's detail with these text blocks, each in a single vertical column `glyph` pixels wide. */
+  function detail(blocks: { id: number; glyph: number; include: boolean }[]): StudioPageDetail {
+    return {
+      page: { width: PAGE.width, height: PAGE.height },
+      blocks: blocks.map(({ id, glyph, include }) => ({
+        id, kind: "text", include, x: 0, y: 0, w: glyph, h: glyph * 5,
+        source_text: "あいうえお", translated_text: "Is that so", style: null, area: null,
+      })),
+    } as unknown as StudioPageDetail;
+  }
+
+  test("measures emphasis as the burn does: a block left out of cleaning isn't counted", () => {
+    // Included lettering of 50, 90 and 90 has a median of 90, so nothing stands out. Counting the excluded 20 too
+    // would make the median 50, and both 90s emphasis — in the preview only, since the burn never letters that block
+    const plan = buildLettering(detail([
+      { id: 1, glyph: 50, include: true },
+      { id: 2, glyph: 90, include: true },
+      { id: 3, glyph: 90, include: true },
+      { id: 4, glyph: 20, include: false },
+    ]), typesetter);
+    expect(plan.items.map((item) => [item.id, item.emphasis])).toEqual([[1, null], [2, null], [3, null], [4, null]]);
   });
 });

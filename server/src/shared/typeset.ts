@@ -654,10 +654,13 @@ export function typesetPage(
   const scales = emphasisScales(entries);
   const bestSizes = entries.map((e) =>
     e.style.font_size ?? typesetter.layout(e.text, e.area, ceilingFor(maxFontSize, scales.get(e.id)), e.style).fontSize);
-  // Size 0 means the area has no room: it must not drag the page size down to the minimum. Emphasis still counts, at
-  // most the page cap as before: leaving it out would move the shared size, and so re-letter every other block too
+  // Size 0 means the area has no room: it must not drag the page size down to the minimum. Emphasis still counts, as
+  // its best fit at the page cap, exactly as before: leaving it out would move the shared size, and so re-letter every
+  // other block too. Measured again rather than clamped, since the cap also decides whether hyphenation wins
+  const sharedSizes = entries.map((e, i) =>
+    scales.has(e.id) ? typesetter.layout(e.text, e.area, maxFontSize, e.style).fontSize : bestSizes[i]);
   const autoSizes = entries
-    .flatMap((e, i) => (e.style.font_size === undefined && bestSizes[i] > 0 ? [Math.min(bestSizes[i], maxFontSize)] : []))
+    .flatMap((e, i) => (e.style.font_size === undefined && sharedSizes[i] > 0 ? [sharedSizes[i]] : []))
     .sort((a, b) => a - b);
   const pageFontSize = autoSizes[Math.floor((autoSizes.length - 1) / 2)] ?? maxFontSize;
 
