@@ -35,6 +35,8 @@ services:
       PORT: "3579"
       NODE_ENV: production
       DATA_DIR: /app/data
+      # TCP, never a Unix socket: the port mapping and the health check both expect 3579 (empty means unset)
+      SOCKET_PATH: ""
     depends_on:
       # With the sugoi profile, the server waits for the translator to be ready: its first start downloads the model
       # for minutes, far longer than a translation's retries wait. Without the profile there is nothing to wait for —

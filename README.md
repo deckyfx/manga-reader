@@ -136,7 +136,7 @@ docker compose logs -f server       # a first start downloads the models before 
 
 It reads `server/.env`, the file a run from source uses, so one set of settings describes both; whatever should
 differ only in the container goes in `.env.docker` at the repository root, which is read second and wins. `HOST`,
-`PORT`, `NODE_ENV` and `DATA_DIR` are fixed by the compose file; any other path in those files should stay relative and
+`PORT`, `NODE_ENV`, `DATA_DIR` and `SOCKET_PATH` (cleared, so it listens on TCP) are fixed by the compose file; any other path in those files should stay relative and
 under `./data`, as `.env.example`'s are, or what is written there is lost with the container. `.env` never enters the image — `server/.dockerignore` keeps it,
 and its DeepL key, out of the build.
 
