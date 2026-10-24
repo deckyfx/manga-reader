@@ -150,8 +150,9 @@ The container runs as uid 1000, so a bind-mounted folder stays yours. Its health
 says `ready` (or `degraded`, the dictionary alone): a model that fails to load leaves the server answering but not
 working, and that should not look healthy.
 
-`docker compose --profile sugoi up -d --build` starts a [Sugoi](tools/sugoi/) translator beside it; put
-`SUGOI_URL=http://sugoi:14366` in `.env.docker` to use it. Only x86-64 for now — the build knows where onnxruntime
+`docker compose --profile sugoi up -d --build` starts a [Sugoi](tools/sugoi/) translator beside it, and the server
+waits for it to be ready — the first start downloads its model for a few minutes; put `SUGOI_URL=http://sugoi:14366`
+in `.env.docker` to use it. Only x86-64 for now — the build knows where onnxruntime
 and sharp keep their libraries on that platform alone.
 
 ## Server Features
