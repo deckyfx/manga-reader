@@ -8,6 +8,7 @@
 # every rebuild. linux/amd64 only, hence the --platform: the build only knows where those libraries live on x64
 # (see NATIVE_LIBS in build.ts), and on another architecture it would make a binary without them.
 
+# Only runs `bun install`: `bun run build` then uses the `bun` devDependency. Raise them together (CLAUDE.md)
 ARG BUN_VERSION=1.4.4
 
 FROM oven/bun:${BUN_VERSION} AS build
