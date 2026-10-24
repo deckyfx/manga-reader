@@ -398,8 +398,10 @@ export function StudioPageEditor() {
       label: page.location ? "Move to another chapter" : "File into a chapter",
       icon: <FolderInput size={14} />,
       hint: page.location ? "Copy this page into another chapter" : "Copy this draft into a chapter so it can be read",
-      onSelect: () => setFiling(true),
-      unavailable: unavailableWhen(translating),
+      // After the saves: filing copies the page, tuning included, so an edit still waiting must be in it. The picker
+      // is modal, so nothing can be edited while it is open
+      onSelect: () => afterSaves("file", () => setFiling(true)),
+      unavailable: unavailableWhen(translating, [queued.has("file"), "Waiting for edits to save"]),
       separated: true,
     },
     {
