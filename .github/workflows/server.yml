@@ -61,7 +61,8 @@ jobs:
   release:
     name: Build, prove it runs, and publish
     if: startsWith(github.ref, 'refs/tags/server-v')
-    needs: check
+    # The container too: an executable that won't start on a clean Debian shouldn't be published either
+    needs: [check, docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write
