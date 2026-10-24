@@ -573,7 +573,9 @@ export class PagePipeline {
       const area = style.box
         ? rectArea(style.box, isDarkBackground(rgb, width, height, style.box))
         : found ? shiftArea(found, style.offset) : null;
-      if (area) entries.push({ id: b.id, text: b.translated_text ?? "", area, style });
+      // The original lettering is measured for emphasis; a sound-effect region's isn't lettering to keep in proportion
+      const source = b.kind === "text" && b.source_text ? { box: { x: b.x, y: b.y, w: b.w, h: b.h }, text: b.source_text } : undefined;
+      if (area) entries.push({ id: b.id, text: b.translated_text ?? "", area, style, source });
       else skipped.push(b.id);
     }
 

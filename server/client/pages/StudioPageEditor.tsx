@@ -257,8 +257,8 @@ export function StudioPageEditor() {
   );
   const relayout = useCallback(
     (blockId: number, box: { x: number; y: number; w: number; h: number }) =>
-      typesetter && previewDetail ? relayoutBlock(typesetter, previewDetail, blockId, box, letteringPlan.pageFontSize) : null,
-    [typesetter, previewDetail, letteringPlan.pageFontSize],
+      typesetter && previewDetail ? relayoutBlock(typesetter, previewDetail, blockId, box, letteringPlan) : null,
+    [typesetter, previewDetail, letteringPlan],
   );
 
   // Blocks without a found text area (never placed, or moved since) are placed automatically, without a burn, so the
