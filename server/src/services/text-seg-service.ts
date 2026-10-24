@@ -58,16 +58,16 @@ function iou(a: Box, b: Box): number {
 }
 
 /** Decode `blk` detections into page-space boxes (confidence filter + NMS). */
-function decodeTextBoxes(blk: ort.Tensor, scale: number, padLeft: number, padTop: number, width: number, height: number): Box[] {
+function decodeTextBoxes(blk: ort.Tensor, scale: number, padLeft: number, padTop: number, width: number, height: number, confidence: number): Box[] {
   const data = blk.data as Float32Array;
   const [, count, stride] = blk.dims;
   const candidates: (Box & { score: number })[] = [];
   for (let i = 0; i < count; i++) {
     const o = i * stride;
     const objectness = data[o + 4];
-    if (objectness < BLOCK_CONFIDENCE) continue;
+    if (objectness < confidence) continue;
     const score = objectness * Math.max(data[o + 5], data[o + 6]);
-    if (score < BLOCK_CONFIDENCE) continue;
+    if (score < confidence) continue;
     const toX = (v: number): number => Math.min(width, Math.max(0, (v - padLeft) / scale));
     const toY = (v: number): number => Math.min(height, Math.max(0, (v - padTop) / scale));
     const x0 = toX(data[o] - data[o + 2] / 2), x1 = toX(data[o] + data[o + 2] / 2);
@@ -92,9 +92,10 @@ export class TextSegmenter {
 
   /**
    * Text-pixel mask at page resolution plus text and SFX blocks. `textBoxes` (e.g. from the bubble
-   * detector) decide how text is grouped; without them the model's own `blk` boxes are used.
+   * detector) decide how text is grouped; without them the model's own `blk` boxes are used, those scoring at least
+   * `confidence` (a page's tuning may lower or raise it).
    */
-  async segment(image: Buffer, textBoxes?: Box[]): Promise<TextSegResult> {
+  async segment(image: Buffer, textBoxes?: Box[], confidence = BLOCK_CONFIDENCE): Promise<TextSegResult> {
     const { data: rgb, info } = await sharp(image).removeAlpha().toColourspace("srgb").raw().toBuffer({ resolveWithObject: true });
     const { width, height } = info;
 
@@ -148,7 +149,7 @@ export class TextSegmenter {
     const mask = new Uint8Array(width * height);
     for (let i = 0; i < mask.length; i++) mask[i] = up[i] >= 128 ? 1 : 0;
 
-    const groups = textBoxes?.length ? textBoxes : decodeTextBoxes(outputs.blk as ort.Tensor, scale, padLeft, padTop, width, height);
+    const groups = textBoxes?.length ? textBoxes : decodeTextBoxes(outputs.blk as ort.Tensor, scale, padLeft, padTop, width, height, confidence);
     return { width, height, mask, blocks: buildBlocks(mask, width, height, groups) };
   }
 }

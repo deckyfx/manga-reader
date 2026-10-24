@@ -17,7 +17,8 @@ import { join } from "node:path";
 import { blockOwnerMask, labelComponents, maskFromImage, maskToPng, selectBlockMask, type BlockKind, type Box } from "@/lib/mask";
 import { getTextSegmenter, textSegModelPath } from "@/services/text-seg-service";
 import { getBubbleDetector } from "@/services/bubble-service";
-import { getInpainter, inpaintModelPath, type CleanMethod } from "@/services/inpaint-service";
+import { getInpainter, inpaintModelPath, type CleanMethod, type CleanTuning } from "@/services/inpaint-service";
+import type { PageTuning } from "@/shared/page-tuning";
 import { leftoverInk } from "@/services/clean-check";
 import { getTypesetter, isDarkBackground, separateAreas, textAreaFor, type TextArea } from "@/services/typeset-service";
 import { childLogger } from "@/lib/logger";
@@ -161,6 +162,8 @@ export interface JobRepository {
   write(job: PageJob): Promise<void>;
   /** result.png was just rewritten, so it holds work nobody has published; the CLI has nothing to publish and skips it. */
   resultChanged?(): Promise<void>;
+  /** The page's own thresholds (shared/page-tuning.ts); without it, every default. */
+  tuning?(): Promise<PageTuning>;
 }
 
 /** Stores the job as blocks.json inside the job directory. */
@@ -183,6 +186,12 @@ export class PagePipeline {
     private readonly report: ProgressReporter = () => {},
     private readonly repository: JobRepository = fileJobRepository(dir),
   ) {}
+
+  /** The page's threshold overrides, as the cleaning stages take them. */
+  private async cleanTuning(): Promise<CleanTuning> {
+    const tuning = (await this.repository.tuning?.()) ?? {};
+    return { maskDilate: tuning.mask_dilate, flatTolerance: tuning.flat_tolerance };
+  }
 
   /** Path of a file inside the job directory. */
   path(file: string): string {
@@ -208,10 +217,12 @@ export class PagePipeline {
     await normalisePage(sharp(image)).png().toFile(this.path("original.png"));
     const page = Buffer.from(await Bun.file(this.path("original.png")).arrayBuffer());
 
+    // A page's tuned confidence applies to whichever detector does the grouping; each keeps its own default otherwise
+    const confidence = (await this.repository.tuning?.())?.detect_confidence;
     const detector = await getBubbleDetector();
-    const textBoxes = detector ? (await detector.detect(page)).textBoxes : undefined;
+    const textBoxes = detector ? (await detector.detect(page, confidence)).textBoxes : undefined;
     const grouping = textBoxes?.length ? `grouped by ${textBoxes.length} bubble-detector text boxes` : "grouped by text-detector boxes";
-    const result = await (await getTextSegmenter()).segment(page, textBoxes);
+    const result = await (await getTextSegmenter()).segment(page, textBoxes, confidence);
 
     await Bun.write(this.path("mask.png"), await maskToPng(result.mask, result.width, result.height));
     const job: PageJob = {
@@ -393,7 +404,7 @@ export class PagePipeline {
     }
 
     const inpainter = await getInpainter();
-    const { rgb: cleaned, flat, lama, methods } = await inpainter.inpaintRgb(rgb, width, height, target, [...regions, ...paintedRegions]);
+    const { rgb: cleaned, flat, lama, methods } = await inpainter.inpaintRgb(rgb, width, height, target, [...regions, ...paintedRegions], undefined, await this.cleanTuning());
     await sharp(cleaned, { raw: { width, height, channels: 3 } }).png().toFile(this.path(output));
 
     // The self-check: how each block was cleaned, and how much of its lettering still shows on the page just written.
@@ -487,7 +498,7 @@ export class PagePipeline {
     }
 
     const inpainter = await getInpainter();
-    const { rgb: cleaned, flat, lama } = await inpainter.inpaintRgb(rgb, width, height, target, clipped);
+    const { rgb: cleaned, flat, lama } = await inpainter.inpaintRgb(rgb, width, height, target, clipped, undefined, await this.cleanTuning());
     await sharp(cleaned, { raw: { width, height, channels: 3 } }).png().toFile(this.path(output));
     this.report({ stage: "cleaning", message: `Re-cleaned ${clipped.length} area${clipped.length === 1 ? "" : "s"} (${flat} flat fill, ${lama} LaMa)`, fraction: 1 });
     return { output, regions: clipped.length, total: clipped.length, flat, lama };

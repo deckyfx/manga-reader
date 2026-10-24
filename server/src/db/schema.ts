@@ -232,6 +232,8 @@ export const pages = sqliteTable("pages", {
   errorMessage: text("error_message"),
   /** clean_sfx option the last full run used, so cached results are only reused for the same options. */
   cleanSfx: integer("clean_sfx", { mode: "boolean" }).notNull().default(false),
+  /** Threshold overrides for this page (shared/page-tuning.ts) as JSON; null means every default. */
+  tuningJson: text("tuning_json"),
   /** Bumped on every publish so open extension tabs reload the result. */
   revision: integer("revision").notNull().default(0),
   /**

@@ -9,6 +9,7 @@ import { childLogger } from "@/lib/logger";
 import { pageBlocks, pages, pageStages, type NewPage, type Page, type PageStageRow } from "@/db/schema";
 import type { BlockShape, JobRepository, PageBlock, PageJob } from "@/services/page-pipeline";
 import type { StoredArea, TextStyle } from "@/shared/typeset";
+import type { PageTuning } from "@/shared/page-tuning";
 
 const log = childLogger("page-store");
 
@@ -555,6 +556,32 @@ export class PageStore {
       read: () => PageStore.readJob(pageId),
       write: async (job) => PageStore.writeJob(pageId, job),
       resultChanged: () => PageStore.noteResultChanged(pageId),
+      tuning: () => PageStore.tuning(pageId),
     };
+  }
+
+  /** The page's threshold overrides; empty (every default) for a page nobody tuned, or one that doesn't exist. */
+  static async tuning(pageId: string): Promise<PageTuning> {
+    const row = await db.select({ json: pages.tuningJson }).from(pages).where(eq(pages.id, pageId)).get();
+    return PageStore.tuningOf({ tuningJson: row?.json ?? null });
+  }
+
+  /** The overrides held by a page row already read. */
+  static tuningOf(page: Pick<Page, "tuningJson">): PageTuning {
+    return page.tuningJson ? (JSON.parse(page.tuningJson) as PageTuning) : {};
+  }
+
+  /**
+   * Stores the page's overrides — none left stored as null, so a later change of default reaches it — and marks
+   * `staleStages` stale, in one transaction. Call under the page lock.
+   */
+  static async setTuning(pageId: string, tuning: PageTuning, staleStages: readonly StageName[] = []): Promise<void> {
+    db.transaction((tx) => {
+      tx.update(pages)
+        .set({ tuningJson: Object.keys(tuning).length > 0 ? JSON.stringify(tuning) : null, updatedAt: sql`(datetime('now'))` })
+        .where(eq(pages.id, pageId))
+        .run();
+      markStaleIn(tx, pageId, staleStages);
+    });
   }
 }

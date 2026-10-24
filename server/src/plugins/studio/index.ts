@@ -16,6 +16,7 @@
  * DELETE /studio/api/pages/:id/mask/:layer       clear a painted mask layer
  * POST  /studio/api/pages/:id/reclean            re-clean only some areas of the latest cleaned page
  * POST  /studio/api/pages/:id/run                re-run ocr / translate (all or some blocks), clean_text / clean_sfx, or render
+ * PATCH /studio/api/pages/:id/tuning             set or clear the page's threshold overrides (marks what they outdate stale)
  * POST  /studio/api/pages/:id/rerun              run the whole pipeline again from the page's stored original
  * POST  /studio/api/pages/:id/publish            snapshot the result and push it to extension tabs showing the page
  * GET   /studio/api/pages/:id/history            published snapshots, newest first
@@ -45,6 +46,7 @@ import { publishPage } from "@/services/page-publish";
 import { decodeBase64Image, runStoredPage, submitPageJob } from "@/services/page-jobs";
 import { MASK_LAYER_FILES, PagePipeline, type BlockShape, type PageBlock } from "@/services/page-pipeline";
 import { FONT_FILES } from "@/services/typeset-service";
+import { applyTuning, staleStagesFor, tuningError, type TuningKey } from "@/shared/page-tuning";
 import { FONT_VARIANTS, TEXT_ALIGNS, type TextStyle } from "@/shared/typeset";
 import { imageSize, maskFromImage, maskToPng } from "@/lib/mask";
 import { pageDir, PageStore, type StageName } from "@/stores/page-store";
@@ -200,7 +202,14 @@ const BlockSchema = t.Object({
   needs_render: t.Boolean(),
 });
 
-const PageDetail = t.Object({ page: PageSummary, stages: t.Array(StageSchema), blocks: t.Array(BlockSchema) });
+/** A page's threshold overrides (shared/page-tuning.ts); a key left out is the default. */
+const TuningSchema = t.Object({
+  flat_tolerance: t.Optional(t.Number()),
+  mask_dilate: t.Optional(t.Number()),
+  detect_confidence: t.Optional(t.Number()),
+});
+
+const PageDetail = t.Object({ page: PageSummary, stages: t.Array(StageSchema), blocks: t.Array(BlockSchema), tuning: TuningSchema });
 
 const PublishResult = t.Object({ revision: t.Integer(), notified: t.Integer() });
 
@@ -240,7 +249,12 @@ async function pageDetail(id: string) {
   const page = await PageStore.findById(id);
   if (!page) return null;
   const [stages, job, location] = await Promise.all([PageStore.listStages(id), PageStore.readJob(id), pageLocation(page)]);
-  return { page: { ...toSummary(page), location }, stages: stages.map(toStage), blocks: (job?.blocks ?? []).map(toBlock) };
+  return {
+    page: { ...toSummary(page), location },
+    stages: stages.map(toStage),
+    blocks: (job?.blocks ?? []).map(toBlock),
+    tuning: PageStore.tuningOf(page),
+  };
 }
 
 /** Why a page can't be edited right now (missing, or still running in the pipeline), as a status + message. */
@@ -712,6 +726,32 @@ export const studioPlugin = new Elysia({ prefix: "/studio/api" })
         dry_run: t.Optional(t.Boolean()),
       }),
       response: { 200: FinalizeResult },
+    },
+  )
+
+  .patch(
+    "/pages/:id/tuning",
+    ({ params, body, status }) => withPageLock(params.id, async () => {
+      const check = await editablePage(params.id);
+      if ("code" in check) return status(check.code, { error: check.error });
+      for (const [key, value] of Object.entries(body) as [TuningKey, number | null | undefined][]) {
+        const invalid = value === null || value === undefined ? null : tuningError(key, value);
+        if (invalid) return status(422, { error: invalid });
+      }
+      const before = PageStore.tuningOf(check.page);
+      const after = applyTuning(before, body);
+      // Only the knobs that moved outdate anything; detector confidence outdates nothing until the page is run again
+      await PageStore.setTuning(params.id, after, staleStagesFor(before, after));
+      return (await pageDetail(params.id)) ?? status(404, { error: "page not found" });
+    }),
+    {
+      params: IdParams,
+      body: t.Object({
+        flat_tolerance: t.Optional(t.Nullable(t.Number())),
+        mask_dilate: t.Optional(t.Nullable(t.Number())),
+        detect_confidence: t.Optional(t.Nullable(t.Number())),
+      }),
+      response: { 200: PageDetail, 404: ErrBody, 409: ErrBody, 422: ErrBody },
     },
   )
 
