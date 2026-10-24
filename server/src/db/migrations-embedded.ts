@@ -24,6 +24,7 @@ import m0019 from "./migrations/0019_slimy_korg.sql" with { type: "text" };
 import m0020 from "./migrations/0020_misty_agent_brand.sql" with { type: "text" };
 import m0021 from "./migrations/0021_brainy_weapon_omega.sql" with { type: "text" };
 import m0022 from "./migrations/0022_exotic_power_pack.sql" with { type: "text" };
+import m0023 from "./migrations/0023_cool_toxin.sql" with { type: "text" };
 
 const files: Record<string, string> = {
   "0000_tidy_namor.sql": m0000,
@@ -49,6 +50,7 @@ const files: Record<string, string> = {
   "0020_misty_agent_brand.sql": m0020,
   "0021_brainy_weapon_omega.sql": m0021,
   "0022_exotic_power_pack.sql": m0022,
+  "0023_cool_toxin.sql": m0023,
 };
 
 /** Embedded migration SQL keyed by filename, plus the raw journal JSON. */

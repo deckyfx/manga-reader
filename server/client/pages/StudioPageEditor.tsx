@@ -50,6 +50,7 @@ import { ProcessingView, StageCompare, FinalizedView } from "../studio/editor/vi
 import { BlockEditor, blockCheck, SfxBlockRow } from "../studio/editor/BlockRows";
 import { LetteringPanel } from "../studio/editor/StyleEditor";
 import { HistoryPanel } from "../studio/editor/HistoryPanel";
+import { TuningPanel } from "../studio/editor/TuningPanel";
 
 const isBusy = (status: string | undefined) => status === "queued" || status === "running";
 
@@ -696,6 +697,7 @@ export function StudioPageEditor() {
               ))}
             </div>
           )}
+          <TuningPanel pageId={page.id} tuning={detail.tuning} disabled={busy} onChanged={setDetail} />
           <HistoryPanel pageId={page.id} currentRevision={page.revision} disabled={busy} onRolledBack={onPublished} />
         </aside>
         )}
