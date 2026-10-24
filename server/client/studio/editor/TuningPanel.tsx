@@ -3,14 +3,17 @@
  * what it outdates stale, so the Clean buttons say so; detector confidence waits for Run again.
  */
 import { useEffect, useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Loader2, SlidersHorizontal } from "lucide-react";
 import { setPageTuning, type StudioPageDetail } from "../../api";
+import { PendingChanges } from "../../lib/pending-changes";
 import { TUNING_KNOBS, type PageTuning, type TuningKey } from "../../../src/shared/page-tuning";
 import { NumberField } from "./StyleEditor";
 
 /** Typing "24" reports 2 then 24: a save waits this long for the number to settle. */
 const SAVE_DELAY_MS = 500;
+
+type Changes = { [K in TuningKey]?: number | null };
 
 export function TuningPanel({ pageId, tuning, disabled, onChanged }: {
   pageId: string;
@@ -21,22 +24,31 @@ export function TuningPanel({ pageId, tuning, disabled, onChanged }: {
   const overridden = TUNING_KNOBS.filter((knob) => tuning[knob.key] !== undefined).length;
   // Open by itself on a page somebody has tuned, so the overrides aren't forgotten behind a fold
   const [open, setOpen] = useState(overridden > 0);
+  const qc = useQueryClient();
+  // The page on screen: a save sent for a page since left must not be shown as this one's
+  const shown = useRef(pageId);
+  useEffect(() => { shown.current = pageId; }, [pageId]);
   const saveM = useMutation({
-    mutationFn: (changes: { [K in TuningKey]?: number | null }) => setPageTuning(pageId, changes),
-    onSuccess: onChanged,
+    mutationFn: ({ id, changes }: { id: string; changes: Changes }) => setPageTuning(id, changes),
+    onSuccess: (detail, { id }) => {
+      if (id === shown.current) onChanged(detail);
+      else void qc.invalidateQueries({ queryKey: ["studio-page", id] });
+    },
   });
 
-  const timers = useRef(new Map<TuningKey, ReturnType<typeof setTimeout>>());
-  useEffect(() => {
-    const pending = timers.current;
-    return () => pending.forEach((timer) => clearTimeout(timer));
-  }, []);
-  const change = (key: TuningKey, value: number | undefined) => {
-    clearTimeout(timers.current.get(key));
-    timers.current.set(key, setTimeout(() => {
-      timers.current.delete(key);
-      saveM.mutate({ [key]: value ?? null });
-    }, SAVE_DELAY_MS));
+  // Edits wait out SAVE_DELAY_MS together; the instance outlives renders, and always saves through the latest mutation
+  const save = useRef(saveM.mutate);
+  useEffect(() => { save.current = saveM.mutate; }, [saveM.mutate]);
+  const [pending] = useState(() => new PendingChanges<Changes>((id, changes) => save.current({ id, changes }), SAVE_DELAY_MS));
+  // Collapsing the panel or leaving the page must not drop an edit still waiting: it is sent, to the page it was
+  // typed on (moving to another page sends it too, from `change`)
+  useEffect(() => () => pending.flush(), [pending]);
+
+  const change = (key: TuningKey, value: number | undefined) => pending.change(pageId, key, value ?? null);
+  /** Every knob back to its default. An edit still waiting would otherwise land after it and undo part of it. */
+  const reset = () => {
+    pending.discard();
+    saveM.mutate({ id: pageId, changes: Object.fromEntries(TUNING_KNOBS.map((knob) => [knob.key, null])) });
   };
 
   return (
@@ -75,7 +87,7 @@ export function TuningPanel({ pageId, tuning, disabled, onChanged }: {
           {overridden > 0 && (
             <button
               disabled={disabled || saveM.isPending}
-              onClick={() => saveM.mutate(Object.fromEntries(TUNING_KNOBS.map((knob) => [knob.key, null])))}
+              onClick={reset}
               className="text-gray-400 hover:text-gray-50 disabled:opacity-40"
             >
               Back to the defaults
