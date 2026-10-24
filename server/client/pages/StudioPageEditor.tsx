@@ -705,7 +705,8 @@ export function StudioPageEditor() {
               ))}
             </div>
           )}
-          <TuningPanel pageId={page.id} tuning={detail.tuning} disabled={busy} onChanged={setDetail} trackSave={trackSave} registerFlush={registerFlush} />
+          {/* Not while an action waits for saves: an edit made then would miss the wait already under way */}
+          <TuningPanel pageId={page.id} tuning={detail.tuning} disabled={busy || queued.size > 0} onChanged={setDetail} trackSave={trackSave} registerFlush={registerFlush} />
           <HistoryPanel pageId={page.id} currentRevision={page.revision} disabled={busy} onRolledBack={onPublished} />
         </aside>
         )}
