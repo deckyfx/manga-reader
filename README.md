@@ -124,6 +124,35 @@ building, so a build for another platform lands in its own folder and says what 
 
 The models are not inside the binary; they are downloaded on first run into `DATA_DIR`.
 
+### Running it in Docker
+
+[`compose.yaml`](compose.yaml) runs the same executable as a service, built by [`server/Dockerfile`](server/Dockerfile)
+on a slim Debian:
+
+```bash
+docker compose up -d --build        # http://localhost:3579
+docker compose logs -f server       # a first start downloads the models before it listens
+```
+
+It reads `server/.env`, the file a run from source uses, so one set of settings describes both; whatever should
+differ only in the container goes in `.env.docker` at the repository root, which is read second and wins. `HOST`,
+`PORT` and `NODE_ENV` are fixed by the compose file. `.env` never enters the image — `server/.dockerignore` keeps it,
+and its DeepL key, out of the build.
+
+| Variable (shell or root `.env`) | Default | What it does |
+|---|---|---|
+| `MANGA_READER_DATA` | `manga-reader-data` (a volume) | Where the database, pages, logs, secret key and models live. `./server/data` reuses what a run from source has filled — stop that run first. |
+| `MANGA_READER_PORT` | `3579` | The port on the host. Anything else also needs `WEBAUTHN_ORIGIN` to match, for passkeys. |
+| `MANGA_READER_BIND` | `127.0.0.1` | `0.0.0.0` opens it to the network, with the same caveat as `HOST` above. |
+
+The container runs as uid 1000, so a bind-mounted folder stays yours. Its health check passes only once `/health`
+says `ready` (or `degraded`, the dictionary alone): a model that fails to load leaves the server answering but not
+working, and that should not look healthy.
+
+`docker compose --profile sugoi up -d --build` starts a [Sugoi](tools/sugoi/) translator beside it; put
+`SUGOI_URL=http://sugoi:14366` in `.env.docker` to use it. Only x86-64 for now — the build knows where onnxruntime
+and sharp keep their libraries on that platform alone.
+
 ## Server Features
 
 - ONNX OCR (Manga-OCR or Baberu) and Japanese→English translation: the built-in Opus-MT, DeepL, or a self-hosted Sugoi

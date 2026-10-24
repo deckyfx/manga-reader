@@ -1,0 +1,13 @@
+# The build context is this folder. What stays out of it never reaches an image layer — which matters most for .env,
+# since it holds a real DeepL key: an image can be pushed or shared, and a layer cannot be un-shipped.
+.env
+.env.*
+!.env.example
+
+# Runtime data (the database, page folders, ~2 GB of models) belongs in the volume, not the image
+data/
+dist/
+node_modules/
+types/
+*.log
+.DS_Store

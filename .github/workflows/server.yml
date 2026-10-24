@@ -12,10 +12,10 @@ permissions:
 on:
   push:
     branches: [main]
-    paths: ["server/**", ".github/workflows/server.yml"]
+    paths: ["server/**", "compose.yaml", ".github/workflows/server.yml"]
     tags: ["server-v*"]
   pull_request:
-    paths: ["server/**", ".github/workflows/server.yml"]
+    paths: ["server/**", "compose.yaml", ".github/workflows/server.yml"]
   workflow_dispatch:
 
 jobs:
@@ -43,6 +43,19 @@ jobs:
       - run: bun run typecheck
       # The tests point DATA_DIR at a scratch folder, so nothing here downloads a model
       - run: bun test
+
+  docker:
+    name: Container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: docker compose config --quiet
+      # Built, never pushed. The image is the executable on another system's libraries, so it is asked the same
+      # question the release asks of the archive: could the server run here?
+      - run: docker build -t manga-reader-server server
+      - run: docker run --rm manga-reader-server --doctor
 
   release:
     name: Build, prove it runs, and publish
