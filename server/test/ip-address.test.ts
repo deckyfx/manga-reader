@@ -105,7 +105,7 @@ describe("IPv6 addresses the server will not connect to", () => {
   });
 
   test("global unicast is allowed, and only global unicast", () => {
-    for (const address of ["2606:4700:4700::1111", "2001:4860:4860::8888", "3fff::1", "[2606:4700::1111]"]) {
+    for (const address of ["2606:4700:4700::1111", "2001:4860:4860::8888", "3fff:1000::1", "[2606:4700::1111]"]) {
       expect(refused(address)).toBe(false);
     }
     // Outside 2000::/3 nothing is assigned for use on the internet

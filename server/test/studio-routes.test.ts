@@ -230,7 +230,8 @@ describe("publish history", () => {
     const pageId = await studioPage(cookie);
     expect((await call("GET", `/studio/api/pages/${pageId}/history`, undefined, { cookie })).body).toEqual([]);
 
-    await Bun.write(join(pageDir(pageId), "result.png"), await png("#123456", WIDTH, HEIGHT));
+    const published = Buffer.from(await png("#123456", WIDTH, HEIGHT));
+    await Bun.write(join(pageDir(pageId), "result.png"), published);
     await PageStore.noteResultChanged(pageId);
     expect((await call("POST", `/studio/api/pages/${pageId}/publish`, undefined, { cookie })).status).toBe(200);
 
@@ -239,6 +240,12 @@ describe("publish history", () => {
     const snapshot = await fetchRaw(`/studio/api/pages/${pageId}/history/1`, cookie);
     expect(snapshot.status).toBe(200);
     expect(snapshot.headers.get("cache-control")).toContain("immutable");
+    expect(Buffer.from(await snapshot.arrayBuffer()).equals(published)).toBe(true);
+
+    // A later result doesn't reach the snapshot: it is the image as published, not whatever result.png holds now
+    await Bun.write(join(pageDir(pageId), "result.png"), await png("#abcdef", WIDTH, HEIGHT));
+    const again = await fetchRaw(`/studio/api/pages/${pageId}/history/1`, cookie);
+    expect(Buffer.from(await again.arrayBuffer()).equals(published)).toBe(true);
 
     expect((await fetchRaw(`/studio/api/pages/${pageId}/history/2`, cookie)).status).toBe(404);
     expect((await call("GET", "/studio/api/pages/no-such-page/history", undefined, { cookie })).status).toBe(404);
