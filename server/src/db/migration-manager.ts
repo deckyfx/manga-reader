@@ -78,6 +78,11 @@ export class MigrationManager {
     const db = drizzle(sqlite);
     try {
       await db.run(sql`PRAGMA journal_mode = WAL`);
+      // Deliberate, though applyMigrations turns enforcement off for the run and back on after, so at run time this
+      // line and that pair cancel out. It makes this connection start the way the server's own does (src/db/index.ts):
+      // with enforcement on, a table rebuild cascades unless applyMigrations really switches it off — which is what
+      // lets test/migration-upgrade.test.ts catch that protection going missing. Off, SQLite's default, the rebuild
+      // is safe by accident, and the test passes whether the protection is there or not.
       await db.run(sql`PRAGMA foreign_keys = ON`);
 
       // Hash-based divergence check — catches rollbacks and cross-branch schema drift.

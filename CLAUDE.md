@@ -115,6 +115,9 @@ which engine.
   shim) and pino's transports (hence the compiled branch in `src/lib/logger.ts`). Native `.node` addons are embedded
   by bundling, but the shared libraries they dlopen are not, so `bun run build` copies those into `dist/lib/` and
   `src/boot.ts` — the binary's entry — loads them before the server's imports run (`src/lib/native-libs.ts`).
+- **The server's Bun is pinned twice, and the two move together**: `bun-version` in the workflows runs `bun test`,
+  while the exact `bun` devDependency in `server/package.json` is what `bun run` puts first on PATH — so it is the
+  Bun that type-checks, runs `bun run dev`, and is embedded in the compiled binary. CI fails when they differ.
 - **Don't run the server**: the user runs it. Test in-process with `app.handle()` and a scratch `DATABASE_URL`; never delete anything under `data/` that a test didn't create.
 - **A test that pins behaviour should be checked by breaking the behaviour**: remove the fix, watch the test fail,
   put it back. Several times now a test has passed for the wrong reason and only this caught it — including one
