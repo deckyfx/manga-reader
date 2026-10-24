@@ -10,6 +10,7 @@ extension/   Browser extension (MV3, TypeScript + Bun)
 desktop/     Avalonia desktop companion (C#, .NET 10); talks to the server's /health, /ocr, /analyze
 docs/        PLAN_dashboard_studio.md: the Studio / reader plan with per-phase design notes
 tools/       sugoi/: a containerised Sugoi translation server the Bun server can use (SUGOI_URL)
+compose.yaml the server as a Docker service (server/Dockerfile), Sugoi beside it under the `sugoi` profile
 MangaReader.slnx  .NET solution for the desktop app
 ```
 
@@ -30,6 +31,7 @@ bun run build --target=macos-arm64   # ubuntu64 (default), linux-arm64, macos-ar
 bun run start            # runs the built binary; it loads dist/lib itself, so no LD_LIBRARY_PATH is needed
 ./dist/app --doctor      # what this machine can and cannot run: libraries, models, fonts, folders
 ./dist/app --setup       # ask the settings questions again and write .env
+docker compose up -d --build   # from the repo root: the built executable in a container, reading server/.env
 bun run db:generate      # after changing src/db/schema.ts: drizzle-kit generate + re-embed migrations
 bun run page <image>     # run the page pipeline from the CLI (scripts/page.ts)
 bun run types:api        # emit API types for the extension's Eden client (server/types/)
