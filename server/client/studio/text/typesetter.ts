@@ -48,6 +48,8 @@ export interface LetteringItem {
   hasExplicitBox: boolean;
   paths: LetteringPaths | null;
   fits: boolean;
+  /** How much larger than the page's lettering the original was, when that made it emphasis; null otherwise. */
+  emphasis: number | null;
   /** False until the server has found this block's text area; until then it's previewed in its region box. */
   placed: boolean;
 }
@@ -75,7 +77,14 @@ export function buildLettering(detail: StudioPageDetail, typesetter: Typesetter)
       : shiftArea(stored ? areaFromStored(stored) : rectArea(baseBox, dark), style.offset);
     return [{ block, kind: block.kind as "text" | "sfx", style, area, baseBox, placed: !!stored || !!style.box }];
   });
-  const entries: TypesetEntry[] = prepared.map((p) => ({ id: p.block.id, text: p.block.translated_text ?? "", area: p.area, style: p.style }));
+  const entries: TypesetEntry[] = prepared.map((p) => ({
+    id: p.block.id,
+    text: p.block.translated_text ?? "",
+    area: p.area,
+    style: p.style,
+    // As the burn measures it: the original lettering of text blocks, for emphasis
+    source: p.kind === "text" && p.block.source_text ? { box: { x: p.block.x, y: p.block.y, w: p.block.w, h: p.block.h }, text: p.block.source_text } : undefined,
+  }));
   const result = typesetPage(typesetter, entries, page);
   const items = prepared.map((p): LetteringItem => {
     const typeset = result.blocks.find((b) => b.id === p.block.id);
@@ -88,18 +97,23 @@ export function buildLettering(detail: StudioPageDetail, typesetter: Typesetter)
       hasExplicitBox: !!p.style.box,
       paths: typeset?.paths ?? null,
       fits: typeset?.layout.fits ?? false,
+      emphasis: typeset?.emphasis ?? null,
       placed: p.placed,
     };
   });
   return { items, pageFontSize: result.pageFontSize };
 }
 
-/** One block laid out again in a new text box, for live re-wrapping while its box is resized. */
-export function relayoutBlock(typesetter: Typesetter, detail: StudioPageDetail, id: number, box: Box, pageFontSize: number): LetteringPaths | null {
+/**
+ * One block laid out again in a new text box, for live re-wrapping while its box is resized. Its emphasis comes from
+ * the page plan, since measuring it needs the other blocks.
+ */
+export function relayoutBlock(typesetter: Typesetter, detail: StudioPageDetail, id: number, box: Box, plan: LetteringPlan): LetteringPaths | null {
   const block = detail.blocks.find((b) => b.id === id);
   if (!block?.translated_text?.trim()) return null;
   const style = { ...((block.style ?? {}) as TextStyle), box };
   delete style.offset;
   const page = { width: detail.page.width, height: detail.page.height };
-  return typesetBlock(typesetter, { id, text: block.translated_text, area: rectArea(box, block.area?.dark ?? false), style }, page, pageFontSize)?.paths ?? null;
+  const emphasis = plan.items.find((item) => item.id === id)?.emphasis ?? undefined;
+  return typesetBlock(typesetter, { id, text: block.translated_text, area: rectArea(box, block.area?.dark ?? false), style }, page, plan.pageFontSize, { emphasis })?.paths ?? null;
 }

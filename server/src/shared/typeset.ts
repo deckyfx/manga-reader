@@ -107,6 +107,19 @@ const HYPHEN_GAIN = 1.35;
 const SOFT_HYPHEN = "­";
 /** The automatic size is capped at page height / this, so lettering stays in proportion to the page. */
 const PAGE_SIZE_DIVISOR = 40;
+/**
+ * Emphasis: a block whose original lettering is this much larger than the page's typical lettering keeps that
+ * proportion in translation. Measured on 656 blocks: at 1.5 the flagged ones were shouts, titles and screams almost
+ * without exception, *except* short texts, where the detector's padding is a large share of the box — hence a
+ * stricter ratio below EMPHASIS_SHORT_CHARS characters.
+ */
+const EMPHASIS_RATIO = 1.5;
+const EMPHASIS_RATIO_SHORT = 1.8;
+const EMPHASIS_SHORT_CHARS = 5;
+/** A page needs this many blocks with source text before "typical lettering" means anything. */
+const EMPHASIS_MIN_PEERS = 3;
+/** However large the original, emphasis stops at this multiple of the page cap. */
+const EMPHASIS_CEILING = 2;
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 /** ASCII stand-ins for typographic characters, used only when the font lacks the original glyph. */
 const GLYPH_FALLBACKS: Record<string, string> = {
@@ -189,6 +202,48 @@ export function shiftArea(area: TextArea, offset?: { x: number; y: number }): Te
 
 /** Largest automatic font size for a page (page height / 40). */
 export const pageMaxFontSize = (pageHeight: number): number => Math.round(pageHeight / PAGE_SIZE_DIVISOR);
+
+/**
+ * Roughly how large the original lettering is, in page pixels: the largest square glyph that packs the source's
+ * characters into the detected box, in columns when the box is taller than wide (vertical Japanese) and in rows
+ * otherwise. A tight box gives the glyph size itself; a padded one overstates it, most for short texts.
+ * Null when there is nothing to measure.
+ */
+export function sourceGlyphSize(box: Box, text: string): number | null {
+  const chars = [...text.replace(/\s/g, "")].length;
+  if (chars === 0 || box.w <= 0 || box.h <= 0) return null;
+  const [along, across] = box.h >= box.w ? [box.h, box.w] : [box.w, box.h];
+  // Binary search on the glyph size: bigger glyphs need more columns, each as wide as a glyph
+  let lo = 1, hi = Math.floor(Math.min(along, across));
+  while (lo < hi) {
+    const glyph = Math.ceil((lo + hi) / 2);
+    const perColumn = Math.floor(along / glyph);
+    if (perColumn >= 1 && Math.ceil(chars / perColumn) * glyph <= across) lo = glyph;
+    else hi = glyph - 1;
+  }
+  return lo;
+}
+
+/**
+ * How much larger than the page's typical lettering each emphasised block was drawn originally, by block id. Only
+ * blocks on the automatic size take part: a fixed size is somebody's decision and overrides this.
+ */
+export function emphasisScales(entries: readonly TypesetEntry[]): Map<number, number> {
+  const measured = entries.flatMap((e) => {
+    if (e.style.font_size !== undefined || !e.source) return [];
+    const glyph = sourceGlyphSize(e.source.box, e.source.text);
+    return glyph === null ? [] : [{ id: e.id, glyph, chars: [...e.source.text.replace(/\s/g, "")].length }];
+  });
+  const scales = new Map<number, number>();
+  if (measured.length < EMPHASIS_MIN_PEERS) return scales;
+  const sorted = measured.map((m) => m.glyph).sort((a, b) => a - b);
+  const typical = sorted[Math.floor((sorted.length - 1) / 2)];
+  for (const m of measured) {
+    const ratio = m.glyph / typical;
+    if (ratio >= (m.chars < EMPHASIS_SHORT_CHARS ? EMPHASIS_RATIO_SHORT : EMPHASIS_RATIO)) scales.set(m.id, ratio);
+  }
+  return scales;
+}
 
 export function storedArea(area: TextArea): StoredArea {
   return { bound: area.bound, dark: area.dark, mask: encodeMask(area.mask) };
@@ -533,6 +588,8 @@ export interface TypesetEntry {
   text: string;
   area: TextArea;
   style: TextStyle;
+  /** The original lettering — its detected box and text — measured for emphasis. Absent for regions with none. */
+  source?: { box: Box; text: string };
 }
 
 export interface TypesetBlock {
@@ -540,30 +597,42 @@ export interface TypesetBlock {
   layout: TextLayout;
   /** Largest size the block could take on its own (its fixed size when set). */
   bestFontSize: number;
+  /** How much larger than the page's lettering the original was, when that made it emphasis; null otherwise. */
+  emphasis: number | null;
   paths: LetteringPaths | null;
   patch: TextPatch | null;
 }
 
+/** The size limit for a block's own best fit: the page cap, or a multiple of it for emphasis. */
+const ceilingFor = (maxFontSize: number, emphasis?: number): number =>
+  emphasis === undefined ? maxFontSize : Math.round(maxFontSize * EMPHASIS_CEILING);
+
 /**
- * Letters one block given the page's shared size: the block's own best size (at most the page cap) limits an
- * automatic size, a fixed size is kept. Null when the area has no room.
+ * Letters one block given the page's shared size: the block's own best size limits an automatic size, a fixed size
+ * is kept. An emphasised block takes the shared size scaled by its `emphasis`, and may pass the page cap to do it
+ * (up to EMPHASIS_CEILING times it). Null when the area has no room.
  */
 export function typesetBlock(
   typesetter: Typesetter,
   entry: TypesetEntry,
   page: { width: number; height: number },
   pageFontSize: number,
-  bestFontSize?: number,
+  options: { bestFontSize?: number; emphasis?: number } = {},
 ): TypesetBlock | null {
   const maxFontSize = pageMaxFontSize(page.height);
-  const best = bestFontSize ?? entry.style.font_size ?? typesetter.layout(entry.text, entry.area, maxFontSize, entry.style).fontSize;
+  const fixed = entry.style.font_size !== undefined;
+  const emphasis = fixed ? undefined : options.emphasis;
+  const ceiling = ceilingFor(maxFontSize, emphasis);
+  const best = options.bestFontSize ?? entry.style.font_size ?? typesetter.layout(entry.text, entry.area, ceiling, entry.style).fontSize;
   if (best <= 0) return null;
-  const cap = entry.style.font_size === undefined ? Math.min(pageFontSize, best) : maxFontSize;
+  const target = emphasis === undefined ? pageFontSize : Math.min(ceiling, Math.round(pageFontSize * emphasis));
+  const cap = fixed ? maxFontSize : Math.min(target, best);
   const layout = typesetter.layout(entry.text, entry.area, cap, entry.style);
   return {
     id: entry.id,
     layout,
     bestFontSize: best,
+    emphasis: emphasis ?? null,
     paths: typesetter.paths(layout, entry.area, entry.style),
     patch: typesetter.renderPatch(layout, entry.area, entry.style, page),
   };
@@ -571,8 +640,10 @@ export function typesetBlock(
 
 /**
  * Letters a whole page. Blocks on the automatic size share one page size (the median of their best sizes, capped by
- * the page height), so lettering looks consistent; a block with a fixed size keeps it. Blocks whose area has no room
- * are returned in `skipped`.
+ * the page height), so lettering looks consistent; a block with a fixed size keeps it. A block whose original
+ * lettering stood out (see {@link emphasisScales}) keeps that proportion over the shared size instead, leaving
+ * the shared size — and so every other block — as it would have been.
+ * Blocks whose area has no room are returned in `skipped`.
  */
 export function typesetPage(
   typesetter: Typesetter,
@@ -580,17 +651,20 @@ export function typesetPage(
   page: { width: number; height: number },
 ): { pageFontSize: number; blocks: TypesetBlock[]; skipped: number[] } {
   const maxFontSize = pageMaxFontSize(page.height);
-  const bestSizes = entries.map((e) => e.style.font_size ?? typesetter.layout(e.text, e.area, maxFontSize, e.style).fontSize);
-  // Size 0 means the area has no room: it must not drag the page size down to the minimum
+  const scales = emphasisScales(entries);
+  const bestSizes = entries.map((e) =>
+    e.style.font_size ?? typesetter.layout(e.text, e.area, ceilingFor(maxFontSize, scales.get(e.id)), e.style).fontSize);
+  // Size 0 means the area has no room: it must not drag the page size down to the minimum. Emphasis still counts, at
+  // most the page cap as before: leaving it out would move the shared size, and so re-letter every other block too
   const autoSizes = entries
-    .flatMap((e, i) => (e.style.font_size === undefined && bestSizes[i] > 0 ? [bestSizes[i]] : []))
+    .flatMap((e, i) => (e.style.font_size === undefined && bestSizes[i] > 0 ? [Math.min(bestSizes[i], maxFontSize)] : []))
     .sort((a, b) => a - b);
   const pageFontSize = autoSizes[Math.floor((autoSizes.length - 1) / 2)] ?? maxFontSize;
 
   const blocks: TypesetBlock[] = [];
   const skipped: number[] = [];
   for (const [i, entry] of entries.entries()) {
-    const result = typesetBlock(typesetter, entry, page, pageFontSize, bestSizes[i]);
+    const result = typesetBlock(typesetter, entry, page, pageFontSize, { bestFontSize: bestSizes[i], emphasis: scales.get(entry.id) });
     if (result) blocks.push(result);
     else skipped.push(entry.id);
   }
