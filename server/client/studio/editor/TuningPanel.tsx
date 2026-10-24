@@ -15,11 +15,15 @@ const SAVE_DELAY_MS = 500;
 
 type Changes = { [K in TuningKey]?: number | null };
 
-export function TuningPanel({ pageId, tuning, disabled, onChanged }: {
+export function TuningPanel({ pageId, tuning, disabled, onChanged, trackSave, registerFlush }: {
   pageId: string;
   tuning: PageTuning;
   disabled: boolean;
   onChanged: (detail: StudioPageDetail) => void;
+  /** Registers a save in flight, so the editor's actions wait for it. */
+  trackSave: (save: Promise<unknown>) => void;
+  /** Lets the editor send edits still waiting before an action; returns the way to unregister. */
+  registerFlush: (flush: () => void) => () => void;
 }) {
   const overridden = TUNING_KNOBS.filter((knob) => tuning[knob.key] !== undefined).length;
   // Open by itself on a page somebody has tuned, so the overrides aren't forgotten behind a fold
@@ -29,6 +33,8 @@ export function TuningPanel({ pageId, tuning, disabled, onChanged }: {
   const shown = useRef(pageId);
   useEffect(() => { shown.current = pageId; }, [pageId]);
   const saveM = useMutation({
+    // One page's tuning saves run in the order they were made, so a reset can't be overtaken by an earlier edit
+    scope: { id: `page-tuning:${pageId}` },
     mutationFn: ({ id, changes }: { id: string; changes: Changes }) => setPageTuning(id, changes),
     onSuccess: (detail, { id }) => {
       if (id === shown.current) onChanged(detail);
@@ -36,25 +42,33 @@ export function TuningPanel({ pageId, tuning, disabled, onChanged }: {
     },
   });
 
-  // Edits wait out SAVE_DELAY_MS together; the instance outlives renders, and always saves through the latest mutation
-  const save = useRef(saveM.mutate);
-  useEffect(() => { save.current = saveM.mutate; }, [saveM.mutate]);
+  // Edits wait out SAVE_DELAY_MS together, in one instance that outlives renders. Every save goes through the latest
+  // mutation and is tracked, so an action started meanwhile (Clean text, Run again) waits for it
+  const save = useRef((variables: { id: string; changes: Changes }) => trackSave(saveM.mutateAsync(variables)));
+  useEffect(() => {
+    save.current = (variables) => trackSave(saveM.mutateAsync(variables));
+  }, [saveM.mutateAsync, trackSave]);
   const [pending] = useState(() => new PendingChanges<Changes>((id, changes) => save.current({ id, changes }), SAVE_DELAY_MS));
-  // Collapsing the panel or leaving the page must not drop an edit still waiting: it is sent, to the page it was
-  // typed on (moving to another page sends it too, from `change`)
+  // An action sends what is waiting first; collapsing the panel or leaving the page sends it too, to the page it was
+  // typed on, rather than dropping it
+  useEffect(() => registerFlush(() => pending.flush()), [registerFlush, pending]);
   useEffect(() => () => pending.flush(), [pending]);
 
   const change = (key: TuningKey, value: number | undefined) => pending.change(pageId, key, value ?? null);
   /** Every knob back to its default. An edit still waiting would otherwise land after it and undo part of it. */
   const reset = () => {
     pending.discard();
-    saveM.mutate({ id: pageId, changes: Object.fromEntries(TUNING_KNOBS.map((knob) => [knob.key, null])) });
+    save.current({ id: pageId, changes: Object.fromEntries(TUNING_KNOBS.map((knob) => [knob.key, null])) });
   };
 
   return (
     <div className="pt-2 border-t border-gray-800 space-y-2">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          // Closing sends an edit still waiting now, rather than after the controls have gone
+          if (open) pending.flush();
+          setOpen(!open);
+        }}
         className="flex w-full items-center gap-2 text-xs text-gray-400 hover:text-gray-200"
         title="Thresholds for this page only, where the defaults don't suit it"
       >

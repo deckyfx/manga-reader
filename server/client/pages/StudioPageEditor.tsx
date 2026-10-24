@@ -85,6 +85,12 @@ export function StudioPageEditor() {
     void tracked.catch(() => {});
     pendingSaves.current.add(tracked);
   }, []);
+  // Edits that wait before saving (the page tuning panel's): an action sends them first, so it waits for them too
+  const flushers = useRef(new Set<() => void>());
+  const registerFlush = useCallback((flush: () => void) => {
+    flushers.current.add(flush);
+    return () => { flushers.current.delete(flush); };
+  }, []);
   // Actions waiting on saves, by key: the ref rejects a second click synchronously, the state disables its control
   const queuedRef = useRef(new Set<string>());
   const [queued, setQueued] = useState<ReadonlySet<string>>(() => new Set());
@@ -98,6 +104,7 @@ export function StudioPageEditor() {
     };
     // A failed save leaves the server on the old text: don't run OCR, translate, render or publish against it.
     // Releasing right before the action lets React batch it with the mutation's pending state, so the control stays disabled.
+    for (const flush of flushers.current) flush();
     Promise.all([...pendingSaves.current]).then(() => {
       release();
       action();
@@ -416,10 +423,11 @@ export function StudioPageEditor() {
             confirmLabel: "Run again",
             danger: true,
           });
-          if (ok) rerunM.mutate();
+          // After the saves: a tuning edit made just before (detector confidence above all) is what this run is for
+          if (ok) afterSaves("rerun", () => rerunM.mutate());
         })();
       },
-      unavailable: unavailableWhen(translating, [rerunM.isPending, "Starting…"]),
+      unavailable: unavailableWhen(translating, [rerunM.isPending, "Starting…"], [queued.has("rerun"), "Waiting for edits to save"]),
       pending: rerunM.isPending,
       separated: true,
     },
@@ -697,7 +705,7 @@ export function StudioPageEditor() {
               ))}
             </div>
           )}
-          <TuningPanel pageId={page.id} tuning={detail.tuning} disabled={busy} onChanged={setDetail} />
+          <TuningPanel pageId={page.id} tuning={detail.tuning} disabled={busy} onChanged={setDetail} trackSave={trackSave} registerFlush={registerFlush} />
           <HistoryPanel pageId={page.id} currentRevision={page.revision} disabled={busy} onRolledBack={onPublished} />
         </aside>
         )}
