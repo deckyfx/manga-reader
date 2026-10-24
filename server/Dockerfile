@@ -27,7 +27,8 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends libstdc++6 ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*
 
-# Not root. 1000 is the usual first user on a Linux desktop, so a bind-mounted data folder stays theirs
+# Not root. 1000 is the usual first user on a Linux desktop, so a bind-mounted data folder stays theirs. That folder
+# must exist and be writable by uid 1000 before the first start: one Docker creates on its own belongs to root
 RUN useradd --uid 1000 --user-group --no-create-home --home-dir /app app
 
 # The working directory is where the server's relative paths start: DATA_DIR defaults to ./data, so an existing

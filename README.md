@@ -142,7 +142,7 @@ and its DeepL key, out of the build.
 
 | Variable (shell or root `.env`) | Default | What it does |
 |---|---|---|
-| `MANGA_READER_DATA` | `manga-reader-data` (a volume) | Where the database, pages, logs, secret key and models live. `./server/data` reuses what a run from source has filled — stop that run first. |
+| `MANGA_READER_DATA` | `manga-reader-data` (a volume) | Where the database, pages, logs, secret key and models live. `./server/data` reuses what a run from source has filled — stop that run first. A folder must exist and be writable by uid 1000 beforehand (`mkdir -p` it yourself): one Docker creates for you belongs to root. |
 | `MANGA_READER_PORT` | `3579` | The port on the host. Anything else also needs `WEBAUTHN_ORIGIN` to match, for passkeys. |
 | `MANGA_READER_BIND` | `127.0.0.1` | `0.0.0.0` opens it to the network, with the same caveat as `HOST` above. |
 

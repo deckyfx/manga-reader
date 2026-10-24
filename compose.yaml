@@ -38,7 +38,8 @@ services:
     volumes:
       # The database, page folders, logs, the secret key and the models. A named volume by default; set
       # MANGA_READER_DATA=./server/data to use the folder a run from source has been filling (stop that run first —
-      # two servers on one SQLite database will tread on each other)
+      # two servers on one SQLite database will tread on each other). A folder must already exist and be writable
+      # by uid 1000: given a path that isn't there, Docker creates it owned by root, and the server can't write it.
       - ${MANGA_READER_DATA:-manga-reader-data}:/app/data
 
   # Optional, research-use-only translator; nothing starts it unless the profile is asked for. The server finds it
