@@ -147,8 +147,9 @@ and its DeepL key, out of the build.
 | `MANGA_READER_BIND` | `127.0.0.1` | `0.0.0.0` opens it to the network, with the same caveat as `HOST` above. |
 
 The container runs as uid 1000, so a bind-mounted folder stays yours. Its health check passes only once `/health`
-says `ready` (or `degraded`, the dictionary alone): a model that fails to load leaves the server answering but not
-working, and that should not look healthy.
+says `ready` (or `degraded`, the dictionary alone): OCR, the built-in translator or the text detector failing to load
+leaves the server answering but not working, and that should not look healthy. The inpainter and the bubble detector
+are optional — if they fail, the server warns in its log and stays healthy without them.
 
 `docker compose --profile sugoi up -d --build` starts a [Sugoi](tools/sugoi/) translator beside it, and the server
 waits for it to be ready — the first start downloads its model for a few minutes; put `SUGOI_URL=http://sugoi:14366`

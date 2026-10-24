@@ -44,8 +44,9 @@ EXPOSE 3579
 VOLUME ["/app/data"]
 
 # The server listens once its models are loaded, and a first start downloads them (a few GB with everything
-# enabled) — hence the long grace period. Answering is not enough: a model that failed to load leaves the server
-# listening with "starting" for ever, so only "ready" (or "degraded", which is the dictionary alone) counts.
+# enabled) — hence the long grace period. Answering is not enough: OCR, the built-in translator or the text detector
+# failing to load leaves the server listening with "starting" for ever, so only "ready" (or "degraded", which is the
+# dictionary alone) counts. The inpainter and bubble detector are optional: their failures are warnings, not this.
 # /health answers anyone, so the check needs no key.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=20m --start-interval=10s \
   CMD curl -fsS "http://127.0.0.1:${PORT}/health" | grep -Eq '"status":"(ready|degraded)"' || exit 1
