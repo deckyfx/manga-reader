@@ -13,22 +13,29 @@ import { bootState } from "@/boot-state";
 import { inferenceHandlers } from "@/queue/inference-queue";
 import { childLogger } from "@/lib/logger";
 import { dilateMask, type Box } from "@/lib/mask";
+import { DEFAULT_FLAT_TOLERANCE, DEFAULT_MASK_DILATE } from "@/shared/page-tuning";
 
 const log = childLogger("inpaint");
 
 /** Surrounding pixels fed to LaMa with each region so it can continue the texture. */
 const CONTEXT_MARGIN = 48;
-/** Grow text strokes so anti-aliased edges are removed too. */
-const MASK_DILATE = 4;
 /** The network downsamples 3× by 2, so sides must be multiples of 8. */
 const STRIDE = 8;
 /** Width of the ring around the mask sampled to decide whether a region sits on a plain background. */
 const RING = 6;
-/** How far (per colour channel, 0–255) from the ring's median colour a pixel may be and still count as background. */
-const FLAT_TOLERANCE = 24;
 /** Share of ring pixels that must be background for a flat fill. */
 const FLAT_SHARE = 0.9;
 const MIN_RING_PIXELS = 50;
+
+/**
+ * The page's own cleaning thresholds (see shared/page-tuning.ts), each defaulting when absent: how far text strokes
+ * are grown so anti-aliased edges go too, and how far (per colour channel, 0–255) from the ring's median colour a pixel
+ * may be and still count as background.
+ */
+export interface CleanTuning {
+  maskDilate?: number;
+  flatTolerance?: number;
+}
 
 export interface InpaintInput {
   imageBuffer: Buffer;
@@ -109,8 +116,17 @@ function mergeWindows(windows: Box[]): Box[] {
  * "Near-uniform" is judged in colour, not brightness: a colour page's two-tone or patterned background can be one
  * brightness and several colours, and filling it with one of them is the wrong clean. Exported for its tests.
  */
-export function flatFill(source: Buffer, result: Buffer, width: number, height: number, pending: Uint8Array, ring: Uint8Array, region: Box): boolean {
-  const area = expand(region, MASK_DILATE + RING, width, height);
+export function flatFill(
+  source: Buffer,
+  result: Buffer,
+  width: number,
+  height: number,
+  pending: Uint8Array,
+  ring: Uint8Array,
+  region: Box,
+  { maskDilate = DEFAULT_MASK_DILATE, flatTolerance = DEFAULT_FLAT_TOLERANCE }: CleanTuning = {},
+): boolean {
+  const area = expand(region, maskDilate + RING, width, height);
   const samples: number[] = [];
   for (let y = area.y; y < area.y + area.h; y++) {
     for (let x = area.x; x < area.x + area.w; x++) {
@@ -121,14 +137,14 @@ export function flatFill(source: Buffer, result: Buffer, width: number, height: 
   if (samples.length < MIN_RING_PIXELS) return false;
 
   const ringColour = medianColour(source, samples);
-  const background = samples.filter((p) => colourDistance(source, p, ringColour) <= FLAT_TOLERANCE);
+  const background = samples.filter((p) => colourDistance(source, p, ringColour) <= flatTolerance);
   if (background.length / samples.length < FLAT_SHARE) return false;
 
   const colour = medianColour(source, background);
   for (let y = area.y; y < area.y + area.h; y++) {
     for (let x = area.x; x < area.x + area.w; x++) {
       const p = y * width + x;
-      if (!pending[p] && !(ring[p] && colourDistance(source, p, ringColour) <= FLAT_TOLERANCE)) continue;
+      if (!pending[p] && !(ring[p] && colourDistance(source, p, ringColour) <= flatTolerance)) continue;
       result[p * 3] = colour[0];
       result[p * 3 + 1] = colour[1];
       result[p * 3 + 2] = colour[2];
@@ -163,14 +179,23 @@ export class MangaInpainter {
 
   /**
    * Remove `mask` pixels (grown slightly) inside `regions`: flat fill on plain backgrounds, LaMa on
-   * merged windows elsewhere at native resolution. Unmasked pixels stay byte-identical.
+   * merged windows elsewhere at native resolution. Unmasked pixels stay byte-identical. `tuning` is the page's own
+   * thresholds, where it has any.
    */
-  async inpaintRgb(rgb: Buffer, width: number, height: number, mask: Uint8Array, regions: Box[], signal?: AbortSignal): Promise<InpaintResult> {
-    const pending = dilateMask(mask, width, height, MASK_DILATE);
+  async inpaintRgb(
+    rgb: Buffer,
+    width: number,
+    height: number,
+    mask: Uint8Array,
+    regions: Box[],
+    signal?: AbortSignal,
+    tuning: CleanTuning = {},
+  ): Promise<InpaintResult> {
+    const pending = dilateMask(mask, width, height, tuning.maskDilate ?? DEFAULT_MASK_DILATE);
     const ring = dilateMask(pending, width, height, RING);
     const result = Buffer.from(rgb);
 
-    const methods: CleanMethod[] = regions.map((region) => (flatFill(rgb, result, width, height, pending, ring, region) ? "flat" : "lama"));
+    const methods: CleanMethod[] = regions.map((region) => (flatFill(rgb, result, width, height, pending, ring, region, tuning) ? "flat" : "lama"));
     const lamaRegions = regions.filter((_, i) => methods[i] === "lama");
     const windows = mergeWindows(lamaRegions.map((region) => expand(region, CONTEXT_MARGIN, width, height)));
 

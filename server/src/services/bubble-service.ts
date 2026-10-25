@@ -38,7 +38,8 @@ export class BubbleDetector {
   }
 
   /** Bubbles and text groups on the page, in page pixel coordinates. */
-  async detect(image: Buffer): Promise<BubbleDetection> {
+  /** `minScore` overrides the lowest score a detection may have and still count (a page's tuning). */
+  async detect(image: Buffer, minScore = MIN_SCORE): Promise<BubbleDetection> {
     const { width = 0, height = 0 } = await sharp(image).metadata();
     const { data } = await sharp(image)
       .removeAlpha()
@@ -62,7 +63,7 @@ export class BubbleDetector {
     const scores = out.scores.data as Float32Array;
     const result: BubbleDetection = { bubbles: [], textBoxes: [] };
     for (let i = 0; i < scores.length; i++) {
-      if (scores[i] < MIN_SCORE) continue;
+      if (scores[i] < minScore) continue;
       const x0 = Math.max(0, Math.round(boxes[i * 4])), y0 = Math.max(0, Math.round(boxes[i * 4 + 1]));
       const x1 = Math.min(width, Math.round(boxes[i * 4 + 2])), y1 = Math.min(height, Math.round(boxes[i * 4 + 3]));
       if (x1 - x0 < 2 || y1 - y0 < 2) continue;

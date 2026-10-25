@@ -298,6 +298,13 @@ export const updateBlock = (
   fields: { source_text?: string; translated_text?: string; include?: boolean; style?: TextStyle | null },
 ) => unwrap(api.studio.api.pages({ id }).blocks({ idx }).patch(fields));
 
+/**
+ * Sets the page's threshold overrides: a number sets one, null puts it back to the default, a key left out is kept.
+ * Answers with the page, whose stages show what the change outdated.
+ */
+export const setPageTuning = (id: string, changes: { flat_tolerance?: number | null; mask_dilate?: number | null; detect_confidence?: number | null }) =>
+  unwrap(api.studio.api.pages({ id }).tuning.patch(changes));
+
 /** Finds and stores each block's text area without burning, so lettering can be previewed right away. */
 export const placeText = (id: string) => unwrap(api.studio.api.pages({ id }).place.post());
 

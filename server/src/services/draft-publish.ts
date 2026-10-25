@@ -53,6 +53,8 @@ export async function publishDraft(draft: Page): Promise<PublishOutcome> {
       height: draft.height,
       status: "done",
       cleanSfx: draft.cleanSfx,
+      // What readers now see was cleaned with the draft's thresholds, so the chapter page keeps them for its next run
+      tuningJson: draft.tuningJson,
     });
     await copyPageImages(draft.id, origin.id);
     await PageStore.copyStagesAndBlocks(draft.id, origin.id);

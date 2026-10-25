@@ -50,6 +50,8 @@ async function fillCopy(source: Page, copy: Page, chapterId: number | null): Pro
     height: source.height,
     status: source.status === "queued" || source.status === "running" ? "done" : source.status,
     cleanSfx: source.cleanSfx,
+    // A copy is cleaned the way its source was tuned to be
+    tuningJson: source.tuningJson,
   });
 
   await copyPageImages(source.id, copy.id);
