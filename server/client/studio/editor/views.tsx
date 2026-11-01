@@ -81,6 +81,8 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const measure = (e: SyntheticEvent<HTMLImageElement>) => {
     const { naturalWidth: width, naturalHeight: height } = e.currentTarget;
+    // A size of nothing would make every fit divide by zero, and stick: the first size measured is kept
+    if (width <= 0 || height <= 0) return;
     setSize((current) => current ?? { width, height });
   };
   const [view, setView] = useState<CompareView | null>(null);
@@ -88,6 +90,8 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
   const fit = useCallback(() => {
     const el = viewport.current;
     if (!el || !size) return;
+    // No room yet (laid out at nothing): fitting now would settle on the smallest zoom, and the first fit is the only one
+    if (el.clientWidth <= 2 * FIT_MARGIN || el.clientHeight <= 2 * FIT_MARGIN) return;
     const zoom = clampZoom(Math.min(
       (el.clientWidth - 2 * FIT_MARGIN) / size.width,
       (el.clientHeight - 2 * FIT_MARGIN) / size.height,
