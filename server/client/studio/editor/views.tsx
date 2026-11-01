@@ -120,8 +120,11 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
     setView((current) => {
       // Nothing to adjust before the first fit, and nothing taken over either
       if (!current) return current;
+      const next = change(current);
+      // A change that changes nothing (zooming out at the smallest zoom) doesn't take the view over
+      if (next.zoom === current.zoom && next.x === current.x && next.y === current.y) return current;
       following.current = false;
-      return change(current);
+      return next;
     });
   }, []);
 
@@ -179,6 +182,16 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
     setDragging(false);
   };
 
+  // A stage not made yet (no result before a render, no SFX pass) fails to load: that side is missing, and the other
+  // shows whole rather than cut at the split. Keyed by address, so a new version of the page is tried afresh
+  const leftUrl = pageFileUrl(pageId, left, version);
+  const rightUrl = pageFileUrl(pageId, right, version);
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+  const markFailed = (url: string) => setFailed((current) => (current.has(url) ? current : new Set(current).add(url)));
+  const leftMissing = failed.has(leftUrl);
+  const rightMissing = failed.has(rightUrl);
+  const missing = [leftMissing && left, rightMissing && right].filter((file): file is PageImage => !!file);
+
   const select = (value: PageImage, onChange: (file: PageImage) => void, label: string) => (
     <select
       aria-label={label}
@@ -206,6 +219,11 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
           className="flex-1 min-w-24"
         />
         {select(right, setRight, "Right image")}
+        {missing.length > 0 && (
+          <span className="text-xs text-amber-400">
+            {missing.map((file) => PAGE_IMAGES.find((img) => img.file === file)?.label ?? file).join(" and ")} not made yet
+          </span>
+        )}
         <WheelModeButtons />
         <ZoomControls
           zoom={view?.zoom ?? 1}
@@ -234,23 +252,25 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
           }}
         >
           <img
-            src={pageFileUrl(pageId, right, version)}
+            src={rightUrl}
             alt=""
             draggable={false}
             onLoad={measure}
+            onError={() => markFailed(rightUrl)}
             className="absolute inset-0 h-full w-full max-w-none"
           />
           <img
-            src={pageFileUrl(pageId, left, version)}
+            src={leftUrl}
             alt=""
             draggable={false}
             onLoad={measure}
+            onError={() => markFailed(leftUrl)}
             className="absolute inset-0 h-full w-full max-w-none"
-            style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}
+            style={{ clipPath: rightMissing ? undefined : `inset(0 ${100 - split}% 0 0)` }}
           />
         </div>
         {/* Outside the scaled layer, so the line stays one width at any zoom */}
-        {view && size && (
+        {view && size && missing.length === 0 && (
           <div
             className="absolute w-0.5 bg-indigo-400 pointer-events-none"
             style={{ left: view.x + (size.width * view.zoom * split) / 100, top: view.y, height: size.height * view.zoom }}
