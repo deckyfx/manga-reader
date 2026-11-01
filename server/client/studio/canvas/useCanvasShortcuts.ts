@@ -5,7 +5,7 @@
 import { useEffect, type MutableRefObject, type RefObject } from "react";
 import type { Canvas } from "fabric";
 import { useCanvasStore } from "../../stores/canvas";
-import { isTyping, type CanvasActions, type Tool } from "./config";
+import { isTyping, ZOOM_STEP, type CanvasActions, type Tool } from "./config";
 import type { CommandHistory } from "./history";
 
 interface ShortcutDeps {
@@ -79,8 +79,8 @@ export function useCanvasShortcuts({ enqueue, history, canvasRef, spaceRef, acti
         e.preventDefault();
         actionsRef.current?.deleteSelected();
       } else if (key === "f" || key === "0") actionsRef.current?.fit();
-      else if (key === "+" || key === "=") actionsRef.current?.zoomBy(1.2);
-      else if (key === "-") actionsRef.current?.zoomBy(1 / 1.2);
+      else if (key === "+" || key === "=") actionsRef.current?.zoomBy(ZOOM_STEP);
+      else if (key === "-") actionsRef.current?.zoomBy(1 / ZOOM_STEP);
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code !== "Space" || !spaceRef.current) return;

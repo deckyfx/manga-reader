@@ -26,6 +26,8 @@ export function readWheelMode(): WheelMode {
 
 export const MIN_ZOOM = 0.05;
 export const MAX_ZOOM = 8;
+/** One zoom-button or +/- step: 20% in, or back by the same factor. */
+export const ZOOM_STEP = 1.2;
 /** Zoom speed per wheel pixel: one ordinary wheel notch (~100px) zooms exactly 10%, about 7 notches to double. */
 export const WHEEL_ZOOM_RATE = Math.log(1.1) / 100;
 /** Largest wheel delta (pixels) honoured per event, so fast flicks and hi-res wheels don't jump several levels. */
