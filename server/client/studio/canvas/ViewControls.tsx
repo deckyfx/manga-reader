@@ -85,7 +85,7 @@ function ZoomField({ zoom, onZoom }: { zoom: number; onZoom: (value: number) => 
         onBlur={apply}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
-            apply();
+            // Blurring applies it, once: applying here as well ran it twice, before the draft was cleared
             e.currentTarget.blur();
           } else if (e.key === "Escape") {
             cancelled.current = true;
