@@ -188,6 +188,13 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
   const rightUrl = pageFileUrl(pageId, right, version);
   const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
   const markFailed = (url: string) => setFailed((current) => (current.has(url) ? current : new Set(current).add(url)));
+  // A failure is forgotten once that address loads after all (a network hiccup rather than a stage not made)
+  const markLoaded = (url: string) => setFailed((current) => {
+    if (!current.has(url)) return current;
+    const next = new Set(current);
+    next.delete(url);
+    return next;
+  });
   const leftMissing = failed.has(leftUrl);
   const rightMissing = failed.has(rightUrl);
   const missing = [leftMissing && left, rightMissing && right].filter((file): file is PageImage => !!file);
@@ -255,7 +262,10 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
             src={rightUrl}
             alt=""
             draggable={false}
-            onLoad={measure}
+            onLoad={(e) => {
+              measure(e);
+              markLoaded(rightUrl);
+            }}
             onError={() => markFailed(rightUrl)}
             className="absolute inset-0 h-full w-full max-w-none"
           />
@@ -263,7 +273,10 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
             src={leftUrl}
             alt=""
             draggable={false}
-            onLoad={measure}
+            onLoad={(e) => {
+              measure(e);
+              markLoaded(leftUrl);
+            }}
             onError={() => markFailed(leftUrl)}
             className="absolute inset-0 h-full w-full max-w-none"
             style={{ clipPath: rightMissing ? undefined : `inset(0 ${100 - split}% 0 0)` }}
