@@ -98,10 +98,16 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
     ));
     setView({ zoom, x: (el.clientWidth - size.width * zoom) / 2, y: (el.clientHeight - size.height * zoom) / 2 });
   }, [size]);
-  // The first time the page's size is known; switching images keeps where you are
+  // The first time the page's size is known; switching images keeps where you are. A view with no room yet (fit
+  // waits for some) is tried again as it resizes — the side panel collapsing, the window growing — until it fits
   const fitted = view !== null;
   useEffect(() => {
-    if (!fitted) fit();
+    const el = viewport.current;
+    if (fitted || !el) return;
+    fit();
+    const resized = new ResizeObserver(() => fit());
+    resized.observe(el);
+    return () => resized.disconnect();
   }, [fit, fitted]);
 
   /** Zooms by `factor`, keeping the page point under (px, py) — viewport pixels — where it is. */
