@@ -1,12 +1,16 @@
 /**
- * The page editor's whole-page views: the page while it is being translated, two stage images compared, and a
- * finalized page. Split out of pages/StudioPageEditor.tsx.
+ * The page editor's whole-page views: the page while it is being translated, two stage images compared (zoomed and
+ * moved like the editing canvas), and a finalized page. Split out of pages/StudioPageEditor.tsx.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent, type SyntheticEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { PAGE_IMAGES, pageFileUrl, type PageImage } from "../../api";
 import { JobProgress } from "../../components/JobProgress";
 import { usePageJobEvents } from "../../hooks/usePageJobEvents";
+import { useCanvasStore } from "../../stores/canvas";
+import { MAX_ZOOM, MIN_ZOOM, WHEEL_HINTS } from "../canvas/config";
+import { WheelModeButtons, ZoomControls } from "../canvas/ViewControls";
+import { wheelIntent } from "../canvas/wheel";
 
 /** Shown while the page runs in the pipeline (e.g. re-submitted from the extension): the original dimmed, with live progress. */
 export function ProcessingView({ pageId, status, version, job }: {
@@ -51,11 +55,105 @@ export function ProcessingView({ pageId, status, version, job }: {
   );
 }
 
-/** Two stage images on top of each other with a slider revealing the left one. */
+/** Where the compared page sits in its viewport: its scale, and its top-left corner in viewport pixels. */
+interface CompareView {
+  zoom: number;
+  x: number;
+  y: number;
+}
+
+/** Room left around the page when it is fitted, in screen pixels. */
+const FIT_MARGIN = 16;
+
+/**
+ * Two stage images on top of each other with a slider revealing the left one. The wheel works as it does on the
+ * editing canvas — the same wheel mode, Shift and Ctrl — and dragging the page moves it.
+ */
 export function StageCompare({ pageId, version }: { pageId: string; version: string }) {
   const [left, setLeft] = useState<PageImage>("original.png");
   const [right, setRight] = useState<PageImage>("result.png");
   const [split, setSplit] = useState(50);
+  const wheelMode = useCanvasStore((state) => state.wheelMode);
+
+  const viewport = useRef<HTMLDivElement>(null);
+  /** The page's size in image pixels, from whichever image loads first: every stage image shares it, and the right one
+   * may not exist yet (no result before a render) */
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const measure = (e: SyntheticEvent<HTMLImageElement>) => {
+    const { naturalWidth: width, naturalHeight: height } = e.currentTarget;
+    setSize((current) => current ?? { width, height });
+  };
+  const [view, setView] = useState<CompareView | null>(null);
+
+  const fit = useCallback(() => {
+    const el = viewport.current;
+    if (!el || !size) return;
+    const zoom = clampZoom(Math.min(
+      (el.clientWidth - 2 * FIT_MARGIN) / size.width,
+      (el.clientHeight - 2 * FIT_MARGIN) / size.height,
+    ));
+    setView({ zoom, x: (el.clientWidth - size.width * zoom) / 2, y: (el.clientHeight - size.height * zoom) / 2 });
+  }, [size]);
+  // The first time the page's size is known; switching images keeps where you are
+  const fitted = view !== null;
+  useEffect(() => {
+    if (!fitted) fit();
+  }, [fit, fitted]);
+
+  /** Zooms by `factor`, keeping the page point under (px, py) — viewport pixels — where it is. */
+  const zoomAt = useCallback((factor: number, px: number, py: number) => {
+    setView((current) => {
+      if (!current) return current;
+      const zoom = clampZoom(current.zoom * factor);
+      const scale = zoom / current.zoom;
+      return { zoom, x: px - (px - current.x) * scale, y: py - (py - current.y) * scale };
+    });
+  }, []);
+  const zoomAtCentre = (factor: number) => {
+    const el = viewport.current;
+    if (el) zoomAt(factor, el.clientWidth / 2, el.clientHeight / 2);
+  };
+
+  // A listener of our own rather than onWheel: React's is passive, and the page itself must not scroll
+  useEffect(() => {
+    const el = viewport.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const intent = wheelIntent(e, useCanvasStore.getState().wheelMode, el.clientHeight);
+      if ("zoom" in intent) {
+        const rect = el.getBoundingClientRect();
+        zoomAt(intent.zoom, e.clientX - rect.left, e.clientY - rect.top);
+      } else {
+        const { dx, dy } = intent.pan;
+        setView((current) => current && { ...current, x: current.x - dx, y: current.y - dy });
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoomAt]);
+
+  // Dragging the page moves it; the pointer is captured, so a drag that leaves the viewport keeps going
+  const drag = useRef<{ pointer: number; x: number; y: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 && e.button !== 1) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { pointer: e.pointerId, x: e.clientX, y: e.clientY };
+    setDragging(true);
+  };
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    const from = drag.current;
+    if (!from || from.pointer !== e.pointerId) return;
+    const dx = e.clientX - from.x, dy = e.clientY - from.y;
+    drag.current = { ...from, x: e.clientX, y: e.clientY };
+    setView((current) => current && { ...current, x: current.x + dx, y: current.y + dy });
+  };
+  const endDrag = (e: PointerEvent<HTMLDivElement>) => {
+    if (drag.current?.pointer !== e.pointerId) return;
+    drag.current = null;
+    setDragging(false);
+  };
 
   const select = (value: PageImage, onChange: (file: PageImage) => void, label: string) => (
     <select
@@ -72,7 +170,7 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
 
   return (
     <section className="flex-1 min-w-0 min-h-0 flex flex-col">
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-800">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-gray-800">
         {select(left, setLeft, "Left image")}
         <input
           type="range"
@@ -81,25 +179,65 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
           max={100}
           value={split}
           onChange={(e) => setSplit(Number(e.target.value))}
-          className="flex-1"
+          className="flex-1 min-w-24"
         />
         {select(right, setRight, "Right image")}
+        <WheelModeButtons />
+        <ZoomControls
+          zoom={view?.zoom ?? 1}
+          onZoomBy={zoomAtCentre}
+          onZoomTo={(value) => zoomAtCentre(value / (view?.zoom ?? 1))}
+          onFit={fit}
+        />
+        <span className="hidden xl:inline text-xs text-gray-500">{WHEEL_HINTS[wheelMode]}, Ctrl+wheel zooms, drag to move</span>
       </div>
-      <div className="flex-1 min-h-0 overflow-auto p-4">
-        <div className="relative mx-auto w-fit">
-          <img src={pageFileUrl(pageId, right, version)} alt="" className="block max-h-[calc(100vh-10rem)] w-auto" />
+      <div
+        ref={viewport}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        className={`relative flex-1 min-h-0 overflow-hidden touch-none select-none ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
+      >
+        <div
+          className="absolute left-0 top-0 origin-top-left"
+          style={{
+            width: size?.width,
+            height: size?.height,
+            transform: view ? `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` : undefined,
+            // Measured first, shown once it has been fitted
+            visibility: view ? "visible" : "hidden",
+          }}
+        >
+          <img
+            src={pageFileUrl(pageId, right, version)}
+            alt=""
+            draggable={false}
+            onLoad={measure}
+            className="absolute inset-0 h-full w-full max-w-none"
+          />
           <img
             src={pageFileUrl(pageId, left, version)}
             alt=""
-            className="absolute inset-0 h-full w-full"
+            draggable={false}
+            onLoad={measure}
+            className="absolute inset-0 h-full w-full max-w-none"
             style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}
           />
-          <div className="absolute inset-y-0 w-0.5 bg-indigo-400 pointer-events-none" style={{ left: `${split}%` }} />
         </div>
+        {/* Outside the scaled layer, so the line stays one width at any zoom */}
+        {view && size && (
+          <div
+            className="absolute w-0.5 bg-indigo-400 pointer-events-none"
+            style={{ left: view.x + (size.width * view.zoom * split) / 100, top: view.y, height: size.height * view.zoom }}
+          />
+        )}
       </div>
     </section>
   );
 }
+
+const clampZoom = (zoom: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 
 /** A finalized page: only its final image is left, and what can still be done with it. */
 export function FinalizedView({ pageId, rawKept, version }: { pageId: string; rawKept: boolean; version: string | number }) {

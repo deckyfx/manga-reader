@@ -28,6 +28,7 @@ import {
 import { CommandHistory, type Command } from "./history";
 import { MaskLayers, type Area, type StrokeRecord } from "./mask-layers";
 import { LetteringObject, letteringIdOf } from "./lettering-object";
+import { wheelIntent } from "./wheel";
 import type { Toolset } from "../toolset";
 import { canvasSession, ifCurrent, showsTextLayer, useCanvasStore } from "../../stores/canvas";
 
@@ -40,8 +41,6 @@ import {
   MIN_ZOOM,
   PANEL_OUTER_HEIGHT,
   PANEL_WIDTH,
-  WHEEL_MAX_DELTA,
-  WHEEL_ZOOM_RATE,
   type CanvasActions,
   type EditMode,
   type Tool,
@@ -500,38 +499,13 @@ export function PageCanvas({
       const e = opt.e;
       e.preventDefault();
       e.stopPropagation();
-      const mode = canvasState().wheelMode;
-      // Wheels report pixels, lines (Firefox) or pages: normalise to pixels, and cap one event so a flick can't jump levels
-      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.getHeight() : 1;
-      const deltaX = Math.max(-WHEEL_MAX_DELTA, Math.min(WHEEL_MAX_DELTA, e.deltaX * unit));
-      const deltaY = Math.max(-WHEEL_MAX_DELTA, Math.min(WHEEL_MAX_DELTA, e.deltaY * unit));
-      // Exponential steps: a 100px wheel notch zooms 10%, trackpad pinches (small deltas) stay fine-grained
-      const zoom = () => setZoomTo(canvas.getZoom() * Math.exp(-deltaY * WHEEL_ZOOM_RATE), new Point(e.offsetX, e.offsetY));
-      const pan = (dx: number, dy: number) => {
-        canvas.relativePan(new Point(-dx, -dy));
+      const intent = wheelIntent(e, canvasState().wheelMode, canvas.getHeight());
+      if ("zoom" in intent) {
+        setZoomTo(canvas.getZoom() * intent.zoom, new Point(e.offsetX, e.offsetY));
+      } else {
+        canvas.relativePan(new Point(-intent.pan.dx, -intent.pan.dy));
         canvas.requestRenderAll();
-      };
-      // Ctrl/Cmd + wheel always zooms (a trackpad pinch arrives as ctrl + wheel too)
-      if (e.ctrlKey || e.metaKey) {
-        zoom();
-        return;
       }
-      // Some browsers turn Shift + wheel into horizontal deltas, so take whichever axis moved
-      const amount = deltaY !== 0 ? deltaY : deltaX;
-      if (mode === "zoom") {
-        if (e.shiftKey) pan(0, amount);
-        else zoom();
-        return;
-      }
-      // Trackpads send both axes at once: a two-finger swipe moves freely in either scroll mode
-      if (!e.shiftKey && deltaX !== 0 && deltaY !== 0) {
-        pan(deltaX, deltaY);
-        return;
-      }
-      // Shift switches direction: vertical mode scrolls sideways, horizontal mode scrolls up/down
-      const sideways = (mode === "horizontal") !== e.shiftKey;
-      if (sideways) pan(amount, 0);
-      else pan(0, amount);
     });
 
     canvas.on("mouse:down", (opt) => {

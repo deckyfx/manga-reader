@@ -4,17 +4,13 @@
  * and hands it down under the same names.
  */
 import type { ReactNode, RefObject } from "react";
-import { useRef, useState } from "react";
 import {
   ALargeSmall,
   Brush,
   Circle as EllipseIcon,
   Eye,
   EyeOff,
-  Maximize,
   MousePointer2,
-  MoveHorizontal,
-  MoveVertical,
   Pentagon,
   Redo2,
   Shapes,
@@ -23,14 +19,13 @@ import {
   Type,
   Undo2,
   WandSparkles,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 import { showsTextLayer, useCanvasStore } from "../../stores/canvas";
 import { KIND_HINTS, LETTERING_HINT, MAX_BRUSH, MIN_BRUSH, TOOL_HINTS, WHEEL_HINTS, type CanvasActions, type Tool } from "./config";
 import { REGION_COLORS } from "./geometry";
 import type { CommandHistory } from "./history";
 import type { Area } from "./mask-layers";
+import { WheelModeButtons, ZoomControls } from "./ViewControls";
 
 interface CanvasToolbarProps {
   /** Extra controls at the start (the background image picker). */
@@ -53,7 +48,7 @@ export function CanvasToolbar({
 }: CanvasToolbarProps) {
   // What the canvas is set to: the store, so the canvas doesn't have to hand it all down
   const { tool, mode, kind, brushLayer, brushSize, showMask, wheelMode, zoom, paintedAreas, recleaning, busyCount, error } = useCanvasStore();
-  const { setTool, setMode, setKind, setBrushLayer, setBrushSize, setShowMask, setShowText, setWheelMode } = useCanvasStore.getState();
+  const { setTool, setMode, setKind, setBrushLayer, setBrushSize, setShowMask, setShowText } = useCanvasStore.getState();
   const showTextLayer = showsTextLayer(useCanvasStore.getState(), textPreviewAvailable);
 const toolButton = (value: Tool, icon: ReactNode, label: string, shortcut: string) => (
   <button
@@ -209,87 +204,17 @@ const toolButton = (value: Tool, icon: ReactNode, label: string, shortcut: strin
           <Trash2 size={15} />
         </button>
       </div>
-      <div className="flex items-center gap-1 text-xs text-gray-400" role="group" aria-label="Mouse wheel action">
-        <span className="hidden md:inline">Wheel</span>
-        <div className="flex items-center rounded-md border border-gray-700 overflow-hidden">
-          {([
-            { mode: "zoom", icon: <ZoomIn size={14} />, label: "Wheel zooms (Shift+wheel scrolls up/down)" },
-            { mode: "vertical", icon: <MoveVertical size={14} />, label: "Wheel scrolls up/down (Shift+wheel scrolls sideways)" },
-            { mode: "horizontal", icon: <MoveHorizontal size={14} />, label: "Wheel scrolls sideways (Shift+wheel scrolls up/down)" },
-          ] as const).map(({ mode, icon, label }) => (
-            <button
-              key={mode}
-              onClick={() => setWheelMode(mode)}
-              title={`${label}. Ctrl+wheel always zooms.`}
-              aria-label={label}
-              aria-pressed={wheelMode === mode}
-              className={`px-1.5 py-1 ${wheelMode === mode ? "bg-gray-700 text-gray-50" : "text-gray-400 hover:bg-gray-800"}`}
-            >
-              {icon}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="flex items-center gap-0.5 text-xs text-gray-400">
-        <button onClick={() => actionsRef.current?.zoomBy(1 / 1.2)} title="Zoom out (-)" className="p-1.5 rounded-md hover:bg-gray-800">
-          <ZoomOut size={15} />
-        </button>
-        <ZoomField zoom={zoom} onZoom={(value) => actionsRef.current?.zoomTo(value)} />
-        <button onClick={() => actionsRef.current?.zoomBy(1.2)} title="Zoom in (+)" className="p-1.5 rounded-md hover:bg-gray-800">
-          <ZoomIn size={15} />
-        </button>
-        <button onClick={() => actionsRef.current?.fit()} title="Fit page (F)" className="p-1.5 rounded-md hover:bg-gray-800">
-          <Maximize size={15} />
-        </button>
-      </div>
+      <WheelModeButtons />
+      <ZoomControls
+        zoom={zoom}
+        onZoomBy={(factor) => actionsRef.current?.zoomBy(factor)}
+        onZoomTo={(value) => actionsRef.current?.zoomTo(value)}
+        onFit={() => actionsRef.current?.fit()}
+        fitTitle="Fit page (F)"
+      />
       <span className="ml-auto text-xs truncate max-w-full">
         {error ? <span className="text-red-400">{error}</span> : busyCount > 0 ? <span className="text-gray-400">{recleaning ? "Re-cleaning…" : "Saving…"}</span> : <span className="text-gray-500">{mode === "lettering" ? LETTERING_HINT : TOOL_HINTS[tool]} · {WHEEL_HINTS[wheelMode]}, Ctrl+wheel zooms, Space-drag pans</span>}
       </span>
     </div>
-  );
-}
-
-/**
- * The zoom percentage, typed into: Enter or leaving the field applies it (100 for actual size), Escape puts back the
- * current zoom. Anything that isn't a positive number is ignored.
- */
-function ZoomField({ zoom, onZoom }: { zoom: number; onZoom: (value: number) => void }) {
-  const shown = String(Math.round(zoom * 100));
-  const [draft, setDraft] = useState<string | null>(null);
-  // Escape blurs the field, and the blur must not apply what Escape just threw away
-  const cancelled = useRef(false);
-  const apply = () => {
-    if (cancelled.current) {
-      cancelled.current = false;
-      setDraft(null);
-      return;
-    }
-    if (draft === null) return;
-    const percent = Number.parseFloat(draft.replace("%", ""));
-    setDraft(null);
-    if (Number.isFinite(percent) && percent > 0) onZoom(percent / 100);
-  };
-  return (
-    <label className="flex items-center rounded-md px-1 hover:bg-gray-800 focus-within:bg-gray-800" title="Zoom: type a percentage, 100 for actual size">
-      <input
-        value={draft ?? shown}
-        onChange={(e) => setDraft(e.target.value)}
-        onFocus={(e) => e.currentTarget.select()}
-        onBlur={apply}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            apply();
-            e.currentTarget.blur();
-          } else if (e.key === "Escape") {
-            cancelled.current = true;
-            e.currentTarget.blur();
-          }
-        }}
-        inputMode="decimal"
-        aria-label="Zoom percentage"
-        className="w-9 bg-transparent text-right tabular-nums focus:outline-none"
-      />
-      <span>%</span>
-    </label>
   );
 }
