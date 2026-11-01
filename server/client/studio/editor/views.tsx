@@ -90,7 +90,7 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
   const fit = useCallback(() => {
     const el = viewport.current;
     if (!el || !size) return;
-    // No room yet (laid out at nothing): fitting now would settle on the smallest zoom, and the first fit is the only one
+    // No room yet (laid out at nothing): wait for some, which the resize below will bring
     if (el.clientWidth <= 2 * FIT_MARGIN || el.clientHeight <= 2 * FIT_MARGIN) return;
     const zoom = clampZoom(Math.min(
       (el.clientWidth - 2 * FIT_MARGIN) / size.width,
@@ -98,27 +98,41 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
     ));
     setView({ zoom, x: (el.clientWidth - size.width * zoom) / 2, y: (el.clientHeight - size.height * zoom) / 2 });
   }, [size]);
-  // The first time the page's size is known; switching images keeps where you are. A view with no room yet (fit
-  // waits for some) is tried again as it resizes — the side panel collapsing, the window growing — until it fits
-  const fitted = view !== null;
+  // The page stays fitted — when it loads, and as the viewport resizes (the side panel, the window) — until it is
+  // zoomed or moved; from then it stays where it was put, until Fit hands it back. Switching images keeps the view
+  const following = useRef(true);
   useEffect(() => {
     const el = viewport.current;
-    if (fitted || !el) return;
-    fit();
-    const resized = new ResizeObserver(() => fit());
+    if (!el) return;
+    if (following.current) fit();
+    const resized = new ResizeObserver(() => {
+      if (following.current) fit();
+    });
     resized.observe(el);
     return () => resized.disconnect();
-  }, [fit, fitted]);
+  }, [fit]);
+  const refit = () => {
+    following.current = true;
+    fit();
+  };
+  /** A change somebody made to the view: from now on it is theirs, and resizing leaves it alone. */
+  const adjust = useCallback((change: (current: CompareView) => CompareView) => {
+    setView((current) => {
+      // Nothing to adjust before the first fit, and nothing taken over either
+      if (!current) return current;
+      following.current = false;
+      return change(current);
+    });
+  }, []);
 
   /** Zooms by `factor`, keeping the page point under (px, py) — viewport pixels — where it is. */
   const zoomAt = useCallback((factor: number, px: number, py: number) => {
-    setView((current) => {
-      if (!current) return current;
+    adjust((current) => {
       const zoom = clampZoom(current.zoom * factor);
       const scale = zoom / current.zoom;
       return { zoom, x: px - (px - current.x) * scale, y: py - (py - current.y) * scale };
     });
-  }, []);
+  }, [adjust]);
   const zoomAtCentre = (factor: number) => {
     const el = viewport.current;
     if (el) zoomAt(factor, el.clientWidth / 2, el.clientHeight / 2);
@@ -136,12 +150,12 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
         zoomAt(intent.zoom, e.clientX - rect.left, e.clientY - rect.top);
       } else {
         const { dx, dy } = intent.pan;
-        setView((current) => current && { ...current, x: current.x - dx, y: current.y - dy });
+        adjust((current) => ({ ...current, x: current.x - dx, y: current.y - dy }));
       }
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [zoomAt]);
+  }, [zoomAt, adjust]);
 
   // Dragging the page moves it; the pointer is captured, so a drag that leaves the viewport keeps going
   const drag = useRef<{ pointer: number; x: number; y: number } | null>(null);
@@ -157,7 +171,7 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
     if (!from || from.pointer !== e.pointerId) return;
     const dx = e.clientX - from.x, dy = e.clientY - from.y;
     drag.current = { ...from, x: e.clientX, y: e.clientY };
-    setView((current) => current && { ...current, x: current.x + dx, y: current.y + dy });
+    if (dx !== 0 || dy !== 0) adjust((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
   };
   const endDrag = (e: PointerEvent<HTMLDivElement>) => {
     if (drag.current?.pointer !== e.pointerId) return;
@@ -197,7 +211,7 @@ export function StageCompare({ pageId, version }: { pageId: string; version: str
           zoom={view?.zoom ?? 1}
           onZoomBy={zoomAtCentre}
           onZoomTo={(value) => zoomAtCentre(value / (view?.zoom ?? 1))}
-          onFit={fit}
+          onFit={refit}
         />
         <span className="hidden xl:inline text-xs text-gray-500">{WHEEL_HINTS[wheelMode]}, Ctrl+wheel zooms, drag to move</span>
       </div>
